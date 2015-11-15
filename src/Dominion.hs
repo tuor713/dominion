@@ -14,6 +14,26 @@ import qualified Data.Maybe as Maybe
 import System.Random (StdGen, mkStdGen, randomR, newStdGen)
 import Text.Read (readMaybe)
 
+{-
+
+== Modelling decisions ==
+- how are triggers / reactions going to work
+- what about global effects like Bridge
+- model partial visibility
+- do cards have an identity? (probably yes)
+- should we model reveal ?
+
+== Feature set ==
+- non IO decision making like a bot
+
+== Debt ==
+- separate out random state completely
+- make cards more data driven than all lengthy pattern matching
+- separate domain model and card data / behaviour
+
+-}
+
+
 -- Foundational Types
 
 type ActionGenerator a = a -> GameStack
@@ -42,6 +62,7 @@ data ActionStep =
   | PlayCopy Card
   | DiscardCard String Card
   | TrashCard String Card
+  | TransferCard Card Location Location
   | Branch (GameState -> GameState)
   | Cleanup
 
@@ -55,6 +76,7 @@ instance Show ActionStep where
   show (PlayCopy c)           = "PlayCopy(" ++ show c ++ ")"
   show (DiscardCard player c) = "Discard(" ++ player ++ "," ++ show c ++ ")"
   show (TrashCard player c)   = "Trash(" ++ player ++ "," ++ show c ++ ")"
+  show (TransferCard c from to) = "Transfer(" ++ show c ++ "," ++ show from ++ "," ++ show to ++ ")"
   show Cleanup                = "Cleanup"
   show (Branch _)             = "Branch"
 
@@ -164,12 +186,6 @@ shuffle ys = St.state $ \gen -> shuffle' gen ys []
         (k,gnew) = randomR (0, length l - 1) g
         (lead, x:xs) = splitAt k l
 
-dropFirst :: Eq a => a -> [a] -> [a]
-dropFirst _ [] = []
-dropFirst e (x:xs)
-  | e == x = xs
-  | otherwise = x:dropFirst e xs
-
 list2MultiSet :: Ord a => [a] -> Map.Map a Int
 list2MultiSet xs = Map.fromListWith (+) $ map (,1) xs
 
@@ -189,6 +205,7 @@ mainloop state =
           putStrLn "Game Finished!"
           putStrLn $ "Final score: " ++ (players next
                                          |> L.sortOn points
+                                         |> reverse
                                          |> map (\p -> name p ++ ": " ++ show (points p))
                                          |> L.intersperse ", "
                                          |> concat)
@@ -266,11 +283,11 @@ moveTo c Trash state = state { trash = c : trash state }
 moveTo c Supply state = error "Not implemented: moving card to supply"
 
 moveFrom :: Card -> Location -> GameState -> GameState
-moveFrom c (Hand player) state      = updatePlayer state player (\p -> p { hand = dropFirst c $ hand p })
-moveFrom c (Discard player) state   = updatePlayer state player (\p -> p { discardPile = dropFirst c $ discardPile p })
-moveFrom c (TopOfDeck player) state = updatePlayer state player (\p -> p { deck = dropFirst c $ deck p })
-moveFrom c InPlay state             = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = dropFirst c $ inPlay p })
-moveFrom c Trash state              = state { trash = dropFirst c $ trash state }
+moveFrom c (Hand player) state      = updatePlayer state player (\p -> p { hand = L.delete c $ hand p })
+moveFrom c (Discard player) state   = updatePlayer state player (\p -> p { discardPile = L.delete c $ discardPile p })
+moveFrom c (TopOfDeck player) state = updatePlayer state player (\p -> p { deck = L.delete c $ deck p })
+moveFrom c InPlay state             = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = L.delete c $ inPlay p })
+moveFrom c Trash state              = state { trash = L.delete c $ trash state }
 moveFrom c Supply state             = state { piles = map takeFirst (piles state) }
   where
     takeFirst [] = []
@@ -288,6 +305,7 @@ execute (DiscardCard player card) state = transfer card (Hand player) (Discard p
 execute (TrashCard player card) state = transfer card (Hand player) Trash state
 execute (Draw player num) state = updatePlayerR state player (`draw` num)
 execute (PlayCopy card) state = play card (name (activePlayer state)) state
+execute (TransferCard card from to) state = transfer card from to state
 execute (PlayCard card) state = play card pname $ transfer card (Hand pname) InPlay state
   where
     pname = name (activePlayer state)
@@ -380,6 +398,9 @@ reshuffleDiscard p =
     shuffled <- shuffle (discardPile p)
     return (p { discardPile = [], deck = deck p ++ shuffled })
 
+canDraw :: Player -> Bool
+canDraw p = not (null (hand p)) || not (null (discardPile p))
+
 draw :: Player -> Int -> RandomState Player
 draw p num
   | length (deck p) < num = fmap (\p -> p !!! num) (reshuffleDiscard p)
@@ -420,6 +441,9 @@ playerNames state = map name (players state)
 opponentNames :: GameState -> String -> [String]
 opponentNames state player = filter (/= player) (playerNames state)
 
+opponents :: GameState -> String -> [Player]
+opponents state player = filter ((/= player) . name) (players state)
+
 availableCards :: GameState -> [Card]
 availableCards g = concatMap (take 1) (piles g)
 
@@ -437,7 +461,6 @@ isStandardVictory _ = False
 
 -- Knowledge base
 
--- TODO this is quite verbose
 cost :: Card -> Int
 -- Base
 cost Estate = 2
@@ -556,17 +579,30 @@ play Chapel p g = queueSteps g [Left (PickCards p "Choose up to 4 cards to trash
 -- TODO implement the reaction part
 play Moat p g = queueActions g [Draw p 2]
 
+play Chancellor p g = queueSteps g [Right $ GainGold 2,
+                                    Left $ (YesNoDecision p "Put deck into discard pile?"
+                                                          (\b -> if b then [Right $ Branch deckToDiscard] else []))]
+  where
+    -- Note that this is correct in as far as cards are not discarded individually
+    deckToDiscard g = updatePlayer g p (\player -> player { deck = [], discardPile = deck player ++ discardPile player })
+
 play Village p g = queueActions g [Draw p 1, GainActions 2]
 play Woodcutter _ g = queueActions g [GainBuys 1, GainGold 2]
 play Workshop p g = queueSteps g [Left (PickACard p "Choose a card to gain: " (filter ((<=4) . cost) (availableCards g)) cont)]
   where
     cont card = [Right (GainCard (Discard p) card)]
 
--- play Bureaucrat p g = g
+play Bureaucrat p g = queueSteps g $ [Right $ GainCard (TopOfDeck p) Silver] ++ opDecisions
+  where
+    opDecisions = opponents g p
+                  |> filter (not . null . filter isTreasure . hand)
+                  |> map (\p -> Left $ PickACard (name p) "Choose a treasure to put on your deck: " (filter isTreasure (hand p))
+                                       (\c -> [Right $ TransferCard c (Hand (name p)) (TopOfDeck (name p))]))
+
 play Feast p g = queueSteps g' [Left (PickACard p "Choose a card to gain: " (filter ((<=5) . cost) (availableCards g')) cont)]
   where
     cont card = [Right (GainCard (TopOfDeck p) card)]
-    g' = updatePlayer g p (\player -> player { inPlay = dropFirst Feast (inPlay player) })
+    g' = updatePlayer g p (\player -> player { inPlay = L.delete Feast (inPlay player) })
 
 play Militia p g = queueSteps g ([Right (GainGold 2)]
                                  ++ Maybe.catMaybes (map (decision g) (opponentNames g p)))
@@ -578,11 +614,62 @@ play Militia p g = queueSteps g ([Right (GainGold 2)]
         h = hand (playerByName g op)
     cont op cards = map (Right . DiscardCard op) cards
 
--- play Moneylender p g = g
--- play Remodel p g = g
+-- TODO the linkage is imperfect because reactions and replacement effects could still happen
+play Moneylender p g
+  | Copper `elem` h = queueActions g [TrashCard p Copper, GainGold 3]
+  | otherwise = g
+  where
+    h = hand (playerByName g p)
+
+play Remodel p g
+  | null h = g -- Nothing happens since there is nothing to trash
+  | otherwise = queueSteps g [Left (PickACard p "Choose a card to trash: " h cont)]
+  where
+    h = hand (playerByName g p)
+    cont card = [Left (PickACard p "Choose a card to gain: "
+                                 (filter ((<=maxCost) . cost) (availableCards g))
+                                 (\c -> [Right $ GainCard (Discard p) c]))]
+      where
+        maxCost = 2 + cost card
+
+
 play Smithy p g = queueActions g [Draw p 3]
--- play Spy p g = g
--- play Thief p g = g
+
+play Spy p g = queueActions g [Draw p 1, GainActions 1, Branch lookAtTopCards]
+  where
+    lookAtTopCards game = queueSteps game { gen = gen', players = ps } $ map (Left . discardDecision) $ filter canDraw ps
+      where
+        (ps, gen') = St.runState (sequence $ map reshuffleIfNeeded (players game)) (gen game)
+        reshuffleIfNeeded p = if null (deck p) then reshuffleDiscard p else return p
+        discardDecision player = YesNoDecision p ("Discard top of deck (" ++ show top ++ ") for player " ++ name player ++ "?")
+                                              (\c -> [Right $ TransferCard top (TopOfDeck (name player)) (Discard (name player))])
+          where
+            top = head (deck player)
+
+-- TODO implementation is messy and also imprecise because we ask trash/gain per card not for all at the end
+play Thief thief g = queueSteps g' decisions
+  where
+    g' = g { players = ps, gen = gen' }
+    (ps, gen') = St.runState (sequence $ map reshuffleIfNeeded (players g)) (gen g)
+    reshuffleIfNeeded p = if name p /= thief && length (deck p) < 2 then reshuffleDiscard p else return p
+    decisions = opponents g' thief |> filter (null . deck) |> (\ops -> map reveal ops ++ concatMap mkDecision ops)
+    reveal opponent = Left $ Information "All" (name opponent ++ " revealed " ++ show top2)
+      where
+        top2 = take 2 (deck opponent)
+    mkDecision opponent
+      | any isTreasure top2 =
+        [Left $ PickACard thief "Pick a treasure to trash: " (filter isTreasure top2) cont]
+      | otherwise = []
+      where
+        top2 = take 2 (deck opponent)
+        cont c = [Left $ YesNoDecision thief ("Gain " ++ show c ++ " from trash?") (cont2 c)]
+        cont2 c True = [Right $ TransferCard c (TopOfDeck (name opponent)) Trash,
+                        Right $ TransferCard c Trash (Discard thief)]
+                       ++ discardRest c
+        cont2 c False = [Right $ TransferCard c (TopOfDeck (name opponent)) Trash] ++ discardRest c
+        discardRest c = map (\c -> Right $ TransferCard c (TopOfDeck (name opponent)) (Discard (name opponent))) $ L.delete c top2
+
+
 play ThroneRoom p g = queueSteps g [Left (PickACard p "Choose an action: " (filter isAction (hand (playerByName g p))) cont)]
   where
     cont card = map Right [PlayCard card, PlayCopy card]
@@ -590,7 +677,24 @@ play ThroneRoom p g = queueSteps g [Left (PickACard p "Choose an action: " (filt
 play CouncilRoom player g = queueActions g ([Draw player 4, GainBuys 1] ++ map (`Draw` 1) (opponentNames g player))
 play Festival _ g = queueActions g [GainActions 2, GainBuys 1, GainGold 2]
 play Laboratory p g = queueActions g [Draw p 2, GainActions 1]
--- play Library p g = g
+
+-- TODO potentially the "aside" part needs to be modelled explicitly
+play Library p g = queueActions g [Branch repeatDraw]
+  where
+    condDraw s = if isAction newCard
+                 then queueSteps s' [Left (YesNoDecision p ("Set aside action " ++ show newCard ++ "?") cont)]
+                 else s'
+      where
+        s' = execute (Draw p 1) s
+        newCard = head $ (hand (playerByName s' p) L.\\ hand (playerByName s p))
+        cont True = [Right $ DiscardCard p newCard]
+        cont False = []
+    repeatDraw s
+      | length (hand (activePlayer s)) < 7 && canDraw (activePlayer s) =
+        queueActions s [Branch condDraw, Branch repeatDraw]
+      | otherwise = s
+
+
 play Market p g = queueActions g [Draw p 1, GainActions 1, GainBuys 1, GainGold 1]
 
 play Mine p g = if length treasuresInHand == 0
@@ -609,7 +713,6 @@ play Mine p g = if length treasuresInHand == 0
 play Witch player g =
   queueActions g ([Draw player 2] ++ map (\p -> GainCard (Discard p) Curse) (opponentNames g player))
 
--- TODO can we extract this into a more generic actions, needed for further reactions likely
 play Adventurer player g = updatePlayerR g player inner
   where
     inner :: Player -> RandomState Player
