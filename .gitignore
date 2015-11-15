@@ -1,0 +1,7 @@
+.idea
+.cabal-sandbox
+cabal.sandbox.config
+dist
+log
+.DS_Store
+.ghci
