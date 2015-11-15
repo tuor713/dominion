@@ -1,4 +1,5 @@
 {-# LANGUAGE TupleSections #-}
+{-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 module Dominion (
   Edition(..),
   Card(..))
@@ -6,6 +7,7 @@ where
 
 import Prelude hiding (interact)
 import qualified Control.Monad.Trans.State.Lazy as St
+import qualified Control.Monad as M
 import qualified Data.List as L
 import qualified Data.Map.Strict as Map
 import qualified Data.Maybe as Maybe
@@ -153,8 +155,8 @@ instance Ord Card where
 (|>) :: a -> (a -> b) -> b
 (|>) x f = f x
 
-shuffle :: [a] -> StdGen -> ([a],StdGen)
-shuffle ys gen = shuffle' gen ys []
+shuffle :: [a] -> RandomState [a]
+shuffle ys = St.state $ \gen -> shuffle' gen ys []
   where
     shuffle' g [] acc = (acc,g)
     shuffle' g l acc = shuffle' gnew (lead ++ xs) (x:acc)
@@ -205,6 +207,7 @@ step g =
                                 newSteps <- interact decision
                                 return $ g { turn = (turn g) { stack = (newSteps ++ steps) } }
     (Right action:steps) -> return $ execute action g { turn = (turn g) { stack = steps } }
+    _ -> error "Illegal state, no steps but game has not ended"
 
 getInput :: String -> (String -> Maybe a) -> IO a
 getInput caption parser =
@@ -217,7 +220,6 @@ getInput caption parser =
       Nothing -> getInput caption parser
 
 
--- TODO this is partial because we don't support Information
 decision2prompt :: Interaction -> (String, String -> Maybe GameStack)
 decision2prompt (PickACard player caption choices cont) =
   ("[" ++ player ++ "] " ++ caption ++ summarizeCards choices,
@@ -242,6 +244,9 @@ decision2prompt (YesNoDecision player caption cont) =
     parse "n" = Just (cont False)
     parse _ = Nothing
 
+-- TODO this is partial because we don't support Information
+decision2prompt (Information _ _) = undefined
+
 interact (Information player message) =
   do putStrLn ("[" ++ player ++ "] " ++ message)
      return []
@@ -258,7 +263,7 @@ moveTo c (Discard player) state = updatePlayer state player (\p -> p { discardPi
 moveTo c (TopOfDeck player) state = updatePlayer state player (\p -> p { deck = c : deck p })
 moveTo c InPlay state = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = c : inPlay p })
 moveTo c Trash state = state { trash = c : trash state }
-moveTo c Supply state = undefined
+moveTo c Supply state = error "Not implemented: moving card to supply"
 
 moveFrom :: Card -> Location -> GameState -> GameState
 moveFrom c (Hand player) state      = updatePlayer state player (\p -> p { hand = dropFirst c $ hand p })
@@ -281,7 +286,7 @@ execute (GainActions num) state = state { turn = (turn state) { actions = action
 execute (GainCard toLoc card) state = transfer card Supply toLoc state
 execute (DiscardCard player card) state = transfer card (Hand player) (Discard player) state
 execute (TrashCard player card) state = transfer card (Hand player) Trash state
-execute (Draw player num) state = updatePlayerR state player (\p gen -> draw p num gen)
+execute (Draw player num) state = updatePlayerR state player (`draw` num)
 execute (PlayCopy card) state = play card (name (activePlayer state)) state
 execute (PlayCard card) state = play card pname $ transfer card (Hand pname) InPlay state
   where
@@ -295,7 +300,7 @@ execute Cleanup state
   where
     current = head (players state)
     current' = current { hand = [], inPlay = [], discardPile = hand current ++ inPlay current ++ discardPile current }
-    (current'',gen') = draw current' 5 (gen state)
+    (current'',gen') = St.runState (draw current' 5) (gen state)
 
 
 -- Game Primitives
@@ -337,10 +342,8 @@ newTurn :: TurnState
 newTurn = TurnState { money = 0, buys = 1, actions = 1,
                       stack = map Right [Branch canPlayAction, Branch canBuyCard, Cleanup] }
 
-mkPlayer :: String -> StdGen -> (Player,StdGen)
-mkPlayer name gen = draw proto 5 gen
-  where
-    proto = Player { name = name, hand = [], discardPile = initialDeck, deck = [], inPlay = [] }
+mkPlayer :: String -> RandomState Player
+mkPlayer name = draw Player { name = name, hand = [], discardPile = initialDeck, deck = [], inPlay = [] } 5
 
 mkGame :: [String] -> [Card] -> StdGen -> GameState
 mkGame names kingdomCards gen =
@@ -364,23 +367,25 @@ mkGame names kingdomCards gen =
       | card == Copper = 60 - 7 * playerNo
       | otherwise = 10
 
-    (players,gen') = foldr (\name (ps,gen) -> let (p,gen') = mkPlayer name gen in (p:ps,gen')) ([], gen) names
+    (players,gen') = St.runState (sequence $ map mkPlayer names) gen
 
 finished :: GameState -> Bool
 finished state =
   L.notElem Province (availableCards state)
   || length (filter null (piles state)) >= 3
 
+reshuffleDiscard :: Player -> RandomState Player
+reshuffleDiscard p =
+  do
+    shuffled <- shuffle (discardPile p)
+    return (p { discardPile = [], deck = deck p ++ shuffled })
 
-draw :: Player -> Int -> StdGen -> (Player, StdGen)
-draw p num gen = (p { hand = hand', deck = deck'', discardPile = discard' }, gen')
+draw :: Player -> Int -> RandomState Player
+draw p num
+  | length (deck p) < num = fmap (\p -> p !!! num) (reshuffleDiscard p)
+  | otherwise = return $ p !!! num
   where
-    deck'' = drop num deck'
-    hand' = take num deck' ++ hand p
-    (deck', discard', gen') = if length (deck p) < num
-                                then (deck p ++ shuffledDiscard, [], gen'')
-                                else (deck p, discardPile p, gen)
-    (shuffledDiscard, gen'') = shuffle (discardPile p) gen
+    (!!!) p num = p { hand = (hand p) ++ take num (deck p), deck = drop num (deck p)}
 
 
 allCards :: Player -> [Card]
@@ -402,14 +407,11 @@ updatePlayer :: GameState -> String -> (Player -> Player) -> GameState
 updatePlayer state pname f =
   state { players = map (\p -> if name p == pname then f p else p) (players state) }
 
-updatePlayerR :: GameState -> String -> (Player -> StdGen -> (Player,StdGen)) -> GameState
-updatePlayerR state player f =
+updatePlayerR :: GameState -> String -> (Player -> RandomState Player) -> GameState
+updatePlayerR state pname f =
   state { players = ps, gen = resultgen }
   where
-    (ps, resultgen) = foldr update ([], gen state) (players state)
-    update p (ps, gen) = if player == name p then (p':ps, gen') else (p:ps, gen)
-      where
-        (p', gen') = f p gen
+    (ps, resultgen) = St.runState (sequence $ map (\p -> if name p == pname then f p else return p) (players state)) (gen state)
 
 
 playerNames :: GameState -> [String]
@@ -492,19 +494,37 @@ cardTypes Gold = [Treasure]
 cardTypes Curse = [CurseType]
 cardTypes Estate = [Victory]
 cardTypes Duchy = [Victory]
-cardTypes Gardens = [Victory]
-cardTypes Colony = [Victory]
-cardTypes Moat = [Action, Reaction]
-cardTypes Bureaucrat = [Action, Attack]
-cardTypes Militia = [Action, Attack]
-cardTypes Spy = [Action, Attack]
-cardTypes Thief = [Action, Attack]
-cardTypes Witch = [Action, Attack]
-
-cardTypes Platinum = [Treasure]
 cardTypes Province = [Victory]
 
-cardTypes _ = undefined
+cardTypes Cellar = [Action]
+cardTypes Chapel = [Action]
+cardTypes Moat = [Action, Reaction]
+cardTypes Chancellor = [Action]
+cardTypes Village = [Action]
+cardTypes Woodcutter = [Action]
+cardTypes Workshop = [Action]
+cardTypes Bureaucrat = [Action, Attack]
+cardTypes Feast = [Action]
+cardTypes Gardens = [Victory]
+cardTypes Militia = [Action, Attack]
+cardTypes Moneylender = [Action]
+cardTypes Remodel = [Action]
+cardTypes Smithy = [Action]
+cardTypes Spy = [Action, Attack]
+cardTypes Thief = [Action, Attack]
+cardTypes ThroneRoom = [Action]
+cardTypes CouncilRoom = [Action]
+cardTypes Festival = [Action]
+cardTypes Laboratory = [Action]
+cardTypes Library = [Action]
+cardTypes Market = [Action]
+cardTypes Mine = [Action]
+cardTypes Witch = [Action, Attack]
+cardTypes Adventurer = [Action]
+
+cardTypes Platinum = [Treasure]
+cardTypes Colony = [Victory]
+
 
 queueSteps :: GameState -> [PlayStep] -> GameState
 queueSteps g steps = g { turn = (turn g) { stack = steps ++ stack (turn g) } }
@@ -589,21 +609,20 @@ play Mine p g = if length treasuresInHand == 0
 play Witch player g =
   queueActions g ([Draw player 2] ++ map (\p -> GainCard (Discard p) Curse) (opponentNames g player))
 
--- TODO can we extract this into a more generic actions
+-- TODO can we extract this into a more generic actions, needed for further reactions likely
 play Adventurer player g = updatePlayerR g player inner
   where
-    inner :: Player -> StdGen -> (Player, StdGen)
-    inner p gen = let (p', cards, gen') = drawIter p 2 [] gen
-                  in (p' { discardPile = filter (not . isTreasure) cards ++ discardPile p',
-                           hand = filter isTreasure cards ++ hand p' },
-                      gen')
+    inner :: Player -> RandomState Player
+    inner p = do (p', cards) <- drawIter p 2 []
+                 return p' { discardPile = filter (not . isTreasure) cards ++ discardPile p',
+                             hand = filter isTreasure cards ++ hand p' }
 
-    drawIter :: Player -> Int -> [Card] -> StdGen -> (Player, [Card], StdGen)
-    drawIter p 0 cards gen = (p, cards, gen)
-    drawIter p num cards gen =
+    drawIter :: Player -> Int -> [Card] -> RandomState (Player, [Card])
+    drawIter p 0 cards = return (p, cards)
+    drawIter p num cards =
       case p of
-        Player { deck = [], discardPile = [] } -> (p, cards, gen)
-        Player { deck = (x:xs) } -> drawIter (p {deck = xs}) (if isTreasure x then num-1 else num) (x:cards) gen
-        _ -> let (pile, gen') = shuffle (discardPile p) gen
-             in drawIter p { deck = pile, discardPile = [] } num cards gen'
+        Player { deck = [], discardPile = [] } -> return (p, cards)
+        Player { deck = (x:xs) } -> drawIter (p {deck = xs}) (if isTreasure x then num-1 else num) (x:cards)
+        _ -> reshuffleDiscard p >>= \p2 -> drawIter p2 num cards
 
+play c _ _ = error ("Card not implemented: " ++ (show c))
