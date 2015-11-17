@@ -17,6 +17,7 @@ module Dominion.Model
    points,
    allCards,
    isAction,
+   isAttack,
    isReaction,
    isTreasure,
    isStandardVictory,
@@ -41,7 +42,6 @@ import qualified Control.Monad.Trans.State.Lazy as St
 import qualified Data.List as L
 import System.Random (StdGen, mkStdGen, randomR, newStdGen)
 
-
 data CardType = Action | Treasure | Victory | CurseType {- This is a bit of a hack -} |
     Reaction | Attack | Duration |
     Prize | Looter | Ruins | Knight | Reserve | Traveller
@@ -61,7 +61,13 @@ data Card = Card { cardName :: String,
                    cost :: Int, -- TODO this only works until Alchemy
                    types :: [CardType],
                    cardPoints :: Player -> Int,
-                   onPlay :: GameState -> String -> GameState
+                   onPlay :: GameState -> String -> GameState,
+
+                   -- determine whether in the given state an action triggers the card owned by the given player
+                   -- if so return a non-empty game stack of actions / decisions, which will be applied
+                   -- before the action
+                   -- TODO how can this handle replacements?
+                   trigger :: GameState -> String -> ActionStep -> GameStack
                    }
 
 instance Show Card where
@@ -77,7 +83,8 @@ data Player = Player { name :: String,
                        hand :: [Card],
                        inPlay :: [Card],
                        deck :: [Card],
-                       discardPile :: [Card]
+                       discardPile :: [Card],
+                       moated :: Bool
                        }
                        deriving (Eq, Show)
 
@@ -151,11 +158,17 @@ instance Show ActionStep where
 
 -- Game mutator primitives
 
-queueSteps :: GameState -> [PlayStep] -> GameState
-queueSteps g steps = g { turn = (turn g) { stack = steps ++ stack (turn g) } }
+applyTriggers :: GameState -> PlayStep -> GameStack
+applyTriggers g (Left step) = [(Left step)]
+applyTriggers g (Right action) =
+  concatMap (\p -> concatMap (\c -> trigger c g (name p) action) (hand p)) (players g)
+  ++ [Right action]
+
+queueSteps :: GameState -> GameStack -> GameState
+queueSteps g steps = g { turn = (turn g) { stack = concatMap (applyTriggers g) steps ++ stack (turn g) } }
 
 queueActions :: GameState -> [ActionStep] -> GameState
-queueActions g as = queueSteps g (map Right as)
+queueActions g as = queueSteps g $ map Right as
 
 
 -- Player
@@ -189,11 +202,14 @@ updatePlayerR state pname f =
 playerNames :: GameState -> [String]
 playerNames state = map name (players state)
 
+attackablePlayers :: GameState -> [Player]
+attackablePlayers state = filter (not . moated) (players state)
+
 opponentNames :: GameState -> String -> [String]
-opponentNames state player = filter (/= player) (playerNames state)
+opponentNames state player = map name $ opponents state player
 
 opponents :: GameState -> String -> [Player]
-opponents state player = filter ((/= player) . name) (players state)
+opponents state player = filter ((/= player) . name) $ attackablePlayers state
 
 availableCards :: GameState -> [Card]
 availableCards g = concatMap (take 1) (piles g)
@@ -204,6 +220,7 @@ hasCardType card typ = typ `elem` types card
 isAction card = hasCardType card Action
 isReaction card = hasCardType card Reaction
 isTreasure card = hasCardType card Treasure
+isAttack card = hasCardType card Attack
 
 -- TODO card as data has made this less type safe
 isStandardVictory c

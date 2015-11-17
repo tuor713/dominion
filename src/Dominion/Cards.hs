@@ -51,55 +51,57 @@ plusBuys num state _ = queueActions state [GainBuys num]
 
 noPoints = const 0
 
-
+noTriggers :: GameState -> String -> ActionStep -> GameStack
+noTriggers _ _ _ = []
 
 
 -- order is name, edition, cost, types, points, onPlay
 baseCards =
-  [Card "Estate" Base 2 [Victory] (const 1) pass,
-   Card "Duchy" Base 5 [Victory] (const 3) pass,
-   Card "Province" Base 8 [Victory] (const 6) pass,
-   Card "Curse" Base 0 [CurseType] (const (-1)) pass,
+  [Card "Estate" Base 2 [Victory] (const 1) pass noTriggers,
+   Card "Duchy" Base 5 [Victory] (const 3) pass noTriggers,
+   Card "Province" Base 8 [Victory] (const 6) pass noTriggers,
+   Card "Curse" Base 0 [CurseType] (const (-1)) pass noTriggers,
 
-   Card "Copper" Base 0 [Treasure] noPoints (plusMoney 1),
-   Card "Silver" Base 3 [Treasure] noPoints (plusMoney 2),
-   Card "Gold" Base 6 [Treasure] noPoints (plusMoney 3),
+   Card "Copper" Base 0 [Treasure] noPoints (plusMoney 1) noTriggers,
+   Card "Silver" Base 3 [Treasure] noPoints (plusMoney 2) noTriggers,
+   Card "Gold" Base 6 [Treasure] noPoints (plusMoney 3) noTriggers,
 
 
-   Card "Cellar" Base 2 [Action] noPoints playCellar,
-   Card "Chapel" Base 2 [Action] noPoints playChapel,
-   Card "Moat" Base 2 [Action, Reaction] noPoints (plusCards 2),
+   Card "Cellar" Base 2 [Action] noPoints playCellar noTriggers,
+   Card "Chapel" Base 2 [Action] noPoints playChapel noTriggers,
+   Card "Moat" Base 2 [Action, Reaction] noPoints (plusCards 2) moatTrigger,
 
-   Card "Chancellor" Base 3 [Action] noPoints playChancellor,
-   Card "Village" Base 3 [Action] noPoints (plusActions 2 & plusCards 1),
-   Card "Woodcutter" Base 3 [Action] noPoints (plusBuys 1 & plusMoney 2),
-   Card "Workshop" Base 3 [Action] noPoints playWorkshop,
+   Card "Chancellor" Base 3 [Action] noPoints playChancellor noTriggers,
+   Card "Village" Base 3 [Action] noPoints (plusActions 2 & plusCards 1) noTriggers,
+   Card "Woodcutter" Base 3 [Action] noPoints (plusBuys 1 & plusMoney 2) noTriggers,
+   Card "Workshop" Base 3 [Action] noPoints playWorkshop noTriggers,
 
-   Card "Bureaucrat" Base 4 [Action, Attack] noPoints playBureaucrat,
-   Card "Feast" Base 4 [Action] noPoints playFeast,
-   Card "Gardens" Base 4 [Victory] (\p -> length (allCards p) `quot` 10) pass,
-   Card "Militia" Base 4 [Action, Attack] noPoints playMilitia,
-   Card "Moneylender" Base 4 [Action] noPoints playMoneylender,
-   Card "Remodel" Base 4 [Action] noPoints playRemodel,
-   Card "Smithy" Base 4 [Action] noPoints (plusCards 3),
-   Card "Spy" Base 4 [Action, Attack] noPoints playSpy,
-   Card "Thief" Base 4 [Action, Attack] noPoints playThief,
-   Card "Throne Room" Base 4 [Action] noPoints playThroneRoom,
+   Card "Bureaucrat" Base 4 [Action, Attack] noPoints playBureaucrat noTriggers,
+   Card "Feast" Base 4 [Action] noPoints playFeast noTriggers,
+   Card "Gardens" Base 4 [Victory] (\p -> length (allCards p) `quot` 10) pass noTriggers,
+   Card "Militia" Base 4 [Action, Attack] noPoints playMilitia noTriggers,
+   Card "Moneylender" Base 4 [Action] noPoints playMoneylender noTriggers,
+   Card "Remodel" Base 4 [Action] noPoints playRemodel noTriggers,
+   Card "Smithy" Base 4 [Action] noPoints (plusCards 3) noTriggers,
+   Card "Spy" Base 4 [Action, Attack] noPoints playSpy noTriggers,
+   Card "Thief" Base 4 [Action, Attack] noPoints playThief noTriggers,
+   Card "Throne Room" Base 4 [Action] noPoints playThroneRoom noTriggers,
 
-   Card "Council Room" Base 5 [Action] noPoints playCouncilRoom,
-   Card "Festival" Base 5 [Action] noPoints (plusActions 2 & plusBuys 1 & plusMoney 2),
-   Card "Laboratory" Base 5 [Action] noPoints (plusCards 2 & plusActions 1),
-   Card "Library" Base 5 [Action] noPoints playLibrary,
-   Card "Market" Base 5 [Action] noPoints (plusCards 1 & plusActions 1 & plusBuys 1 & plusMoney 1),
-   Card "Mine" Base 5 [Action] noPoints playMine,
-   Card "Witch" Base 5 [Action, Attack] noPoints playWitch,
+   Card "Council Room" Base 5 [Action] noPoints playCouncilRoom noTriggers,
+   Card "Festival" Base 5 [Action] noPoints (plusActions 2 & plusBuys 1 & plusMoney 2) noTriggers,
+   Card "Laboratory" Base 5 [Action] noPoints (plusCards 2 & plusActions 1) noTriggers,
+   Card "Library" Base 5 [Action] noPoints playLibrary noTriggers,
+   Card "Market" Base 5 [Action] noPoints (plusCards 1 & plusActions 1 & plusBuys 1 & plusMoney 1) noTriggers,
+   Card "Mine" Base 5 [Action] noPoints playMine noTriggers,
+   Card "Witch" Base 5 [Action, Attack] noPoints playWitch noTriggers,
 
-   Card "Adventurer" Base 6 [Action] noPoints playAdventurer
+   Card "Adventurer" Base 6 [Action] noPoints playAdventurer noTriggers
    ]
 
 prosperityCards =
-  [Card "Colony" Prosperity 11 [Victory] (const 10) pass,
-   Card "Platinum" Prosperity 9 [Treasure] noPoints (plusMoney 5)]
+  [Card "Colony" Prosperity 11 [Victory] (const 10) pass noTriggers,
+   Card "Platinum" Prosperity 9 [Treasure] noPoints (plusMoney 5) noTriggers]
+
 
 cardData :: Map.Map String Card
 cardData = Map.fromList $ map (\c -> (map toLower $ cardName c, c)) (baseCards ++ prosperityCards)
@@ -130,6 +132,31 @@ playCellar g p =
 playChapel g p = queueSteps g [Left (PickCards p "Choose up to 4 cards to trash: " (hand (playerByName g p)) 4 cont)]
   where
     cont cards = map (Right . TrashCard p) cards
+
+-- Do actions have identities that we could use to make moat apply?
+moatDecision player card = Left $ YesNoDecision player "Use Moat's ability to prevent the attack?" cont
+  where
+    cont True = [Right $Branch rewriteStack]
+    cont False = []
+    rewriteStack g = g { turn = (turn g) { stack = iter g $ stack $ turn g } }
+    iter _ [] = []
+    iter g (Right (PlayCard card):xs) = Right (Branch hideplayer) : Right (PlayCard card) : Right (Branch unhideplayer) : xs
+    iter g (Right (PlayCopy card):xs) = Right (Branch hideplayer) : Right (PlayCopy card) : Right (Branch unhideplayer) : xs
+    iter g (x:xs) = x:iter g xs
+    hideplayer g = updatePlayer g player (\p -> p { moated = True })
+    unhideplayer g = updatePlayer g player (\p -> p { moated = False })
+
+
+moatTrigger :: GameState -> String -> ActionStep -> GameStack
+moatTrigger game player (PlayCard card)
+  | name (activePlayer game) /= player && isAttack card = [moatDecision player card]
+  | otherwise = []
+
+moatTrigger game player (PlayCopy card)
+  | name (activePlayer game) /= player && isAttack card = [moatDecision player card]
+  | otherwise = []
+
+moatTrigger _ _ _ = []
 
 playChancellor g p = queueSteps g [Right $ GainGold 2,
                                     Left $ (YesNoDecision p "Put deck into discard pile?"
@@ -185,10 +212,12 @@ playRemodel g p
 
 playSpy g p = queueActions g [Draw p 1, GainActions 1, Branch lookAtTopCards]
   where
-    lookAtTopCards game = queueSteps game { gen = gen', players = ps } $ map (Left . discardDecision) $ filter canDraw ps
+    lookAtTopCards game = queueSteps game { gen = gen', players = ps }
+      $ map (Left . discardDecision)
+      $ filter (\p -> canDraw p && not (moated p)) ps
       where
         (ps, gen') = St.runState (sequence $ map reshuffleIfNeeded (players game)) (gen game)
-        reshuffleIfNeeded p = if null (deck p) then reshuffleDiscard p else return p
+        reshuffleIfNeeded p = if null (deck p) && not (moated p) then reshuffleDiscard p else return p
         discardDecision player = YesNoDecision p ("Discard top of deck (" ++ show top ++ ") for player " ++ name player ++ "?")
                                               (\c -> [Right $ TransferCard top (TopOfDeck (name player)) (Discard (name player))])
           where

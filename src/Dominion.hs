@@ -32,8 +32,10 @@ import Text.Read (readMaybe)
 - separate out random state completely
 - make cards more data driven than all lengthy pattern matching
 - separate domain model and card data / behaviour
+- add unit tests
 
 -}
+
 
 
 summarizeCards :: [Card] -> String
@@ -109,7 +111,7 @@ step g =
   case stack (turn g) of
     (Left decision:steps) -> do putStrLn (show g)
                                 newSteps <- interact decision
-                                return $ g { turn = (turn g) { stack = (newSteps ++ steps) } }
+                                return $ queueSteps g { turn = (turn g) { stack = steps } } newSteps
     (Right action:steps) -> return $ execute action g { turn = (turn g) { stack = steps } }
     _ -> error "Illegal state, no steps but game has not ended"
 
@@ -163,7 +165,7 @@ interact decision = getInput caption handler
 -- Some more model elements
 
 mkPlayer :: String -> RandomState Player
-mkPlayer name = draw Player { name = name, hand = [], discardPile = initialDeck, deck = [], inPlay = [] } 5
+mkPlayer name = draw Player { name = name, hand = [], discardPile = initialDeck, deck = [], inPlay = [], moated = False } 5
 
 initialDeck :: [Card]
 initialDeck = replicate 7 copper ++ replicate 3 estate
