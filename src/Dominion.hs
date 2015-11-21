@@ -1,75 +1,16 @@
 {-# LANGUAGE TupleSections #-}
-{-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 module Dominion where
 
 import Dominion.Model
 import Dominion.Cards
 
 import Prelude hiding (interact)
-import qualified Control.Monad as M
 import qualified Control.Monad.Trans.State.Lazy as St
 import qualified Data.List as L
+import System.Random (StdGen, mkStdGen, randomR, newStdGen)
 import Data.List.Split (wordsBy)
 import qualified Data.Map.Strict as Map
 import qualified Data.Maybe as Maybe
-import System.Random (StdGen, mkStdGen, randomR, newStdGen)
-import Text.Read (readMaybe)
-
-
-{-
-
-== Modelling decisions ==
-- how are triggers / reactions going to work
-- what about global effects like Bridge
-- model partial visibility
-- do cards have an identity? (probably yes)
-- should we model reveal ?
-
-== Feature set ==
-- non IO decision making like a bot
-
-== Debt ==
-- separate out random state completely
-- make cards more data driven than all lengthy pattern matching
-- separate domain model and card data / behaviour
-- add unit tests
-
--}
-
-
-
-summarizeCards :: [Card] -> String
-summarizeCards cards =
-  cards |>
-  L.sort |>
-  L.group |>
-  L.map (\cs -> (if (length cs > 1) then show (length cs) ++ "x " else "") ++ show (head cs)) |>
-  L.intersperse ", " |>
-  concat
-
-instance Show GameState where
-  show g = "Game {\n" ++
-    "  players: {\n" ++
-    concatMap
-      (\p ->
-        "    " ++ name p ++ ": {\n" ++
-        "      hand:    [ " ++ summarizeCards (hand p) ++ " ]\n" ++
-        "      play:    [ " ++ summarizeCards (inPlay p) ++ " ]\n" ++
-        "      deck:    [ " ++ summarizeCards (deck p) ++ " ]\n" ++
-        "      discard: [ " ++ summarizeCards (discardPile p) ++ " ]\n" ++
-        "      points:  " ++ show (points p) ++ "\n" ++
-        "    }\n")
-      (players g) ++
-    "  }\n" ++
-    "  supply: [ " ++
-    (summarizeCards $ concat (piles g)) ++
-    " ]\n" ++
-    "  turn: { " ++
-    "actions: " ++ show (actions (turn g)) ++ ", buys: " ++ show (buys (turn g)) ++ ", money: " ++ show (money (turn g)) ++
-    " }\n" ++
-    "}"
-
--- Utilities
 
 
 list2MultiSet :: Ord a => [a] -> Map.Map a Int
@@ -78,104 +19,130 @@ list2MultiSet xs = Map.fromListWith (+) $ map (,1) xs
 contains :: Ord a => Map.Map a Int -> Map.Map a Int -> Bool
 contains bigger smaller = Map.isSubmapOfBy (<=) smaller bigger
 
+message :: String -> String -> String
+message player msg = "["++player++"] "++ msg
 
--- Basic operations
-
-mainloop :: GameState -> IO ()
-mainloop state =
+getInput :: (String -> Maybe a) -> IO a
+getInput parser =
   do
-    next <- step state
-    -- no actions means end of game
-    if null (stack (turn next))
-    then do
-          putStrLn "Game Finished!"
-          putStrLn $ "Final score: " ++ (players next
-                                         |> L.sortOn points
-                                         |> reverse
-                                         |> map (\p -> name p ++ ": " ++ show (points p))
-                                         |> L.intersperse ", "
-                                         |> concat)
-    else mainloop next
-
-{- Sample invocation (ghci)
-  playOnConsole ["Alice", "Bob"] (map (Maybe.fromJust . lookupCard) ["cellar", "market", "militia", "mine", "moat", "remodel", "smithy", "village", "woodcutter", "workshop"])
--}
-playOnConsole :: [String] -> [Card] -> IO ()
-playOnConsole players cards =
-  do
-    gen <- newStdGen
-    mainloop $ mkGame players cards gen
-
-step :: GameState -> IO GameState
-step g =
-  case stack (turn g) of
-    (Left decision:steps) -> do putStrLn (show g)
-                                newSteps <- interact decision
-                                return $ queueSteps g { turn = (turn g) { stack = steps } } newSteps
-    (Right action:steps) -> return $ execute action g { turn = (turn g) { stack = steps } }
-    _ -> error "Illegal state, no steps but game has not ended"
-
-getInput :: String -> (String -> Maybe a) -> IO a
-getInput caption parser =
-  do
-    putStrLn caption
     putStr ">> "
     line <- getLine
     case parser line of
       Just v -> return v
-      Nothing -> getInput caption parser
+      Nothing -> getInput parser
 
+decisionType2message :: DecisionType -> String
+decisionType2message QDraw = "Draw?"
+decisionType2message QPlay = "Play a card?"
+decisionType2message QTreasures = "Play treasures?"
+decisionType2message QBuy = "Buy a card?"
+decisionType2message QGain = "Gain a card?"
+decisionType2message QTrash = "Trash a card?"
+decisionType2message QDiscard = "Discard a card?"
+decisionType2message (QOption card) = "Use " ++ cardName card ++ "'s effect?"
 
-decision2prompt :: Interaction -> (String, String -> Maybe GameStack)
-decision2prompt (PickACard player caption choices cont) =
-  ("[" ++ player ++ "] " ++ caption ++ summarizeCards choices,
-   (fmap cont) . (\s -> lookupCard s >>= \x -> if x `elem` choices then Just x else Nothing))
-
-decision2prompt (PickCards player caption choices max cont) =
-  ("[" ++ player ++ "] " ++ caption ++ summarizeCards choices,
-   (fmap cont) . (\s -> if s == "all" then Just choices else (sequence $ map lookupCard (wordsBy (==',') s))
-                        >>= \xs -> if length xs <= max then Just xs else Nothing
-                        >>= \xs -> if contains (list2MultiSet choices) (list2MultiSet xs) then Just xs else Nothing))
-
-decision2prompt (OptionalDecision decision) =
-  (caption, handler')
+decision2prompt :: PlayerId -> Decision -> (String, String -> Maybe GameStep)
+decision2prompt player (YesNo typ f) = (message player (decisionType2message typ ++ " [yn]"), (fmap f) . parse)
   where
-    (caption, handler) = decision2prompt decision
-    handler' s = if s == "" then Just [] else handler s
-
-decision2prompt (YesNoDecision player caption cont) =
-  ("[" ++ player ++ "] " ++ caption ++ " [yn]", parse)
-  where
-    parse "y" = Just (cont True)
-    parse "n" = Just (cont False)
+    parse "y" = Just True
+    parse "n" = Just False
     parse _ = Nothing
 
--- TODO this is partial because we don't support Information
-decision2prompt (Information _ _) = undefined
-
-interact (Information player message) =
-  do putStrLn ("[" ++ player ++ "] " ++ message)
-     return []
-
-interact decision = getInput caption handler
+decision2prompt player (Choice typ choices f) =
+  (message player (decisionType2message typ ++ " " ++ summarizeCards choices), (fmap f) . parse)
   where
-    (caption, handler) = decision2prompt decision
+    parse s = lookupCard s >>= \x -> if x `elem` choices then Just x else Nothing
 
+decision2prompt player (Choices typ choices validator f) =
+  (message player (decisionType2message typ ++ " " ++ summarizeCards choices), (fmap f) . parse)
+  where
+    parse s = if s == "all" then Just choices else (sequence $ map lookupCard (wordsBy (==',') s))
+              >>= \xs -> if contains (list2MultiSet choices) (list2MultiSet xs) then Just xs else Nothing
+              >>= \xs -> if validator xs then Just xs else Nothing
 
--- Some more model elements
+decision2prompt player (Optional inner next) = (msg, parser)
+  where
+    (msg, handler) = decision2prompt player inner
+    parser "" = Just next
+    parser s = handler s
+
+interact :: PlayerId -> Interaction -> IO GameStep
+interact player (Info info next) = putStrLn (message player info) >> return next
+interact player (Decision decision) = putStrLn info >> getInput handler
+  where
+    (info, handler) = decision2prompt player decision
+
+-- TODO
+-- => the bot returning a GameStep directly is not a very safe pattern
+--    it presupposes bots are correctly implemented and not malicious
+-- => should we include bot state or is this covered by IO monad ?
+type Bot = GameState -> Interaction -> IO GameStep
+
+human :: PlayerId -> Bot
+human player _ = interact player
+
+bigMoneyBot :: Maybe GameStep -> Bot
+bigMoneyBot _ _ (Info info next) = return next
+bigMoneyBot _ state (Decision (Optional inner next)) = bigMoneyBot (Just next) state (Decision inner)
+
+bigMoneyBot (Just alt) _ (Decision (Choice QBuy choices f))
+  | province `elem` choices = return $ f province
+  | gold `elem` choices = return $ f gold
+  | silver `elem` choices = return $ f silver
+  | otherwise = return alt
+
+bigMoneyBot _ _ (Decision (Choices QTreasures choices _ f)) = return $ f choices
+
+runGameConsole :: Map.Map PlayerId Bot -> GameStep -> IO ()
+runGameConsole bots (State state)
+  | finished state =
+    do
+      putStrLn "Game Finished!"
+      putStrLn $ "Final score: " ++ (players state
+                                      |> L.sortOn points
+                                      |> reverse
+                                      |> map (\p -> name p ++ ": " ++ show (points p))
+                                      |> L.intersperse ", "
+                                      |> concat)
+  | otherwise = runGameConsole bots $ playTurn state
+
+runGameConsole bots (Interaction player state (Info msg next))
+  | player == allPlayerId =
+    do
+      putStrLn (message "All" msg)
+      runGameConsole bots next
+  | otherwise =
+    do
+      next <- (bots Map.! player) (visibleState player state) (Info msg next)
+      runGameConsole bots next
+
+runGameConsole bots (Interaction player state decision@(Decision _)) =
+  do
+    next <- (bots Map.! player) (visibleState player state) decision
+    runGameConsole bots next
+
 
 mkPlayer :: String -> RandomState Player
-mkPlayer name = draw Player { name = name, hand = [], discardPile = initialDeck, deck = [], inPlay = [], moated = False } 5
+mkPlayer name = draw Player { name = name, hand = [], discardPile = initialDeck, deck = [], inPlay = [] } 5
 
 initialDeck :: [Card]
 initialDeck = replicate 7 copper ++ replicate 3 estate
+
+-- TODO card as data has made this less type safe
+isStandardVictory c
+  | c == estate = True
+  | c == duchy = True
+  | c == province = True
+  | c == colony = True
+  | otherwise = False
 
 mkGame :: [String] -> [Card] -> StdGen -> GameState
 mkGame names kingdomCards gen =
   GameState { players = players,
               piles = map (\c -> replicate (noInPile c) c) (standardCards ++ kingdomCards),
-              trash = [],
+              trashPile = [],
               turn = newTurn,
+              ply = 1,
               gen = gen'
               }
   where
@@ -193,3 +160,13 @@ mkGame names kingdomCards gen =
       | otherwise = 10
 
     (players,gen') = St.runState (sequence $ map mkPlayer names) gen
+
+{- Sample invocation (ghci)
+   playOnConsole [("Alice",human "Alice"),("Bob",human "Bob")] (map (Maybe.fromJust . lookupCard) ["cellar", "market", "militia", "mine", "moat", "remodel", "smithy", "village", "woodcutter", "workshop"])
+   playOnConsole [("Alice",human "Alice"), ("Bob",bigMoneyBot Nothing)] (map (Maybe.fromJust . lookupCard) ["market", "library", "smithy", "laboratory", "village", "witch", "thief", "bureaucrat", "militia", "festival", "adventurer", "workshop", "feast", "gardens", "woodcutter", "chapel", "cellar", "moat", "mine", "chancellor", "moneylender", "remodel", "council room", "throne room", "spy"])
+-}
+playOnConsole :: [(String,Bot)] -> [Card] -> IO ()
+playOnConsole players cards =
+  do
+    gen <- newStdGen
+    runGameConsole (Map.fromList players) $ State $ mkGame (map fst players) cards gen

@@ -1,301 +1,272 @@
-module Dominion.Cards
-  (baseCards,
-   prosperityCards,
-   cardData,
-   lookupCard,
-
-   copper,
-   curse,
-   duchy,
-   estate,
-   gold,
-   province,
-   silver,
-   (|>))
-where
-
--- This module has the card knowledge base
+module Dominion.Cards where
 
 import Dominion.Model
 
+import qualified Control.Monad as M
 import qualified Control.Monad.Trans.State.Lazy as St
 import Data.Char (toLower)
-import qualified Data.Maybe as Maybe
-import qualified Data.Map.Strict as Map
 import qualified Data.List as L
+import qualified Data.Map.Strict as Map
+import qualified Data.Maybe as Maybe
+import System.Random (StdGen, mkStdGen, randomR, newStdGen)
 
--- Clojure / F# style threading
-(|>) :: a -> (a -> b) -> b
-(|>) x f = f x
-
-
-type GameAction = GameState -> String -> GameState
-
-pass :: GameAction
-pass state _ = state
-
-plusMoney :: Int -> GameAction
-plusMoney num state _ = queueActions state [GainGold num]
-
-plusCards :: Int -> GameAction
-plusCards num state player = queueActions state [Draw player num]
-
-plusActions :: Int -> GameAction
-plusActions num state _ = queueActions state [GainActions num]
-
-plusBuys :: Int -> GameAction
-plusBuys num state _ = queueActions state [GainBuys num]
-
-(&) :: GameAction -> GameAction -> GameAction
-(&) act1 act2 state player = act2 (act1 state player) player
 
 noPoints = const 0
 
-noTriggers :: GameState -> String -> ActionStep -> GameStack
-noTriggers _ _ _ = []
+treasure name cost money edition =
+  Card name edition cost [Treasure] noPoints (plusMoney money)
 
+action name cost effect edition =
+  Card name edition cost [Action] noPoints effect
 
--- order is name, edition, cost, types, points, onPlay
-baseCards =
-  [Card "Estate" Base 2 [Victory] (const 1) pass noTriggers,
-   Card "Duchy" Base 5 [Victory] (const 3) pass noTriggers,
-   Card "Province" Base 8 [Victory] (const 6) pass noTriggers,
-   Card "Curse" Base 0 [CurseType] (const (-1)) pass noTriggers,
+attack name cost effect edition =
+  Card name edition cost [Action, Attack] noPoints effect
 
-   Card "Copper" Base 0 [Treasure] noPoints (plusMoney 1) noTriggers,
-   Card "Silver" Base 3 [Treasure] noPoints (plusMoney 2) noTriggers,
-   Card "Gold" Base 6 [Treasure] noPoints (plusMoney 3) noTriggers,
+victory name cost points edition =
+  Card name edition cost [Victory] (const points) pass
 
+carddef name cost types points effect edition =
+  Card name edition cost types points effect
 
-   Card "Cellar" Base 2 [Action] noPoints playCellar noTriggers,
-   Card "Chapel" Base 2 [Action] noPoints playChapel noTriggers,
-   Card "Moat" Base 2 [Action, Reaction] noPoints (plusCards 2) moatTrigger,
+baseCards = map ($ Base)
+  [treasure "Copper" 0 1,
+   treasure "Silver" 3 2,
+   treasure "Gold" 6 3,
 
-   Card "Chancellor" Base 3 [Action] noPoints playChancellor noTriggers,
-   Card "Village" Base 3 [Action] noPoints (plusActions 2 & plusCards 1) noTriggers,
-   Card "Woodcutter" Base 3 [Action] noPoints (plusBuys 1 & plusMoney 2) noTriggers,
-   Card "Workshop" Base 3 [Action] noPoints playWorkshop noTriggers,
+   victory "Estate" 2 1,
+   victory "Duchy" 5 3,
+   victory "Province" 8 6,
 
-   Card "Bureaucrat" Base 4 [Action, Attack] noPoints playBureaucrat noTriggers,
-   Card "Feast" Base 4 [Action] noPoints playFeast noTriggers,
-   Card "Gardens" Base 4 [Victory] (\p -> length (allCards p) `quot` 10) pass noTriggers,
-   Card "Militia" Base 4 [Action, Attack] noPoints playMilitia noTriggers,
-   Card "Moneylender" Base 4 [Action] noPoints playMoneylender noTriggers,
-   Card "Remodel" Base 4 [Action] noPoints playRemodel noTriggers,
-   Card "Smithy" Base 4 [Action] noPoints (plusCards 3) noTriggers,
-   Card "Spy" Base 4 [Action, Attack] noPoints playSpy noTriggers,
-   Card "Thief" Base 4 [Action, Attack] noPoints playThief noTriggers,
-   Card "Throne Room" Base 4 [Action] noPoints playThroneRoom noTriggers,
+   carddef "Curse" 0 [CurseType] (const (-1)) pass,
 
-   Card "Council Room" Base 5 [Action] noPoints playCouncilRoom noTriggers,
-   Card "Festival" Base 5 [Action] noPoints (plusActions 2 & plusBuys 1 & plusMoney 2) noTriggers,
-   Card "Laboratory" Base 5 [Action] noPoints (plusCards 2 & plusActions 1) noTriggers,
-   Card "Library" Base 5 [Action] noPoints playLibrary noTriggers,
-   Card "Market" Base 5 [Action] noPoints (plusCards 1 & plusActions 1 & plusBuys 1 & plusMoney 1) noTriggers,
-   Card "Mine" Base 5 [Action] noPoints playMine noTriggers,
-   Card "Witch" Base 5 [Action, Attack] noPoints playWitch noTriggers,
+   action "Cellar" 2 cellar,
+   action "Chapel" 2 chapel,
+   carddef "Moat" 2 [Action, Reaction] (const 0) (plusCards 2),
 
-   Card "Adventurer" Base 6 [Action] noPoints playAdventurer noTriggers
+   action "Chancellor" 3 chancellor,
+   action "Village" 3 (plusActions 2 & plusCards 1),
+   action "Woodcutter" 3 (plusBuys 1 & plusMoney 2),
+   action "Workshop" 3 workshop,
+
+   attack "Bureaucrat" 4 bureaucrat,
+   action "Feast" 4 feast,
+   carddef "Gardens" 4 [Victory] (\p -> length (allCards p) `quot` 10) pass,
+   attack "Militia" 4 militia,
+   action "Moneylender" 4 moneylender,
+   action "Remodel" 4 remodel,
+   action "Smithy" 4 (plusCards 3),
+   attack "Spy" 4 spy,
+   attack "Thief" 4 thief,
+   action "Throne Room" 4 throneRoom,
+
+   action "Council Room" 5 councilRoom,
+   action "Festival" 5 (plusActions 2 & plusBuys 1 & plusMoney 2),
+   action "Laboratory" 5 (plusCards 2 & plusActions 1),
+   action "Library" 5 (library []),
+   action "Market" 5 (plusCards 1 & plusActions 1 & plusBuys 1 & plusMoney 1),
+   action "Mine" 5 mine,
+   attack "Witch" 5 witch,
+
+   action "Adventurer" 6 (adventurer [] [])
    ]
 
-prosperityCards =
-  [Card "Colony" Prosperity 11 [Victory] (const 10) pass noTriggers,
-   Card "Platinum" Prosperity 9 [Treasure] noPoints (plusMoney 5) noTriggers]
+seqSteps :: (a -> GameState -> GameStep) -> [a] -> GameState -> GameStep
+seqSteps f [] state = State state
+seqSteps f (x:xs) state = f x state `andThen` seqSteps f xs
 
+playAttack :: PlayerId -> (PlayerId -> GameState -> GameStep) -> GameState -> GameStep
+playAttack attacker attack state = seqSteps checkAttack (opponentNames state attacker) state
+  where
+    moat = (cardData Map.! "moat")
+    -- TODO can we do this more elegantly, triggers again?
+    checkAttack op state
+      | moat `elem` h =
+        decision op (YesNo (QOption moat) (\b -> if b then State state else attack op state))
+          False state
+      | otherwise = attack op state
+      where
+        h = hand $ playerByName state op
+
+cellar :: PlayerId -> GameState -> GameStep
+cellar player state = plusActions 1 player state
+  `andThen` \s2 -> decision player (Choices QDiscard (hand (playerByName s2 player)) (const True) (cont s2)) False s2
+  where
+    cont state cards = seqSteps (\c -> discard c (Hand player) player) cards state
+      `andThen` plusCards (length cards) player
+
+chapel :: PlayerId -> GameState -> GameStep
+chapel player state =
+  decision player (Choices QTrash (hand (playerByName state player)) valid cont) False state
+  where
+    valid cards = length cards <= 4
+    cont cards = seqSteps (\c -> trash c (Hand player) player) cards state
+
+chancellor :: PlayerId -> GameState -> GameStep
+chancellor player state = plusMoney 2 player state
+  `andThen` \s2 -> decision player (YesNo (QOption (cardData Map.! "chancellor")) (cont s2)) False s2
+  where
+    cont state b = State $ if b then updatePlayer state player
+                                       (\p -> p { deck = [], discardPile = deck p ++ discardPile p })
+                                else state
+
+workshop :: PlayerId -> GameState -> GameStep
+workshop player state = decision player (Choice QGain affordable (\c -> gain c player state)) False state
+  where
+    affordable = filter ((<=4) . cost) (availableCards state)
+
+bureaucrat :: Action
+bureaucrat player state = gainTo silver (TopOfDeck player) player state
+  `andThen` playAttack player treasureToDeck
+  where
+    treasureToDeck op state
+      | null treasures = info allPlayerId (op ++ " reveals hand " ++ summarizeCards h) state
+      -- TODO QDiscard is an approximation only
+      | otherwise = decision op (Choice QDiscard treasures cont) False state
+      where
+        h = hand $ playerByName state op
+        treasures = filter isTreasure h
+        cont card = info allPlayerId (op ++ " reveals " ++ cardName card) state
+          `andThen` (State . transfer card (Hand op) (TopOfDeck op))
+
+
+feast :: PlayerId -> GameState -> GameStep
+feast player state = trash (cardData Map.! "feast") InPlay player state
+  `andThen` \s2 -> decision player (Choice QGain (affordable s2) (\c -> gain c player s2)) False s2
+  where
+    affordable state = filter ((<=5) . cost) (availableCards state)
+
+militia :: Action
+militia player state = plusMoney 2 player state `andThen` playAttack player discardTo3
+  where
+    discardTo3 op state
+      | length h <= 3 = State state
+      | otherwise = decision op (Choices QDiscard h (\cs -> length h == length cs + 3) cont) False state
+      where
+        h = hand $ playerByName state op
+        cont cards = seqSteps (\c -> discard c (Hand op) op) cards state
+
+moneylender :: Action
+moneylender player state
+  | copper `elem` h = trash copper (Hand player) player state `andThen` plusMoney 3 player
+  | otherwise = State state
+  where
+    h = hand $ playerByName state player
+
+remodel :: Action
+remodel player state
+  | null h = State state
+  | otherwise = decision player (Choice QTrash h cont) False state
+  where
+    h = hand $ playerByName state player
+    cont card = trash card (Hand player) player state `andThen` chooseToGain card
+    chooseToGain trashed s2 = decision player (Choice QGain (affordable trashed s2) (cont2 s2)) False s2
+    affordable trashed state = filter ((<= cost trashed + 2) . cost) (availableCards state)
+    cont2 state card = gain card player state
+
+spy :: Action
+spy player state = plusCards 1 player state `andThen` plusActions 1 player
+  `andThen` spyAction player
+  `andThen` playAttack player spyAction
+  where
+    spyAction attackee state = maybe (State state) (doSpy attackee) $ ensureCanDraw 1 state attackee
+    doSpy attackee state =
+      info allPlayerId (attackee ++ " reveals " ++ cardName top) state
+      `andThen` decision player (YesNo QDiscard cont) False
+      where
+        cont b = if b then discard top (TopOfDeck attackee) attackee state else State state
+        top = head $ deck $ playerByName state attackee
+
+thief :: Action
+thief player state = playAttack player doThief state
+  where
+    doThief op state =
+      maybe (State state) (decide op) (M.mplus (ensureCanDraw 2 state op) (ensureCanDraw 1 state op))
+    decide op state
+      | null (filter isTreasure top) = seqSteps (\c -> discard c (TopOfDeck op) op) top state
+      | otherwise = decision player (Choice QTrash (filter isTreasure top) cont) False state
+      where
+        top = take 2 $ hand $ playerByName state op
+        cont card = trash card (TopOfDeck op) op state
+          `andThen` \s -> decision player (YesNo QGain (\b -> if b then gainFrom card Trash player s else State s)) False s
+          `andThen` \s2 -> seqSteps (\c -> discard c (TopOfDeck op) op) (L.delete card top) s2
+
+throneRoom :: Action
+throneRoom player state
+  | actions == [] = State state
+  | otherwise = decision player (Choice QPlay actions cont) False state
+  where
+    actions = filter isAction (hand (playerByName state player))
+    cont card = play card player state `andThen` playEffect card player
+
+councilRoom :: Action
+councilRoom player state = plusCards 4 player state `andThen` plusBuys 1 player `andThen` seqSteps (plusCards 1) (opponentNames state player)
+
+library :: [Card] -> Action
+library aside name state
+  | length (hand (playerByName state name)) >= 7 = State finalState
+  | otherwise = maybe (State finalState) draw1 (ensureCanDraw 1 state name)
+  where
+    finalState = updatePlayer state name (\p -> p { discardPile = aside ++ discardPile p})
+    draw1 s2
+      | not (canDraw (activePlayer s2)) = State s2
+      | isAction card = decision name (YesNo QDraw cont) False s2
+      | otherwise = next
+      where
+        cont True = next
+        cont False = library (card:aside) name (updatePlayer s2 name (\p -> p { deck = tail (deck p) }))
+        next = plusCards 1 name s2 `andThen` library aside name
+        card = head $ deck $ activePlayer s2
+
+mine :: Action
+mine player state
+  | treasures == [] = State state
+  | otherwise = decision player (Choice QTrash treasures cont) False state
+  where
+    cont card = trash card (Hand player) player state `andThen` gainDecision card
+    gainDecision trashed s2 = decision player
+                               (Choice QGain (affordable trashed s2) (\c -> gain c player s2))
+                               False s2
+    affordable trashed state = filter (\c -> cost c <= cost trashed + 3 && isTreasure c) (availableCards state)
+    treasures = filter isTreasure (hand (playerByName state player))
+
+witch :: Action
+witch player state = plusCards 2 player state `andThen` playAttack player (gain curse)
+
+-- TODO all home grown primitives rather than reusable pieces
+adventurer :: [Card] -> [Card] -> Action
+adventurer treasures others player state
+  | length treasures >= 2 = terminal
+  | otherwise = maybe terminal draw1 $ ensureCanDraw 1 state player
+  where
+    -- TODO this should probably trigger discard
+    terminal = State (updatePlayer state player (\p -> p { hand = treasures ++ hand p, discardPile = others ++ discardPile p }))
+    draw1 state = adventurer (if isTreasure top then top:treasures else treasures)
+                             (if isTreasure top then others else top:others)
+                             player s2
+      where
+        top = head $ hand (playerByName state player)
+        s2 = updatePlayer state player (\p -> p { deck = tail (deck p) })
+
+prosperityCards = map ($ Prosperity)
+  [treasure "Platinum" 9 5,
+   victory "Colony" 11 10]
 
 cardData :: Map.Map String Card
 cardData = Map.fromList $ map (\c -> (map toLower $ cardName c, c)) (baseCards ++ prosperityCards)
 
-
-copper = cardData Map.! "copper"
-curse = cardData Map.! "curse"
-duchy = cardData Map.! "duchy"
-estate = cardData Map.! "estate"
-feast = cardData Map.! "feast"
-province = cardData Map.! "province"
-silver = cardData Map.! "silver"
-gold = cardData Map.! "gold"
-
 lookupCard :: String -> Maybe Card
 lookupCard name = Map.lookup (map toLower name) cardData
 
-playCellar g p =
-  queueSteps g [Right (GainActions 1),
-                Left (PickCards p
-                                ("Choose any number of cards to discard: ")
-                                (hand (playerByName g p))
-                                (length (hand (playerByName g p)))
-                                cont)]
-  where
-    cont cards = map Right $ map (DiscardCard p) cards ++ [Draw p (length cards)]
+-- Dummy card for hidden information
+unknown = Card "Unknown" Base 0 [] noPoints pass
+curse = cardData Map.! "curse"
 
-playChapel g p = queueSteps g [Left (PickCards p "Choose up to 4 cards to trash: " (hand (playerByName g p)) 4 cont)]
-  where
-    cont cards = map (Right . TrashCard p) cards
+estate = cardData Map.! "estate"
+duchy = cardData Map.! "duchy"
+province = cardData Map.! "province"
+colony = cardData Map.! "colony"
 
--- Do actions have identities that we could use to make moat apply?
-moatDecision player card = Left $ YesNoDecision player "Use Moat's ability to prevent the attack?" cont
-  where
-    cont True = [Right $Branch rewriteStack]
-    cont False = []
-    rewriteStack g = g { turn = (turn g) { stack = iter g $ stack $ turn g } }
-    iter _ [] = []
-    iter g (Right (PlayCard card):xs) = Right (Branch hideplayer) : Right (PlayCard card) : Right (Branch unhideplayer) : xs
-    iter g (Right (PlayCopy card):xs) = Right (Branch hideplayer) : Right (PlayCopy card) : Right (Branch unhideplayer) : xs
-    iter g (x:xs) = x:iter g xs
-    hideplayer g = updatePlayer g player (\p -> p { moated = True })
-    unhideplayer g = updatePlayer g player (\p -> p { moated = False })
-
-
-moatTrigger :: GameState -> String -> ActionStep -> GameStack
-moatTrigger game player (PlayCard card)
-  | name (activePlayer game) /= player && isAttack card = [moatDecision player card]
-  | otherwise = []
-
-moatTrigger game player (PlayCopy card)
-  | name (activePlayer game) /= player && isAttack card = [moatDecision player card]
-  | otherwise = []
-
-moatTrigger _ _ _ = []
-
-playChancellor g p = queueSteps g [Right $ GainGold 2,
-                                    Left $ (YesNoDecision p "Put deck into discard pile?"
-                                                          (\b -> if b then [Right $ Branch deckToDiscard] else []))]
-  where
-    -- Note that this is correct in as far as cards are not discarded individually
-    deckToDiscard g = updatePlayer g p (\player -> player { deck = [], discardPile = deck player ++ discardPile player })
-
-playWorkshop g p = queueSteps g [Left (PickACard p "Choose a card to gain: " (filter ((<=4) . cost) (availableCards g)) cont)]
-  where
-    cont card = [Right (GainCard (Discard p) card)]
-
-playBureaucrat g p = queueSteps g $ [Right $ GainCard (TopOfDeck p) silver] ++ opDecisions
-  where
-    opDecisions = opponents g p
-                  |> filter (not . null . filter isTreasure . hand)
-                  |> map (\p -> Left $ PickACard (name p) "Choose a treasure to put on your deck: " (filter isTreasure (hand p))
-                                       (\c -> [Right $ TransferCard c (Hand (name p)) (TopOfDeck (name p))]))
-
-playFeast g p = queueSteps g' [Left (PickACard p "Choose a card to gain: " (filter ((<=5) . cost) (availableCards g')) cont)]
-  where
-    cont card = [Right (GainCard (TopOfDeck p) card)]
-    g' = updatePlayer g p (\player -> player { inPlay = L.delete feast (inPlay player) })
-
-playMilitia g p = queueSteps g ([Right (GainGold 2)]
-                                 ++ Maybe.catMaybes (map (decision g) (opponentNames g p)))
-  where
-    decision g op = if length h <= 3
-                    then Nothing
-                    else Just $ Left $ PickCards p "Choose cards to discard:" h (length h - 3) (cont op)
-      where
-        h = hand (playerByName g op)
-    cont op cards = map (Right . DiscardCard op) cards
-
--- TODO the linkage is imperfect because reactions and replacement effects could still happen
-playMoneylender g p
-  | copper `elem` h = queueActions g [TrashCard p copper, GainGold 3]
-  | otherwise = g
-  where
-    h = hand (playerByName g p)
-
-playRemodel g p
-  | null h = g -- Nothing happens since there is nothing to trash
-  | otherwise = queueSteps g [Left (PickACard p "Choose a card to trash: " h cont)]
-  where
-    h = hand (playerByName g p)
-    cont card = [Right $ TrashCard p card,
-                 Left (PickACard p "Choose a card to gain: "
-                                 (filter ((<=maxCost) . cost) (availableCards g))
-                                 (\c -> [Right $ GainCard (Discard p) c]))]
-      where
-        maxCost = 2 + cost card
-
-playSpy g p = queueActions g [Draw p 1, GainActions 1, Branch lookAtTopCards]
-  where
-    lookAtTopCards game = queueSteps game { gen = gen', players = ps }
-      $ map (Left . discardDecision)
-      $ filter (\p -> canDraw p && not (moated p)) ps
-      where
-        (ps, gen') = St.runState (sequence $ map reshuffleIfNeeded (players game)) (gen game)
-        reshuffleIfNeeded p = if null (deck p) && not (moated p) then reshuffleDiscard p else return p
-        discardDecision player = YesNoDecision p ("Discard top of deck (" ++ show top ++ ") for player " ++ name player ++ "?")
-                                              (\c -> [Right $ TransferCard top (TopOfDeck (name player)) (Discard (name player))])
-          where
-            top = head (deck player)
-
--- TODO implementation is messy and also imprecise because we ask trash/gain per card not for all at the end
-playThief g thief = queueSteps g' decisions
-  where
-    g' = g { players = ps, gen = gen' }
-    (ps, gen') = St.runState (sequence $ map reshuffleIfNeeded (players g)) (gen g)
-    reshuffleIfNeeded p = if name p /= thief && length (deck p) < 2 then reshuffleDiscard p else return p
-    decisions = opponents g' thief |> filter (null . deck) |> (\ops -> map reveal ops ++ concatMap mkDecision ops)
-    reveal opponent = Left $ Information "All" (name opponent ++ " revealed " ++ show top2)
-      where
-        top2 = take 2 (deck opponent)
-    mkDecision opponent
-      | any isTreasure top2 =
-        [Left $ PickACard thief "Pick a treasure to trash: " (filter isTreasure top2) cont]
-      | otherwise = []
-      where
-        top2 = take 2 (deck opponent)
-        cont c = [Left $ YesNoDecision thief ("Gain " ++ show c ++ " from trash?") (cont2 c)]
-        cont2 c True = [Right $ TransferCard c (TopOfDeck (name opponent)) Trash,
-                        Right $ TransferCard c Trash (Discard thief)]
-                       ++ discardRest c
-        cont2 c False = [Right $ TransferCard c (TopOfDeck (name opponent)) Trash] ++ discardRest c
-        discardRest c = map (\c -> Right $ TransferCard c (TopOfDeck (name opponent)) (Discard (name opponent))) $ L.delete c top2
-
-
-playThroneRoom g p = queueSteps g [Left (PickACard p "Choose an action: " (filter isAction (hand (playerByName g p))) cont)]
-  where
-    cont card = map Right [PlayCard card, PlayCopy card]
-
-playCouncilRoom g player = queueActions g ([Draw player 4, GainBuys 1] ++ map (`Draw` 1) (opponentNames g player))
-
--- TODO potentially the "aside" part needs to be modelled explicitly
-playLibrary g p = queueActions g [Branch repeatDraw]
-  where
-    condDraw s = if isAction newCard
-                 then queueSteps s' [Left (YesNoDecision p ("Set aside action " ++ show newCard ++ "?") cont)]
-                 else s'
-      where
-        s' = execute (Draw p 1) s
-        newCard = head $ (hand (playerByName s' p) L.\\ hand (playerByName s p))
-        cont True = [Right $ DiscardCard p newCard]
-        cont False = []
-    repeatDraw s
-      | length (hand (activePlayer s)) < 7 && canDraw (activePlayer s) =
-        queueActions s [Branch condDraw, Branch repeatDraw]
-      | otherwise = s
-
-playMine g p = if length treasuresInHand == 0
-                then g
-                else queueSteps g [Left (PickACard p "Choose a treasure to trash: "
-                                                   treasuresInHand
-                                                   cont)]
-  where
-    treasuresInHand = filter isTreasure (hand (playerByName g p))
-    cont card = [Right (TrashCard p card),
-                 Left (PickACard p "Choose a treasure card: "
-                                 (filter (\c -> cost c <= cost card + 3 && isTreasure c) (availableCards g))
-                                 cont2)]
-    cont2 card = [Right (GainCard (Hand p) card)]
-
-playWitch g player =
-  queueActions g ([Draw player 2] ++ map (\p -> GainCard (Discard p) curse) (opponentNames g player))
-
-playAdventurer g player = updatePlayerR g player inner
-  where
-    inner :: Player -> RandomState Player
-    inner p = do (p', cards) <- drawIter p 2 []
-                 return p' { discardPile = filter (not . isTreasure) cards ++ discardPile p',
-                             hand = filter isTreasure cards ++ hand p' }
-
-    drawIter :: Player -> Int -> [Card] -> RandomState (Player, [Card])
-    drawIter p 0 cards = return (p, cards)
-    drawIter p num cards =
-      case p of
-        Player { deck = [], discardPile = [] } -> return (p, cards)
-        Player { deck = (x:xs) } -> drawIter (p {deck = xs}) (if isTreasure x then num-1 else num) (x:cards)
-        _ -> reshuffleDiscard p >>= \p2 -> drawIter p2 num cards
+copper = cardData Map.! "copper"
+silver = cardData Map.! "silver"
+gold = cardData Map.! "gold"
+platinum = cardData Map.! "platinum"
