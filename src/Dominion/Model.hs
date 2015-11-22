@@ -82,10 +82,12 @@ data Interaction = Decision Decision | Info String GameStep
 
 data GameStep = State GameState | Interaction PlayerId GameState Interaction
 
+type Action = PlayerId -> GameState -> GameStep
+
 
 instance Show GameState where
   show g = "Game {\n" ++
-    "  turn: " ++ (show ((ply g + 1) `div` length (players g))) ++ "\n" ++
+    "  turn: " ++ (show (turnNo g)) ++ "\n" ++
     "  players: {\n" ++
     concatMap
       (\p ->
@@ -109,12 +111,14 @@ instance Show GameState where
 
 -- Combinators
 
-info :: PlayerId -> String -> GameState -> GameStep
-info to msg state = Interaction to state $ Info msg (State state)
+info :: String -> Action
+info msg to state = Interaction to state $ Info msg (State state)
 
-decision :: PlayerId -> Decision -> Bool -> GameState -> GameStep
-decision player decision False state = Interaction player state (Decision decision)
-decision player decision True state = Interaction player state (Decision (Optional decision (State state)))
+decision :: Decision -> Action
+decision decision player state = Interaction player state (Decision decision)
+
+optDecision :: Decision -> Action
+optDecision decision player state = Interaction player state (Decision (Optional decision (State state)))
 
 andThenI :: Decision -> (GameState -> GameStep) -> Decision
 andThenI (YesNo caption cont) f = YesNo caption (\b -> cont b `andThen` f)
@@ -125,7 +129,11 @@ andThenI (Optional inner fallback) f = Optional (inner `andThenI` f) (fallback `
 andThen :: GameStep -> (GameState -> GameStep) -> GameStep
 andThen (State state) f = f state
 andThen (Interaction player state (Info msg next)) f = Interaction player state (Info msg (next `andThen` f))
-andThen (Interaction player state (Decision choice)) f = decision player (choice `andThenI` f) False state
+andThen (Interaction player state (Decision choice)) f = decision (choice `andThenI` f) player state
+
+(&&&) :: Action -> Action -> Action
+(&&&) act1 act2 player state = act1 player state `andThen` act2 player
+
 
 -- Game functions
 
@@ -204,6 +212,9 @@ allCards s = concatMap (\f -> f s) [hand, inPlay, discardPile, deck]
 points :: Player -> Int
 points s = sum $ map (`cardPoints` s) $ allCards s
 
+turnNo :: GameState -> Int
+turnNo g = ((ply g + 1) `div` length (players g))
+
 unknown = Card "Unknown" Base 0 [] (\_ -> 0) pass
 
 -- Removes invisble information from the state such as opponents hands
@@ -269,130 +280,110 @@ ensureCanDraw num state name
 
 -- Game action
 
-type Action = PlayerId -> GameState -> GameStep
-
-playEffect :: Card -> PlayerId -> GameState -> GameStep
+playEffect :: Card -> Action
 playEffect card player state =
-  info allPlayerId (player ++ " plays " ++ cardName card) state `andThen` onPlay card player
+  info (player ++ " plays " ++ cardName card) allPlayerId state `andThen` onPlay card player
 
-play :: Card -> PlayerId -> GameState -> GameStep
+play :: Card -> Action
 play card player state = playEffect card player (transfer card (Hand player) InPlay state)
 
-playAll :: [Card] -> PlayerId -> GameState -> GameStep
+playAll :: [Card] -> Action
 playAll [] _ state = State $ state
 playAll (c:cs) player state = play c player state  `andThen` playAll cs player
 
 gainFrom :: Card -> Location -> Action
 gainFrom card source player state =
-  info allPlayerId (player ++ " gains " ++ cardName card) $ transfer card source (Discard player) state
+  info (player ++ " gains " ++ cardName card) allPlayerId $ transfer card source (Discard player) state
 
 
 gainTo :: Card -> Location -> Action
 gainTo card target player state
   | inSupply state card =
-    info allPlayerId (player ++ " gains " ++ cardName card) $ transfer card Supply target state
+    info (player ++ " gains " ++ cardName card) allPlayerId $ transfer card Supply target state
   | otherwise = State state
 
 gain :: Card -> Action
 gain card player = gainTo card (Discard player) player
 
-buy :: Card -> PlayerId -> GameState -> GameStep
+buy :: Card -> Action
 buy card player state =
-  info allPlayerId (player ++ " buys " ++ cardName card)
-  $ transfer card Supply (Discard player) state
+  info (player ++ " buys " ++ cardName card) allPlayerId $ transfer card Supply (Discard player) state
 
-trash :: Card -> Location -> PlayerId -> GameState -> GameStep
+trash :: Card -> Location -> Action
 trash card source player state =
-  info allPlayerId (player ++ " trashes " ++ cardName card)
-  $ transfer card source Trash state
+  info (player ++ " trashes " ++ cardName card) allPlayerId $ transfer card source Trash state
 
-discard :: Card -> Location -> PlayerId -> GameState -> GameStep
+discard :: Card -> Location -> Action
 discard card loc player state =
-  info allPlayerId (player ++ " discards " ++ cardName card)
-  $ transfer card loc (Discard player) state
+  info (player ++ " discards " ++ cardName card) allPlayerId $ transfer card loc (Discard player) state
 
-plusMoney :: Int -> PlayerId -> GameState -> GameStep
+plusMoney :: Int -> Action
 plusMoney num _ state = State $ state { turn = (turn state) { money = num + money (turn state) } }
 
-plusCards :: Int -> PlayerId -> GameState -> GameStep
-plusCards num player state = info player ("Drew " ++ summarizeCards newcards) s2
+plusCards :: Int -> Action
+plusCards num player state = info ("Drew " ++ summarizeCards newcards) player s2
   where
     s2 = updatePlayerR state player $ \p -> draw p num
     newhand = hand (playerByName s2 player)
     newcards = take (length newhand - length (hand (playerByName state player))) newhand
 
-plusBuys :: Int -> PlayerId -> GameState -> GameStep
+plusBuys :: Int -> Action
 plusBuys num _ state = State $ state { turn = (turn state) { buys = num + buys (turn state) } }
 
-plusActions :: Int -> PlayerId -> GameState -> GameStep
+plusActions :: Int -> Action
 plusActions num _ state = State $ state { turn = (turn state) { actions = num + actions (turn state) } }
 
-pass :: PlayerId -> GameState -> GameStep
+pass :: Action
 pass _ state = State state
-
-(&) :: (PlayerId -> GameState -> GameStep) -> (PlayerId -> GameState -> GameStep) -> PlayerId -> GameState -> GameStep
-(&) act1 act2 player state = act1 player state `andThen` act2 player
-
 
 -- Macro flows
 
 newTurn :: TurnState
 newTurn = TurnState { money = 0, buys = 1, actions = 1 }
 
-cleanupPhase :: GameState -> GameStep
-cleanupPhase state = State $ state { turn = newTurn, players = tail (players state) ++ [current''], ply = 1 + ply state, gen = gen'}
+cleanupPhase :: Action
+cleanupPhase _ state = State $ state { turn = newTurn, players = tail (players state) ++ [current''], ply = 1 + ply state, gen = gen'}
   where
     current = head (players state)
     -- TODO can cleanup trigger anything like discard ?
     current' = current { hand = [], inPlay = [], discardPile = hand current ++ inPlay current ++ discardPile current }
     (current'',gen') = St.runState (draw current' 5) (gen state)
 
-buyPhase :: GameState -> GameStep
-buyPhase state
+buyPhase :: Action
+buyPhase name state
   | length treasures > 0 = playTreasureDecision
   | buys (turn state) == 0 = State state
   | otherwise = buyDecision state
   where
-    name = activePlayerId state
     treasures = filter isTreasure (hand (activePlayer state))
 
-    playTreasureDecision = decision name (Choices QTreasures
-                                                  treasures
-                                                  (const True)
-                                                  (\cards -> playAll cards name state))
-                            True state
+    playTreasureDecision = optDecision (Choices QTreasures
+                                             treasures
+                                             (const True)
+                                             (\cards -> playAll cards name state))
+                            name state
       `andThen` buyDecision
 
-    buyDecision s2 = decision name (Choice QBuy
-                                           affordableCards
-                                           (\card -> plusBuys (-1) name s2
-                                                     `andThen` plusMoney (- (cost card)) name
-                                                     `andThen` buy card name
-                                                     `andThen` buyPhase))
-                                    True s2
+    buyDecision s2 = optDecision (Choice QBuy
+                                      affordableCards
+                                      (\card -> (plusBuys (-1) &&& plusMoney (- (cost card)) &&& buy card &&& buyPhase) name s2))
+                                    name s2
       where
         moneyToSpend = money (turn s2)
         affordableCards = filter ((<=moneyToSpend) . cost) $ availableCards s2
 
 
-actionPhase :: GameState -> GameStep
-actionPhase state
-  | actions (turn state) == 0 || actionsInHand == [] = State state
-  | otherwise = decision (activePlayerId state) (Choice QPlay
-                                                        actionsInHand
-                                                        (\card -> plusActions (-1) (activePlayerId state) state
-                                                                  `andThen` play card (activePlayerId state)
-                                                                  `andThen` actionPhase))
-                         True state
+actionPhase :: Action
+actionPhase name state
+  | actions (turn state) == 0 || null actionsInHand = State state
+  | otherwise = optDecision (Choice QPlay actionsInHand (\card -> (plusActions (-1) &&& play card &&& actionPhase) name state))
+                         name state
   where
     actionsInHand = filter isAction (hand (activePlayer state))
 
-playTurn :: GameState -> GameStep
-playTurn state =
-  info (activePlayerId state) ("Your turn:\n" ++ show (visibleState (activePlayerId state) state)) state
-  `andThen` actionPhase
-  `andThen` buyPhase
-  `andThen` cleanupPhase
+playTurn :: Action
+playTurn name state =
+  (info ("Your turn:\n" ++ show (visibleState name state)) &&& actionPhase &&& buyPhase &&& cleanupPhase) name state
 
 finished :: GameState -> Bool
 finished state =

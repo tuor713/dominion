@@ -3,6 +3,7 @@ module Dominion where
 
 import Dominion.Model
 import Dominion.Cards
+import Dominion.Bots
 
 import Prelude hiding (interact)
 import qualified Control.Monad.Trans.State.Lazy as St
@@ -72,54 +73,8 @@ interact player (Decision decision) = putStrLn info >> getInput handler
   where
     (info, handler) = decision2prompt player decision
 
--- TODO
--- => the bot returning a GameStep directly is not a very safe pattern
---    it presupposes bots are correctly implemented and not malicious
--- => should we include bot state or is this covered by IO monad ?
-type Bot = GameState -> Interaction -> IO GameStep
-
 human :: PlayerId -> Bot
 human player _ = interact player
-
-bigMoneyBot :: Maybe GameStep -> Bot
-bigMoneyBot _ _ (Info info next) = return next
-bigMoneyBot _ state (Decision (Optional inner next)) = bigMoneyBot (Just next) state (Decision inner)
-
-bigMoneyBot (Just alt) _ (Decision (Choice QBuy choices f))
-  | province `elem` choices = return $ f province
-  | gold `elem` choices = return $ f gold
-  | silver `elem` choices = return $ f silver
-  | otherwise = return alt
-
-bigMoneyBot _ _ (Decision (Choices QTreasures choices _ f)) = return $ f choices
-
-runGameConsole :: Map.Map PlayerId Bot -> GameStep -> IO ()
-runGameConsole bots (State state)
-  | finished state =
-    do
-      putStrLn "Game Finished!"
-      putStrLn $ "Final score: " ++ (players state
-                                      |> L.sortOn points
-                                      |> reverse
-                                      |> map (\p -> name p ++ ": " ++ show (points p))
-                                      |> L.intersperse ", "
-                                      |> concat)
-  | otherwise = runGameConsole bots $ playTurn state
-
-runGameConsole bots (Interaction player state (Info msg next))
-  | player == allPlayerId =
-    do
-      putStrLn (message "All" msg)
-      runGameConsole bots next
-  | otherwise =
-    do
-      next <- (bots Map.! player) (visibleState player state) (Info msg next)
-      runGameConsole bots next
-
-runGameConsole bots (Interaction player state decision@(Decision _)) =
-  do
-    next <- (bots Map.! player) (visibleState player state) decision
-    runGameConsole bots next
 
 
 mkPlayer :: String -> RandomState Player
@@ -161,9 +116,44 @@ mkGame names kingdomCards gen =
 
     (players,gen') = St.runState (sequence $ map mkPlayer names) gen
 
+
+
+runGameConsole :: Map.Map PlayerId Bot -> GameStep -> IO ()
+runGameConsole bots (State state)
+  | finished state =
+    do
+      putStrLn "Game Finished!"
+      putStrLn $ "Final score: " ++ (players state
+                                      |> L.sortOn points
+                                      |> reverse
+                                      |> map (\p -> name p ++ ": " ++ show (points p))
+                                      |> L.intersperse ", "
+                                      |> concat)
+  | otherwise =
+    do
+      putStrLn ("Turn " ++ (show (turnNo state)) ++ ", player " ++ activePlayerId state)
+      runGameConsole bots $ playTurn (activePlayerId state) state
+
+runGameConsole bots (Interaction player state (Info msg next))
+  | player == allPlayerId =
+    do
+      putStrLn (message "All" msg)
+      runGameConsole bots next
+  | otherwise =
+    do
+      next <- (bots Map.! player) (visibleState player state) (Info msg next)
+      runGameConsole bots next
+
+runGameConsole bots (Interaction player state decision@(Decision _)) =
+  do
+    next <- (bots Map.! player) (visibleState player state) decision
+    runGameConsole bots next
+
+
 {- Sample invocation (ghci)
    playOnConsole [("Alice",human "Alice"),("Bob",human "Bob")] (map (Maybe.fromJust . lookupCard) ["cellar", "market", "militia", "mine", "moat", "remodel", "smithy", "village", "woodcutter", "workshop"])
    playOnConsole [("Alice",human "Alice"), ("Bob",bigMoneyBot Nothing)] (map (Maybe.fromJust . lookupCard) ["market", "library", "smithy", "laboratory", "village", "witch", "thief", "bureaucrat", "militia", "festival", "adventurer", "workshop", "feast", "gardens", "woodcutter", "chapel", "cellar", "moat", "mine", "chancellor", "moneylender", "remodel", "council room", "throne room", "spy"])
+   playOnConsole [("Alice",bigMoneyBot Nothing), ("Bob",bigMoneyBot Nothing)] (map (Maybe.fromJust . lookupCard) ["market", "library", "smithy"])
 -}
 playOnConsole :: [(String,Bot)] -> [Card] -> IO ()
 playOnConsole players cards =

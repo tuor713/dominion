@@ -13,20 +13,12 @@ import System.Random (StdGen, mkStdGen, randomR, newStdGen)
 
 noPoints = const 0
 
-treasure name cost money edition =
-  Card name edition cost [Treasure] noPoints (plusMoney money)
+treasure name cost money edition = Card name edition cost [Treasure] noPoints (plusMoney money)
+action name cost effect edition = Card name edition cost [Action] noPoints effect
+attack name cost effect edition = Card name edition cost [Action, Attack] noPoints effect
+victory name cost points edition = Card name edition cost [Victory] (const points) pass
+carddef name cost types points effect edition = Card name edition cost types points effect
 
-action name cost effect edition =
-  Card name edition cost [Action] noPoints effect
-
-attack name cost effect edition =
-  Card name edition cost [Action, Attack] noPoints effect
-
-victory name cost points edition =
-  Card name edition cost [Victory] (const points) pass
-
-carddef name cost types points effect edition =
-  Card name edition cost types points effect
 
 baseCards = map ($ Base)
   [treasure "Copper" 0 1,
@@ -44,8 +36,8 @@ baseCards = map ($ Base)
    carddef "Moat" 2 [Action, Reaction] (const 0) (plusCards 2),
 
    action "Chancellor" 3 chancellor,
-   action "Village" 3 (plusActions 2 & plusCards 1),
-   action "Woodcutter" 3 (plusBuys 1 & plusMoney 2),
+   action "Village" 3 (plusActions 2 &&& plusCards 1),
+   action "Woodcutter" 3 (plusBuys 1 &&& plusMoney 2),
    action "Workshop" 3 workshop,
 
    attack "Bureaucrat" 4 bureaucrat,
@@ -60,10 +52,10 @@ baseCards = map ($ Base)
    action "Throne Room" 4 throneRoom,
 
    action "Council Room" 5 councilRoom,
-   action "Festival" 5 (plusActions 2 & plusBuys 1 & plusMoney 2),
-   action "Laboratory" 5 (plusCards 2 & plusActions 1),
+   action "Festival" 5 (plusActions 2 &&& plusBuys 1 &&& plusMoney 2),
+   action "Laboratory" 5 (plusCards 2 &&& plusActions 1),
    action "Library" 5 (library []),
-   action "Market" 5 (plusCards 1 & plusActions 1 & plusBuys 1 & plusMoney 1),
+   action "Market" 5 (plusCards 1 &&& plusActions 1 &&& plusBuys 1 &&& plusMoney 1),
    action "Mine" 5 mine,
    attack "Witch" 5 witch,
 
@@ -74,80 +66,76 @@ seqSteps :: (a -> GameState -> GameStep) -> [a] -> GameState -> GameStep
 seqSteps f [] state = State state
 seqSteps f (x:xs) state = f x state `andThen` seqSteps f xs
 
-playAttack :: PlayerId -> (PlayerId -> GameState -> GameStep) -> GameState -> GameStep
-playAttack attacker attack state = seqSteps checkAttack (opponentNames state attacker) state
+playAttack :: Action -> Action
+playAttack attack attacker state = seqSteps checkAttack (opponentNames state attacker) state
   where
     moat = (cardData Map.! "moat")
     -- TODO can we do this more elegantly, triggers again?
     checkAttack op state
       | moat `elem` h =
-        decision op (YesNo (QOption moat) (\b -> if b then State state else attack op state))
-          False state
+        decision (YesNo (QOption moat) (\b -> if b then State state else attack op state)) op state
       | otherwise = attack op state
       where
         h = hand $ playerByName state op
 
-cellar :: PlayerId -> GameState -> GameStep
+cellar :: Action
 cellar player state = plusActions 1 player state
-  `andThen` \s2 -> decision player (Choices QDiscard (hand (playerByName s2 player)) (const True) (cont s2)) False s2
+  `andThen` \s2 -> decision (Choices QDiscard (hand (playerByName s2 player)) (const True) (cont s2)) player s2
   where
     cont state cards = seqSteps (\c -> discard c (Hand player) player) cards state
       `andThen` plusCards (length cards) player
 
-chapel :: PlayerId -> GameState -> GameStep
-chapel player state =
-  decision player (Choices QTrash (hand (playerByName state player)) valid cont) False state
+chapel :: Action
+chapel player state = decision (Choices QTrash (hand (playerByName state player)) valid cont) player state
   where
     valid cards = length cards <= 4
     cont cards = seqSteps (\c -> trash c (Hand player) player) cards state
 
-chancellor :: PlayerId -> GameState -> GameStep
+chancellor :: Action
 chancellor player state = plusMoney 2 player state
-  `andThen` \s2 -> decision player (YesNo (QOption (cardData Map.! "chancellor")) (cont s2)) False s2
+  `andThen` \s2 -> decision (YesNo (QOption (cardData Map.! "chancellor")) (cont s2)) player s2
   where
     cont state b = State $ if b then updatePlayer state player
                                        (\p -> p { deck = [], discardPile = deck p ++ discardPile p })
                                 else state
 
-workshop :: PlayerId -> GameState -> GameStep
-workshop player state = decision player (Choice QGain affordable (\c -> gain c player state)) False state
+workshop :: Action
+workshop player state = decision (Choice QGain affordable (\c -> gain c player state)) player state
   where
     affordable = filter ((<=4) . cost) (availableCards state)
 
 bureaucrat :: Action
-bureaucrat player state = gainTo silver (TopOfDeck player) player state
-  `andThen` playAttack player treasureToDeck
+bureaucrat player state = (gainTo silver (TopOfDeck player) &&& playAttack treasureToDeck) player state
   where
     treasureToDeck op state
-      | null treasures = info allPlayerId (op ++ " reveals hand " ++ summarizeCards h) state
+      | null treasures = info (op ++ " reveals hand " ++ summarizeCards h) allPlayerId state
       -- TODO QDiscard is an approximation only
-      | otherwise = decision op (Choice QDiscard treasures cont) False state
+      | otherwise = decision (Choice QDiscard treasures cont) op state
       where
         h = hand $ playerByName state op
         treasures = filter isTreasure h
-        cont card = info allPlayerId (op ++ " reveals " ++ cardName card) state
+        cont card = info (op ++ " reveals " ++ cardName card) allPlayerId state
           `andThen` (State . transfer card (Hand op) (TopOfDeck op))
 
-
-feast :: PlayerId -> GameState -> GameStep
+feast :: Action
 feast player state = trash (cardData Map.! "feast") InPlay player state
-  `andThen` \s2 -> decision player (Choice QGain (affordable s2) (\c -> gain c player s2)) False s2
+  `andThen` \s2 -> decision (Choice QGain (affordable s2) (\c -> gain c player s2)) player s2
   where
     affordable state = filter ((<=5) . cost) (availableCards state)
 
 militia :: Action
-militia player state = plusMoney 2 player state `andThen` playAttack player discardTo3
+militia player state = (plusMoney 2 &&& playAttack discardTo3) player state
   where
     discardTo3 op state
       | length h <= 3 = State state
-      | otherwise = decision op (Choices QDiscard h (\cs -> length h == length cs + 3) cont) False state
+      | otherwise = decision (Choices QDiscard h (\cs -> length h == length cs + 3) cont) op state
       where
         h = hand $ playerByName state op
         cont cards = seqSteps (\c -> discard c (Hand op) op) cards state
 
 moneylender :: Action
 moneylender player state
-  | copper `elem` h = trash copper (Hand player) player state `andThen` plusMoney 3 player
+  | copper `elem` h = (trash copper (Hand player) &&& plusMoney 3) player state
   | otherwise = State state
   where
     h = hand $ playerByName state player
@@ -155,51 +143,49 @@ moneylender player state
 remodel :: Action
 remodel player state
   | null h = State state
-  | otherwise = decision player (Choice QTrash h cont) False state
+  | otherwise = decision (Choice QTrash h cont) player state
   where
     h = hand $ playerByName state player
     cont card = trash card (Hand player) player state `andThen` chooseToGain card
-    chooseToGain trashed s2 = decision player (Choice QGain (affordable trashed s2) (cont2 s2)) False s2
+    chooseToGain trashed s2 = decision (Choice QGain (affordable trashed s2) (cont2 s2)) player s2
     affordable trashed state = filter ((<= cost trashed + 2) . cost) (availableCards state)
     cont2 state card = gain card player state
 
 spy :: Action
-spy player state = plusCards 1 player state `andThen` plusActions 1 player
-  `andThen` spyAction player
-  `andThen` playAttack player spyAction
+spy player state = (plusCards 1 &&& plusActions 1 &&& spyAction &&& playAttack spyAction) player state
   where
     spyAction attackee state = maybe (State state) (doSpy attackee) $ ensureCanDraw 1 state attackee
     doSpy attackee state =
-      info allPlayerId (attackee ++ " reveals " ++ cardName top) state
-      `andThen` decision player (YesNo QDiscard cont) False
+      info (attackee ++ " reveals " ++ cardName top) allPlayerId state
+      `andThen` decision (YesNo QDiscard cont) player
       where
         cont b = if b then discard top (TopOfDeck attackee) attackee state else State state
         top = head $ deck $ playerByName state attackee
 
 thief :: Action
-thief player state = playAttack player doThief state
+thief player state = playAttack doThief player state
   where
     doThief op state =
       maybe (State state) (decide op) (M.mplus (ensureCanDraw 2 state op) (ensureCanDraw 1 state op))
     decide op state
       | null (filter isTreasure top) = seqSteps (\c -> discard c (TopOfDeck op) op) top state
-      | otherwise = decision player (Choice QTrash (filter isTreasure top) cont) False state
+      | otherwise = decision (Choice QTrash (filter isTreasure top) cont) player state
       where
         top = take 2 $ hand $ playerByName state op
         cont card = trash card (TopOfDeck op) op state
-          `andThen` \s -> decision player (YesNo QGain (\b -> if b then gainFrom card Trash player s else State s)) False s
+          `andThen` \s -> decision (YesNo QGain (\b -> if b then gainFrom card Trash player s else State s)) player s
           `andThen` \s2 -> seqSteps (\c -> discard c (TopOfDeck op) op) (L.delete card top) s2
 
 throneRoom :: Action
 throneRoom player state
   | actions == [] = State state
-  | otherwise = decision player (Choice QPlay actions cont) False state
+  | otherwise = decision (Choice QPlay actions cont) player state
   where
     actions = filter isAction (hand (playerByName state player))
-    cont card = play card player state `andThen` playEffect card player
+    cont card = (play card &&& playEffect card) player state
 
 councilRoom :: Action
-councilRoom player state = plusCards 4 player state `andThen` plusBuys 1 player `andThen` seqSteps (plusCards 1) (opponentNames state player)
+councilRoom player state = (plusCards 4 &&& plusBuys 1) player state `andThen` seqSteps (plusCards 1) (opponentNames state player)
 
 library :: [Card] -> Action
 library aside name state
@@ -209,28 +195,26 @@ library aside name state
     finalState = updatePlayer state name (\p -> p { discardPile = aside ++ discardPile p})
     draw1 s2
       | not (canDraw (activePlayer s2)) = State s2
-      | isAction card = decision name (YesNo QDraw cont) False s2
+      | isAction card = decision (YesNo QDraw cont) name s2
       | otherwise = next
       where
         cont True = next
         cont False = library (card:aside) name (updatePlayer s2 name (\p -> p { deck = tail (deck p) }))
-        next = plusCards 1 name s2 `andThen` library aside name
+        next = (plusCards 1 &&& library aside) name s2
         card = head $ deck $ activePlayer s2
 
 mine :: Action
 mine player state
   | treasures == [] = State state
-  | otherwise = decision player (Choice QTrash treasures cont) False state
+  | otherwise = decision (Choice QTrash treasures cont) player state
   where
     cont card = trash card (Hand player) player state `andThen` gainDecision card
-    gainDecision trashed s2 = decision player
-                               (Choice QGain (affordable trashed s2) (\c -> gain c player s2))
-                               False s2
+    gainDecision trashed s2 = decision (Choice QGain (affordable trashed s2) (\c -> gain c player s2)) player s2
     affordable trashed state = filter (\c -> cost c <= cost trashed + 3 && isTreasure c) (availableCards state)
     treasures = filter isTreasure (hand (playerByName state player))
 
 witch :: Action
-witch player state = plusCards 2 player state `andThen` playAttack player (gain curse)
+witch = plusCards 2 &&& playAttack (gain curse)
 
 -- TODO all home grown primitives rather than reusable pieces
 adventurer :: [Card] -> [Card] -> Action
