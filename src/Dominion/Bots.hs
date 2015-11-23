@@ -27,6 +27,14 @@ simpleBot bot state (Decision decision) = return $ bot state decision Nothing
 
 defaultBot :: SimpleBot
 defaultBot _ (Choices QTreasures choices _ f) _ = f choices
+defaultBot _ (Choice QPlay actions f) _ = f (head actions)
+defaultBot _ (Choice QTrash cards f) alt
+  | curse `elem` cards = f curse
+  | estate `elem` cards = f estate
+  | copper `elem` cards = f copper
+  | otherwise = case alt of
+                  Just next -> next
+                  Nothing -> f (head cards)
 defaultBot _ _ (Just next) = next
 defaultBot _ (YesNo _ f) _ = f False
 defaultBot _ (Choices _ choices val f) _ = f []
@@ -69,6 +77,13 @@ gainsToEndGame state = min cardsToThreePile (min provinceLeft colonyLeft)
     colonyLeft = if colonyGame state then numInSupply state colony else 100
     cardsToThreePile = sum $ take 3 $ L.sort $ map snd $ supply state
 
+deckSize :: GameState -> Int
+deckSize state = length $ allCards $ activePlayer state
+
+numInDeck :: String -> GameState -> Int
+numInDeck name state = length $ filter (==card) $ allCards $ activePlayer state
+  where
+    card = lookupCard name
 
 -- Actual Bots
 
@@ -82,5 +97,19 @@ betterBigMoney = partialBot $
   `alt` buys "Gold"
   `alt` buys "Silver"
 
+bigSmithy = partialBot $
+  buysIf "Province" ((>15) . totalMoney)
+  `alt` buysIf "Duchy" ((<=5) . gainsToEndGame)
+  `alt` buysIf "Chapel" ((<=2) . gainsToEndGame)
+  `alt` buys "Gold"
+  `alt` buysIf "Smithy" (\s -> let num = numInDeck "Smithy" s
+                               in num < 1 || (num < 2 && deckSize s >= 16))
+  `alt` buys "Silver"
 
-
+doubleJack = partialBot $
+  buysIf "Province" ((>15) . totalMoney)
+  `alt` buysIf "Duchy" ((<=5) . gainsToEndGame)
+  `alt` buysIf "Chapel" ((<=2) . gainsToEndGame)
+  `alt` buys "Gold"
+  `alt` buysIf "Jack of All Trades" ((<2) . (numInDeck "Jack of All Trades"))
+  `alt` buys "Silver"

@@ -9,6 +9,7 @@ import Prelude hiding (interact)
 import qualified Control.Monad.Trans.State.Lazy as St
 import qualified Data.List as L
 import System.Random (StdGen, mkStdGen, randomR, newStdGen)
+import System.Random.Shuffle (shuffle')
 import Data.List.Split (wordsBy)
 import qualified Data.Map.Strict as Map
 import qualified Data.Maybe as Maybe
@@ -133,14 +134,14 @@ runSimulation bots accu (Interaction player state interaction) =
     runSimulation bots accu next
 
 -- Sample run:
--- runSimulations [("Alice",basicBigMoney), ("Bob",betterBigMoney)] (map lookupCard ["market", "library", "smithy", "cellar", "chapel", "witch", "village", "laboratory", "festival", "festival"]) 100 >>= stats
+-- runSimulations [("Alice",bigSmithy), ("Bob",betterBigMoney)] (map lookupCard ["market", "library", "smithy", "cellar", "chapel", "witch", "village", "laboratory", "festival", "festival"]) 100 >>= stats
 runSimulations :: [(PlayerId,Bot)] -> [Card] -> Int -> IO [[GameState]]
 runSimulations _ _ 0 = return []
 -- TODO this is horribly unlazy
 runSimulations bots tableau num =
   do
     gen <- newStdGen
-    let initial = mkGame (map fst bots) tableau gen
+    let initial = mkGame (shuffle' (map fst bots) (length bots) gen) tableau gen
     states <- runSimulation (Map.fromList bots) [initial] $ State initial
     sims <- runSimulations bots tableau (num-1)
     return (states:sims)
