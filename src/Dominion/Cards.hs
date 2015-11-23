@@ -20,6 +20,40 @@ victory name cost points edition = Card name edition cost [Victory] (const point
 carddef name cost types points effect edition = Card name edition cost types points effect
 
 
+cardData :: Map.Map String Card
+cardData = Map.fromList $ map (\c -> (map toLower $ cardName c, c))
+  (concat [baseCards, prosperityCards, hinterlandCards])
+
+maybeCard :: String -> Maybe Card
+maybeCard name = Map.lookup (map toLower name) cardData
+
+lookupCard :: String -> Card
+lookupCard name = cardData Map.! (map toLower name)
+
+
+-- Dummy card for hidden information
+unknown = Card "Unknown" Base 0 [] noPoints pass
+curse = cardData Map.! "curse"
+
+estate = cardData Map.! "estate"
+duchy = cardData Map.! "duchy"
+province = cardData Map.! "province"
+colony = cardData Map.! "colony"
+
+copper = cardData Map.! "copper"
+silver = cardData Map.! "silver"
+gold = cardData Map.! "gold"
+platinum = cardData Map.! "platinum"
+
+
+-- Common patterns
+
+
+
+
+
+-- Base Edition
+
 baseCards = map ($ Base)
   [treasure "Copper" 0 1,
    treasure "Silver" 3 2,
@@ -66,6 +100,10 @@ seqSteps :: (a -> GameState -> GameStep) -> [a] -> GameState -> GameStep
 seqSteps f [] state = State state
 seqSteps f (x:xs) state = f x state `andThen` seqSteps f xs
 
+seqActions :: (a -> Action) -> [a] -> Action
+seqActions _ [] _ state = State state
+seqACtions f (x:xs) p state = f x p state `andThen` seqActions f xs p
+
 playAttack :: Action -> Action
 playAttack attack attacker state = seqSteps checkAttack (opponentNames state attacker) state
   where
@@ -79,11 +117,10 @@ playAttack attack attacker state = seqSteps checkAttack (opponentNames state att
         h = hand $ playerByName state op
 
 cellar :: Action
-cellar player state = plusActions 1 player state
-  `andThen` \s2 -> decision (Choices QDiscard (hand (playerByName s2 player)) (const True) (cont s2)) player s2
-  where
-    cont state cards = seqSteps (\c -> discard c (Hand player) player) cards state
-      `andThen` plusCards (length cards) player
+cellar = plusActions 1
+  &&+ \p s -> chooseMany QDiscard (hand (playerByName s p)) (const True)
+  &&= \cards -> seqActions (\c -> discard c (Hand p)) cards
+  &&& plusCards (length cards)
 
 chapel :: Action
 chapel player state = decision (Choices QTrash (hand (playerByName state player)) valid cont) player state
@@ -100,7 +137,7 @@ chancellor player state = plusMoney 2 player state
                                 else state
 
 workshop :: Action
-workshop player state = decision (Choice QGain affordable (\c -> gain c player state)) player state
+workshop player state = app player state $ chooseOne QGain affordable &&= gain
   where
     affordable = filter ((<=4) . cost) (availableCards state)
 
@@ -231,26 +268,36 @@ adventurer treasures others player state
         top = head $ hand (playerByName state player)
         s2 = updatePlayer state player (\p -> p { deck = tail (deck p) })
 
+
+
+-- Prosperity
+
 prosperityCards = map ($ Prosperity)
   [treasure "Platinum" 9 5,
    victory "Colony" 11 10]
 
-cardData :: Map.Map String Card
-cardData = Map.fromList $ map (\c -> (map toLower $ cardName c, c)) (baseCards ++ prosperityCards)
 
-lookupCard :: String -> Maybe Card
-lookupCard name = Map.lookup (map toLower name) cardData
+-- Hinterlands
 
--- Dummy card for hidden information
-unknown = Card "Unknown" Base 0 [] noPoints pass
-curse = cardData Map.! "curse"
+hinterlandCards = map ($ Hinterlands)
+  [action "Jack of All Trades" 4 jackOfAllTrades]
 
-estate = cardData Map.! "estate"
-duchy = cardData Map.! "duchy"
-province = cardData Map.! "province"
-colony = cardData Map.! "colony"
+jackOfAllTrades :: Action
+jackOfAllTrades = gain silver &&& spyTop &&& drawTo5 &&& optTrash
+  where
+    spyTop player state = maybe (State state) (chooseKeepDiscard player) (ensureCanDraw 1 state player)
+    chooseKeepDiscard player state = (info ("Top of deck is " ++ cardName top) &&& decision (YesNo QDiscard cont)) player state
+      where
+        top = head $ deck $ playerByName state player
+        cont b = if b then discard top (TopOfDeck player) player state else State state
 
-copper = cardData Map.! "copper"
-silver = cardData Map.! "silver"
-gold = cardData Map.! "gold"
-platinum = cardData Map.! "platinum"
+    drawTo5 player state = if num >= 5 then State state else plusCards (5-num) player state
+      where
+        num = length $ hand $ playerByName state player
+
+    optTrash player state
+      | null candidates = State state
+      | otherwise = optDecision (Choice QTrash candidates cont) player state
+      where
+        candidates = filter (not . isTreasure) $ hand $ playerByName state player
+        cont card = trash card (Hand player) player state

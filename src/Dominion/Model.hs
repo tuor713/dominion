@@ -16,7 +16,7 @@ data CardType = Action | Treasure | Victory | CurseType {- This is a bit of a ha
 data Location = Hand String | Discard String | TopOfDeck String | InPlay | Trash | Supply
   deriving (Eq, Show)
 
-data Edition = Base | Intrigue | Seaside | Alchemy | Prosperity | Cornucopia | Hinterlands | DarkAges | Guilds
+data Edition = Base | Intrigue | Seaside | Alchemy | Prosperity | Cornucopia | Hinterlands | DarkAges | Guilds | Adventures | Promo
   deriving (Eq, Read, Show)
 
 type RandomState a = St.State StdGen a
@@ -24,12 +24,17 @@ type RandomState a = St.State StdGen a
 
 -- The fundamental domain types
 
+-- TODO this is really a card type, rather than a concrete card sitting somewhere ...
+-- there is design potential to include the concept of a concrete card in the model
+-- it would have an identity, and a location (and could be traced throughout the game)
+-- > it allows cards to be transferred without keeping location as a separate concept
+-- > it allows precise implementation of concepts like, 'if X then do Y to this card'
 data Card = Card { cardName :: String,
                    edition :: Edition,
                    -- TODO this only works for Base
                    -- breaks for cards like peddlar having state dependent cost
                    -- breaks for potion cost
-                     cost :: Int,
+                   cost :: Int,
                    types :: [CardType],
                    cardPoints :: Player -> Int,
                    onPlay :: PlayerId -> GameState -> GameStep
@@ -64,7 +69,7 @@ data TurnState = TurnState { money :: Int,
 data GameState = GameState { players :: [Player],
                              trashPile :: [Card],
                              turn :: TurnState,
-                             piles :: [[Card]],
+                             piles :: [(Card,Int)],
                              ply :: Int,
                              -- TODO Is there a better to do this?
                              gen :: StdGen
@@ -101,7 +106,7 @@ instance Show GameState where
       (players g) ++
     "  }\n" ++
     "  supply: [ " ++
-    (summarizeCards $ concat (piles g)) ++
+    (summarizeCards $ concatMap (\(c,n) -> replicate n c) (piles g)) ++
     " ]\n" ++
     "  turn: { " ++
     "actions: " ++ show (actions (turn g)) ++ ", buys: " ++ show (buys (turn g)) ++ ", money: " ++ show (money (turn g)) ++
@@ -131,8 +136,32 @@ andThen (State state) f = f state
 andThen (Interaction player state (Info msg next)) f = Interaction player state (Info msg (next `andThen` f))
 andThen (Interaction player state (Decision choice)) f = decision (choice `andThenI` f) player state
 
+toAction :: GameStep -> Action
+toAction step _ _ = step
+
+app :: PlayerId -> GameState -> Action -> GameStep
+app p s action = action p s
+
 (&&&) :: Action -> Action -> Action
 (&&&) act1 act2 player state = act1 player state `andThen` act2 player
+
+(&&+) :: Action -> (PlayerId -> GameState -> Action) -> Action
+(&&+) act1 act2 player state = act1 player state `andThen` (\s2 -> app player s2 $ act2 player s2)
+
+(&&=) :: (a -> Action) -> a -> Action
+(&&=) = ($)
+
+yesNo :: DecisionType -> (Bool -> Action) -> Action
+yesNo typ cont player state =
+  decision (YesNo typ (\bool -> cont bool player state)) player state
+
+chooseOne :: DecisionType -> [Card] -> (Card -> Action) -> Action
+chooseOne typ choices cont player state =
+  decision (Choice typ choices (\card -> cont card player state)) player state
+
+chooseMany :: DecisionType -> [Card] -> ([Card] -> Bool) -> ([Card] -> Action) -> Action
+chooseMany typ choices val cont player state =
+  decision (Choices typ choices val (\chosen -> cont chosen player state)) player state
 
 
 -- Game functions
@@ -151,10 +180,9 @@ moveFrom c (Discard player) state   = updatePlayer state player (\p -> p { disca
 moveFrom c (TopOfDeck player) state = updatePlayer state player (\p -> p { deck = L.delete c $ deck p })
 moveFrom c InPlay state             = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = L.delete c $ inPlay p })
 moveFrom c Trash state              = state { trashPile = L.delete c $ trashPile state }
-moveFrom c Supply state             = state { piles = map takeFirst (piles state) }
+moveFrom c Supply state             = state { piles = map takeOne (piles state) }
   where
-    takeFirst [] = []
-    takeFirst (x:xs) = if x == c then xs else x:xs
+    takeOne (card,num) = (card,if card == c then num -1 else num)
 
 transfer :: Card -> Location -> Location -> GameState -> GameState
 transfer c from to state = moveTo c to (moveFrom c from state)
@@ -192,10 +220,20 @@ opponents state player = filter ((/= player) . name) $ players state
 
 
 availableCards :: GameState -> [Card]
-availableCards g = concatMap (take 1) (piles g)
+availableCards g = map fst $ filter ((>0) . snd) (piles g)
+
+supply :: GameState -> [(Card, Int)]
+supply state = piles state
 
 inSupply :: GameState -> Card -> Bool
 inSupply state card = card `elem` availableCards state
+
+numInSupply :: GameState -> Card -> Int
+numInSupply state card = maybe 0 snd (L.find ((==card).fst) (piles state))
+
+colonyGame :: GameState -> Bool
+colonyGame state = "Colony" `elem` map (cardName . fst) (piles state)
+
 
 hasCardType :: Card -> CardType -> Bool
 hasCardType card typ = typ `elem` types card
@@ -248,7 +286,7 @@ summarizeCards cards =
   cards |>
   L.sort |>
   L.group |>
-  L.map (\cs -> (if (length cs > 1) then show (length cs) ++ "x " else "") ++ show (head cs)) |>
+  L.map (\cs -> (if (length cs > 1) then show (length cs) ++ " " else "") ++ show (head cs)) |>
   L.intersperse ", " |>
   concat
 

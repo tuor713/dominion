@@ -52,12 +52,12 @@ decision2prompt player (YesNo typ f) = (message player (decisionType2message typ
 decision2prompt player (Choice typ choices f) =
   (message player (decisionType2message typ ++ " " ++ summarizeCards choices), (fmap f) . parse)
   where
-    parse s = lookupCard s >>= \x -> if x `elem` choices then Just x else Nothing
+    parse s = maybeCard s >>= \x -> if x `elem` choices then Just x else Nothing
 
 decision2prompt player (Choices typ choices validator f) =
   (message player (decisionType2message typ ++ " " ++ summarizeCards choices), (fmap f) . parse)
   where
-    parse s = if s == "all" then Just choices else (sequence $ map lookupCard (wordsBy (==',') s))
+    parse s = if s == "all" then Just choices else (sequence $ map maybeCard (wordsBy (==',') s))
               >>= \xs -> if contains (list2MultiSet choices) (list2MultiSet xs) then Just xs else Nothing
               >>= \xs -> if validator xs then Just xs else Nothing
 
@@ -94,7 +94,7 @@ isStandardVictory c
 mkGame :: [String] -> [Card] -> StdGen -> GameState
 mkGame names kingdomCards gen =
   GameState { players = players,
-              piles = map (\c -> replicate (noInPile c) c) (standardCards ++ kingdomCards),
+              piles = map (\c -> (c, noInPile c)) (standardCards ++ kingdomCards),
               trashPile = [],
               turn = newTurn,
               ply = 1,
@@ -116,6 +116,61 @@ mkGame names kingdomCards gen =
 
     (players,gen') = St.runState (sequence $ map mkPlayer names) gen
 
+
+-- Simulation running
+
+runSimulation :: Map.Map PlayerId Bot -> [GameState] -> GameStep -> IO [GameState]
+runSimulation bots accu (State state)
+  | finished state = return (reverse (state:accu))
+  | otherwise = runSimulation bots (state:accu) $ playTurn (activePlayerId state) state
+
+runSimulation bots accu (Interaction player state (Info _ next)) =
+  runSimulation bots accu next
+
+runSimulation bots accu (Interaction player state interaction) =
+  do
+    next <- (bots Map.! player) (visibleState player state) interaction
+    runSimulation bots accu next
+
+-- Sample run:
+-- runSimulations [("Alice",basicBigMoney), ("Bob",betterBigMoney)] (map lookupCard ["market", "library", "smithy", "cellar", "chapel", "witch", "village", "laboratory", "festival", "festival"]) 100 >>= stats
+runSimulations :: [(PlayerId,Bot)] -> [Card] -> Int -> IO [[GameState]]
+runSimulations _ _ 0 = return []
+-- TODO this is horribly unlazy
+runSimulations bots tableau num =
+  do
+    gen <- newStdGen
+    let initial = mkGame (map fst bots) tableau gen
+    states <- runSimulation (Map.fromList bots) [initial] $ State initial
+    sims <- runSimulations bots tableau (num-1)
+    return (states:sims)
+
+
+-- Stats
+
+frequencies :: Ord a => [a] -> [(a,Int)]
+frequencies xs = map (,1) xs |> Map.fromListWith (+) |> Map.toList |> L.sortOn (negate . snd)
+
+winRatio games =
+  games |>
+  map last |>
+  map winner |>
+  Maybe.catMaybes |>
+  frequencies |>
+  map (\(p,num) -> (p, fromIntegral num / fromIntegral (length games)))
+  where
+    winner state
+      | points one == points two = Just "Tie" -- Draw
+      | otherwise = Just $ name one
+      where
+        (one:two:_) = players state |> L.sortOn points |> reverse
+
+stats :: [[GameState]] -> IO ()
+stats games =
+  do
+    putStrLn $ "No of games: " ++ show (length games)
+    putStrLn $ "Wins ratios: " ++ show (winRatio games)
+    putStrLn $ "Length of games: " ++ show (L.sortOn fst $ frequencies (map (turnNo . last) games))
 
 
 runGameConsole :: Map.Map PlayerId Bot -> GameStep -> IO ()
@@ -151,12 +206,12 @@ runGameConsole bots (Interaction player state decision@(Decision _)) =
 
 
 {- Sample invocation (ghci)
-   playOnConsole [("Alice",human "Alice"),("Bob",human "Bob")] (map (Maybe.fromJust . lookupCard) ["cellar", "market", "militia", "mine", "moat", "remodel", "smithy", "village", "woodcutter", "workshop"])
-   playOnConsole [("Alice",human "Alice"), ("Bob",bigMoneyBot Nothing)] (map (Maybe.fromJust . lookupCard) ["market", "library", "smithy", "laboratory", "village", "witch", "thief", "bureaucrat", "militia", "festival", "adventurer", "workshop", "feast", "gardens", "woodcutter", "chapel", "cellar", "moat", "mine", "chancellor", "moneylender", "remodel", "council room", "throne room", "spy"])
-   playOnConsole [("Alice",bigMoneyBot Nothing), ("Bob",bigMoneyBot Nothing)] (map (Maybe.fromJust . lookupCard) ["market", "library", "smithy"])
+   playOnConsole [("Alice",human "Alice"),("Bob",human "Bob")] ["cellar", "market", "militia", "mine", "moat", "remodel", "smithy", "village", "woodcutter", "workshop"]
+   playOnConsole [("Alice",human "Alice"), ("Bob",betterBigMoney)] ["market", "library", "smithy", "laboratory", "village", "witch", "thief", "bureaucrat", "militia", "chapel"]
+   playOnConsole [("Alice",basicBigMoney), ("Bob",betterBigMoney)] ["market", "library", "smithy"]
 -}
-playOnConsole :: [(String,Bot)] -> [Card] -> IO ()
+playOnConsole :: [(String,Bot)] -> [String] -> IO ()
 playOnConsole players cards =
   do
     gen <- newStdGen
-    runGameConsole (Map.fromList players) $ State $ mkGame (map fst players) cards gen
+    runGameConsole (Map.fromList players) $ State $ mkGame (map fst players) (map lookupCard cards) gen
