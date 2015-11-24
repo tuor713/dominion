@@ -13,5 +13,5 @@ Two excellent simulators are out there that implement much more cards,
 much more reliably and have loads of strategies defined.
 
 - [Geronimoo's simulator](https://github.com/Geronimoo/Geronimoo-s-Dominion-Simulator)
-- [Dominate](https://github.com/rspeer/dominiate)
+- [Dominiate](https://github.com/rspeer/dominiate)
 
