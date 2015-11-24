@@ -1,12 +1,19 @@
 {-# LANGUAGE TupleSections #-}
 module Dominion.Model where
 
+import qualified Control.Monad.Random as MRandom
 import qualified Control.Monad.Trans.State.Lazy as St
 import qualified Data.List as L
 import qualified Data.Map.Strict as Map
+import qualified Data.Map.Lazy as LMap
 import qualified Data.Maybe as Maybe
 import System.Random (StdGen, mkStdGen, randomR, newStdGen)
 
+
+import Data.Array.ST
+import Control.Monad
+import Control.Monad.ST
+import Data.STRef
 
 data CardType = Action | Treasure | Victory | CurseType {- This is a bit of a hack -} |
     Reaction | Attack | Duration |
@@ -69,7 +76,7 @@ data TurnState = TurnState { money :: Int,
 data GameState = GameState { players :: [Player],
                              trashPile :: [Card],
                              turn :: TurnState,
-                             piles :: [(Card,Int)],
+                             piles :: Map.Map Card Int,
                              ply :: Int,
                              -- TODO Is there a better to do this?
                              gen :: StdGen
@@ -106,7 +113,7 @@ instance Show GameState where
       (players g) ++
     "  }\n" ++
     "  supply: [ " ++
-    (summarizeCards $ concatMap (\(c,n) -> replicate n c) (piles g)) ++
+    (summarizeCards $ concatMap (\(c,n) -> replicate n c) (Map.toList (piles g))) ++
     " ]\n" ++
     "  turn: { " ++
     "actions: " ++ show (actions (turn g)) ++ ", buys: " ++ show (buys (turn g)) ++ ", money: " ++ show (money (turn g)) ++
@@ -180,7 +187,7 @@ moveFrom c (Discard player) state   = updatePlayer state player (\p -> p { disca
 moveFrom c (TopOfDeck player) state = updatePlayer state player (\p -> p { deck = L.delete c $ deck p })
 moveFrom c InPlay state             = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = L.delete c $ inPlay p })
 moveFrom c Trash state              = state { trashPile = L.delete c $ trashPile state }
-moveFrom c Supply state             = state { piles = map takeOne (piles state) }
+moveFrom c Supply state             = state { piles = Map.adjust (+(-1)) c (piles state) }
   where
     takeOne (card,num) = (card,if card == c then num -1 else num)
 
@@ -220,19 +227,16 @@ opponents state player = filter ((/= player) . name) $ players state
 
 
 availableCards :: GameState -> [Card]
-availableCards g = map fst $ filter ((>0) . snd) (piles g)
+availableCards g = Map.keys $ Map.filter (>0) (piles g)
 
 supply :: GameState -> [(Card, Int)]
-supply state = piles state
+supply state = Map.toList $ piles state
 
 inSupply :: GameState -> Card -> Bool
-inSupply state card = card `elem` availableCards state
+inSupply state card = maybe False (>0) (Map.lookup card (piles state))
 
 numInSupply :: GameState -> Card -> Int
-numInSupply state card = maybe 0 snd (L.find ((==card).fst) (piles state))
-
-colonyGame :: GameState -> Bool
-colonyGame state = "Colony" `elem` map (cardName . fst) (piles state)
+numInSupply state card = maybe 0 id (Map.lookup card (piles state))
 
 
 hasCardType :: Card -> CardType -> Bool
@@ -268,14 +272,32 @@ visibleState id state = state { players = map anonymize (players state)}
 
 -- Utilities
 
-shuffle :: [a] -> RandomState [a]
-shuffle ys = St.state $ \gen -> shuffle' gen ys []
+-- TODO surprisingly shuffling is one of the most time-intensive bits and the libraries
+-- don't seem to be too fast :(
+-- see also: https://wiki.haskell.org/Random_shuffle
+shuffle' :: [a] -> StdGen -> ([a],StdGen)
+shuffle' xs gen = runST (do
+        g <- newSTRef gen
+        let randomRST lohi = do
+              (a,s') <- liftM (randomR lohi) (readSTRef g)
+              writeSTRef g s'
+              return a
+        ar <- newArray n xs
+        xs' <- forM [1..n] $ \i -> do
+                j <- randomRST (i,n)
+                vi <- readArray ar i
+                vj <- readArray ar j
+                writeArray ar j vi
+                return vj
+        gen' <- readSTRef g
+        return (xs',gen'))
   where
-    shuffle' g [] acc = (acc,g)
-    shuffle' g l acc = shuffle' gnew (lead ++ xs) (x:acc)
-      where
-        (k,gnew) = randomR (0, length l - 1) g
-        (lead, x:xs) = splitAt k l
+    n = length xs
+    newArray :: Int -> [a] -> ST s (STArray s Int a)
+    newArray n xs =  newListArray (1,n) xs
+
+shuffle :: [a] -> RandomState [a]
+shuffle xs = St.state $ \gen -> shuffle' xs gen
 
 -- Clojure / F# style threading
 (|>) :: a -> (a -> b) -> b
@@ -425,5 +447,5 @@ playTurn name state =
 
 finished :: GameState -> Bool
 finished state =
-  L.notElem "Province" (map cardName (availableCards state))
-  || length (filter null (piles state)) >= 3
+  numInSupply state Card { cardName = "Province" } == 0
+  || Map.size (Map.filter (==0) (piles state)) >= 3

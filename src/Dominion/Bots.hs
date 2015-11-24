@@ -46,6 +46,7 @@ partialBot bot = simpleBot (\state decision option -> Maybe.fromMaybe (defaultBo
 alt :: PartialBot -> PartialBot -> PartialBot
 alt bot1 bot2 state decision opt = bot1 state decision opt `M.mplus` bot2 state decision opt
 
+
 buysC :: Card -> (GameState -> Bool) -> PartialBot
 buysC card pred state (Choice QBuy choices f) _
   | card `elem` choices && pred state = Just $ f card
@@ -61,6 +62,9 @@ buysIf cardName pred = buysC (lookupCard cardName) pred
 
 -- Utility Predicates
 
+colonyGame :: GameState -> Bool
+colonyGame state = Map.member colony (piles state)
+
 moneyValue :: Card -> Int
 moneyValue Card { cardName = "Gold" } = 3
 moneyValue Card { cardName = "Silver" } = 2
@@ -75,7 +79,13 @@ gainsToEndGame state = min cardsToThreePile (min provinceLeft colonyLeft)
   where
     provinceLeft = numInSupply state province
     colonyLeft = if colonyGame state then numInSupply state colony else 100
-    cardsToThreePile = sum $ take 3 $ L.sort $ map snd $ supply state
+    cardsToThreePile = min3 100 100 100 $ Map.elems $ piles state
+    min3 a b c [] = a+b+c
+    min3 a b c (x:xs)
+      | x >= c = min3 a b c xs
+      | x >= b = min3 a b x xs
+      | x >= a = min3 a x b xs
+      | otherwise = min3 x a b xs
 
 deckSize :: GameState -> Int
 deckSize state = length $ allCards $ activePlayer state
@@ -93,14 +103,14 @@ basicBigMoney = partialBot $ buys "Province" `alt` buys "Gold" `alt` buys "Silve
 betterBigMoney = partialBot $
   buysIf "Province" ((>15) . totalMoney)
   `alt` buysIf "Duchy" ((<=5) . gainsToEndGame)
-  `alt` buysIf "Chapel" ((<=2) . gainsToEndGame)
+  `alt` buysIf "Estate" ((<=2) . gainsToEndGame)
   `alt` buys "Gold"
   `alt` buys "Silver"
 
 bigSmithy = partialBot $
   buysIf "Province" ((>15) . totalMoney)
   `alt` buysIf "Duchy" ((<=5) . gainsToEndGame)
-  `alt` buysIf "Chapel" ((<=2) . gainsToEndGame)
+  `alt` buysIf "Estate" ((<=2) . gainsToEndGame)
   `alt` buys "Gold"
   `alt` buysIf "Smithy" (\s -> let num = numInDeck "Smithy" s
                                in num < 1 || (num < 2 && deckSize s >= 16))
@@ -109,7 +119,7 @@ bigSmithy = partialBot $
 doubleJack = partialBot $
   buysIf "Province" ((>15) . totalMoney)
   `alt` buysIf "Duchy" ((<=5) . gainsToEndGame)
-  `alt` buysIf "Chapel" ((<=2) . gainsToEndGame)
+  `alt` buysIf "Estate" ((<=2) . gainsToEndGame)
   `alt` buys "Gold"
   `alt` buysIf "Jack of All Trades" ((<2) . (numInDeck "Jack of All Trades"))
   `alt` buys "Silver"

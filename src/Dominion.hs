@@ -9,7 +9,7 @@ import Prelude hiding (interact)
 import qualified Control.Monad.Trans.State.Lazy as St
 import qualified Data.List as L
 import System.Random (StdGen, mkStdGen, randomR, newStdGen)
-import System.Random.Shuffle (shuffle')
+import qualified System.Random.Shuffle as Shuffle
 import Data.List.Split (wordsBy)
 import qualified Data.Map.Strict as Map
 import qualified Data.Maybe as Maybe
@@ -95,7 +95,7 @@ isStandardVictory c
 mkGame :: [String] -> [Card] -> StdGen -> GameState
 mkGame names kingdomCards gen =
   GameState { players = players,
-              piles = map (\c -> (c, noInPile c)) (standardCards ++ kingdomCards),
+              piles = Map.fromList $ map (\c -> (c, noInPile c)) (standardCards ++ kingdomCards),
               trashPile = [],
               turn = newTurn,
               ply = 1,
@@ -141,7 +141,7 @@ runSimulations _ _ 0 = return []
 runSimulations bots tableau num =
   do
     gen <- newStdGen
-    let initial = mkGame (shuffle' (map fst bots) (length bots) gen) tableau gen
+    let initial = mkGame (Shuffle.shuffle' (map fst bots) (length bots) gen) tableau gen
     states <- runSimulation (Map.fromList bots) [initial] $ State initial
     sims <- runSimulations bots tableau (num-1)
     return (states:sims)

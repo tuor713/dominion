@@ -2,6 +2,10 @@
 module Main where
 
 import Dominion
+import Dominion.Model
+import Dominion.Cards
+import Dominion.Bots
+
 import Control.Applicative
 import Control.Monad
 import Control.Monad.IO.Class
@@ -15,10 +19,20 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as E
 import System.Log.FastLogger
 
+{-
 main :: IO ()
 main = do
   logset <- newStdoutLoggerSet 10000
   quickHttpServe (site logset)
+-}
+
+main :: IO ()
+main =
+  runSimulations [("Alice",bigSmithy), ("Bob",doubleJack)]
+    (map lookupCard ["market", "library", "smithy", "cellar", "chapel", "witch",
+                     "village", "laboratory", "festival", "jack of all trades"])
+    10000
+  >>= stats
 
 data Message = Message { message :: T.Text } deriving (Show)
 
@@ -27,7 +41,10 @@ instance J.FromJSON Message where
   parseJSON _ = mzero
 
 instance J.FromJSON Card where
-  parseJSON (J.Object v) = read <$> (v J..: "card")
+  parseJSON (J.Object v) =
+    do
+      s <- v J..: "card"
+      return $ lookupCard s
   parseJSON _ = mzero
 
 postHandler :: LoggerSet -> Snap ()
