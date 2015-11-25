@@ -40,11 +40,11 @@ decisionType2message QTreasures = "Play treasures?"
 decisionType2message QBuy = "Buy a card?"
 decisionType2message QGain = "Gain a card?"
 decisionType2message QTrash = "Trash a card?"
-decisionType2message QDiscard = "Discard a card?"
-decisionType2message (QOption card) = "Use " ++ cardName card ++ "'s effect?"
+decisionType2message (QDiscard _) = "Discard a card?"
+decisionType2message QOption = "Use effect?"
 
 decision2prompt :: PlayerId -> Decision -> (String, String -> Maybe GameStep)
-decision2prompt player (YesNo typ f) = (message player (decisionType2message typ ++ " [yn]"), (fmap f) . parse)
+decision2prompt player (YesNo typ card f) = (message player (decisionType2message typ ++ " " ++ cardName card ++ " [yn]"), (fmap f) . parse)
   where
     parse "y" = Just True
     parse "n" = Just False

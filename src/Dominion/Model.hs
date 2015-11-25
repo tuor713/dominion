@@ -82,10 +82,22 @@ data GameState = GameState { players :: [Player],
                              gen :: StdGen
                              }
 
-data DecisionType = QPlay | QBuy | QDraw | QTreasures | QTrash | QGain | QDiscard |
-  QOption Card
+-- Decision & decision type are not rich enough for smart bots
+-- they need to be able to known more about what the decision really is
+-- What drives a decision:
+-- > the current state
+-- > who decides
+-- > who & what triggered the decision (card, effect)
+-- > what is decided (the crux)
+--   > what action
+--   > what target
 
-data Decision = YesNo DecisionType (Bool -> GameStep) |
+
+
+
+data DecisionType = QPlay | QBuy | QDraw | QTreasures | QTrash | QGain | QDiscard Location | QOption
+
+data Decision = YesNo DecisionType Card (Bool -> GameStep) |
                 Choice DecisionType [Card] (Card -> GameStep) |
                 Choices DecisionType [Card] ([Card] -> Bool) ([Card] -> GameStep) |
                 Optional Decision GameStep
@@ -133,7 +145,7 @@ optDecision :: Decision -> Action
 optDecision decision player state = Interaction player state (Decision (Optional decision (State state)))
 
 andThenI :: Decision -> (GameState -> GameStep) -> Decision
-andThenI (YesNo caption cont) f = YesNo caption (\b -> cont b `andThen` f)
+andThenI (YesNo caption card cont) f = YesNo caption card (\b -> cont b `andThen` f)
 andThenI (Choice caption cards cont) f = Choice caption cards (\c -> cont c `andThen` f)
 andThenI (Choices caption cards validator cont) f = Choices caption cards validator (\cs -> cont cs `andThen` f)
 andThenI (Optional inner fallback) f = Optional (inner `andThenI` f) (fallback `andThen` f)
@@ -158,9 +170,9 @@ app p s action = action p s
 (&&=) :: (a -> Action) -> a -> Action
 (&&=) = ($)
 
-yesNo :: DecisionType -> (Bool -> Action) -> Action
-yesNo typ cont player state =
-  decision (YesNo typ (\bool -> cont bool player state)) player state
+yesNo :: DecisionType -> Card -> (Bool -> Action) -> Action
+yesNo typ card cont player state =
+  decision (YesNo typ card (\bool -> cont bool player state)) player state
 
 chooseOne :: DecisionType -> [Card] -> (Card -> Action) -> Action
 chooseOne typ choices cont player state =

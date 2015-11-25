@@ -18,6 +18,7 @@ import qualified Data.Aeson as J
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as E
 import System.Log.FastLogger
+import qualified System.Environment as Env
 
 {-
 main :: IO ()
@@ -28,11 +29,15 @@ main = do
 
 main :: IO ()
 main =
-  runSimulations [("Alice",bigSmithy), ("Bob",doubleJack)]
-    (map lookupCard ["market", "library", "smithy", "cellar", "chapel", "witch",
-                     "village", "laboratory", "festival", "jack of all trades"])
-    10000
-  >>= stats
+  do
+    args <- Env.getArgs
+    traces <- runSimulations [("Alice",bigSmithy "Alice"), ("Bob",doubleJack "Bob")]
+      (map lookupCard ["market", "library", "smithy", "cellar", "chapel", "witch",
+                       "village", "laboratory", "festival", "jack of all trades"])
+      (case args of
+        (x:_) -> read x
+        [] -> 10000)
+    stats traces
 
 data Message = Message { message :: T.Text } deriving (Show)
 

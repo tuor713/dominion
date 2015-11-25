@@ -17,41 +17,48 @@ type Bot = GameState -> Interaction -> IO GameStep
 
 -- Utilities for defining bots
 
-type SimpleBot = GameState -> Decision -> Maybe GameStep -> GameStep
-type PartialBot = GameState -> Decision -> Maybe GameStep -> Maybe GameStep
+type SimpleBot = PlayerId -> GameState -> Decision -> Maybe GameStep -> GameStep
+type PartialBot = PlayerId -> GameState -> Decision -> Maybe GameStep -> Maybe GameStep
 
-simpleBot :: SimpleBot -> Bot
-simpleBot bot state (Info _ next) = return next
-simpleBot bot state (Decision (Optional inner next)) = return $ bot state inner (Just next)
-simpleBot bot state (Decision decision) = return $ bot state decision Nothing
+simpleBot :: SimpleBot -> PlayerId -> Bot
+simpleBot bot id state (Info _ next) = return next
+simpleBot bot id state (Decision (Optional inner next)) = return $ bot id state inner (Just next)
+simpleBot bot id state (Decision decision) = return $ bot id state decision Nothing
 
 defaultBot :: SimpleBot
-defaultBot _ (Choices QTreasures choices _ f) _ = f choices
-defaultBot _ (Choice QPlay actions f) _ = f (head actions)
-defaultBot _ (Choice QTrash cards f) alt
+defaultBot _ _ (Choices QTreasures choices _ f) _ = f choices
+defaultBot _ _ (Choice QPlay actions f) _ = f (head actions)
+defaultBot _ state (Choice QTrash cards f) alt
   | curse `elem` cards = f curse
-  | estate `elem` cards = f estate
+  | estate `elem` cards && gainsToEndGame state > 2 = f estate
   | copper `elem` cards = f copper
   | otherwise = case alt of
                   Just next -> next
                   Nothing -> f (head cards)
-defaultBot _ _ (Just next) = next
-defaultBot _ (YesNo _ f) _ = f False
-defaultBot _ (Choices _ choices val f) _ = f []
-defaultBot _ (Choice _ choices f) _ = f (head choices)
 
-partialBot :: PartialBot -> Bot
-partialBot bot = simpleBot (\state decision option -> Maybe.fromMaybe (defaultBot state decision option) $ bot state decision option)
+defaultBot ownId _ (YesNo (QDiscard (TopOfDeck p)) card f) _
+  | ownId == p = f (not desirable)
+  | otherwise = f desirable
+  where
+    desirable = card /= copper && card /= curse && card /= estate && card /= duchy && card /= province
+
+defaultBot _ _ _ (Just next) = next
+defaultBot _ _ (YesNo _ _ f) _ = f False
+defaultBot _ _ (Choices _ choices val f) _ = f []
+defaultBot _ _ (Choice _ choices f) _ = f (head choices)
+
+partialBot :: PartialBot -> PlayerId -> Bot
+partialBot bot id = simpleBot (\id state decision option -> Maybe.fromMaybe (defaultBot id state decision option) $ bot id state decision option) id
 
 alt :: PartialBot -> PartialBot -> PartialBot
-alt bot1 bot2 state decision opt = bot1 state decision opt `M.mplus` bot2 state decision opt
+alt bot1 bot2 id state decision opt = bot1 id state decision opt `M.mplus` bot2 id state decision opt
 
 
 buysC :: Card -> (GameState -> Bool) -> PartialBot
-buysC card pred state (Choice QBuy choices f) _
+buysC card pred _ state (Choice QBuy choices f) _
   | card `elem` choices && pred state = Just $ f card
   | otherwise = Nothing
-buysC _ _ _ _ _ = Nothing
+buysC _ _ _ _ _ _ = Nothing
 
 buys :: String -> PartialBot
 buys cardName = buysC (lookupCard cardName) (const True)

@@ -111,14 +111,14 @@ playAttack attack attacker state = seqSteps checkAttack (opponentNames state att
     -- TODO can we do this more elegantly, triggers again?
     checkAttack op state
       | moat `elem` h =
-        decision (YesNo (QOption moat) (\b -> if b then State state else attack op state)) op state
+        decision (YesNo QOption moat (\b -> if b then State state else attack op state)) op state
       | otherwise = attack op state
       where
         h = hand $ playerByName state op
 
 cellar :: Action
 cellar = plusActions 1
-  &&+ \p s -> chooseMany QDiscard (hand (playerByName s p)) (const True)
+  &&+ \p s -> chooseMany (QDiscard (Hand p)) (hand (playerByName s p)) (const True)
   &&= \cards -> seqActions (\c -> discard c (Hand p)) cards
   &&& plusCards (length cards)
 
@@ -130,7 +130,7 @@ chapel player state = decision (Choices QTrash (hand (playerByName state player)
 
 chancellor :: Action
 chancellor player state = plusMoney 2 player state
-  `andThen` \s2 -> decision (YesNo (QOption (cardData Map.! "chancellor")) (cont s2)) player s2
+  `andThen` \s2 -> decision (YesNo QOption (cardData Map.! "chancellor") (cont s2)) player s2
   where
     cont state b = State $ if b then updatePlayer state player
                                        (\p -> p { deck = [], discardPile = deck p ++ discardPile p })
@@ -147,7 +147,7 @@ bureaucrat player state = (gainTo silver (TopOfDeck player) &&& playAttack treas
     treasureToDeck op state
       | null treasures = info (op ++ " reveals hand " ++ summarizeCards h) allPlayerId state
       -- TODO QDiscard is an approximation only
-      | otherwise = decision (Choice QDiscard treasures cont) op state
+      | otherwise = decision (Choice (QDiscard (Hand op)) treasures cont) op state
       where
         h = hand $ playerByName state op
         treasures = filter isTreasure h
@@ -165,7 +165,7 @@ militia player state = (plusMoney 2 &&& playAttack discardTo3) player state
   where
     discardTo3 op state
       | length h <= 3 = State state
-      | otherwise = decision (Choices QDiscard h (\cs -> length h == length cs + 3) cont) op state
+      | otherwise = decision (Choices (QDiscard (Hand op)) h (\cs -> length h == length cs + 3) cont) op state
       where
         h = hand $ playerByName state op
         cont cards = seqSteps (\c -> discard c (Hand op) op) cards state
@@ -194,7 +194,7 @@ spy player state = (plusCards 1 &&& plusActions 1 &&& spyAction &&& playAttack s
     spyAction attackee state = maybe (State state) (doSpy attackee) $ ensureCanDraw 1 state attackee
     doSpy attackee state =
       info (attackee ++ " reveals " ++ cardName top) allPlayerId state
-      `andThen` decision (YesNo QDiscard cont) player
+      `andThen` decision (YesNo (QDiscard (TopOfDeck player)) top cont) player
       where
         cont b = if b then discard top (TopOfDeck attackee) attackee state else State state
         top = head $ deck $ playerByName state attackee
@@ -210,7 +210,7 @@ thief player state = playAttack doThief player state
       where
         top = take 2 $ hand $ playerByName state op
         cont card = trash card (TopOfDeck op) op state
-          `andThen` \s -> decision (YesNo QGain (\b -> if b then gainFrom card Trash player s else State s)) player s
+          `andThen` \s -> decision (YesNo QGain card (\b -> if b then gainFrom card Trash player s else State s)) player s
           `andThen` \s2 -> seqSteps (\c -> discard c (TopOfDeck op) op) (L.delete card top) s2
 
 throneRoom :: Action
@@ -232,7 +232,7 @@ library aside name state
     finalState = updatePlayer state name (\p -> p { discardPile = aside ++ discardPile p})
     draw1 s2
       | not (canDraw (activePlayer s2)) = State s2
-      | isAction card = decision (YesNo QDraw cont) name s2
+      | isAction card = decision (YesNo QDraw card cont) name s2
       | otherwise = next
       where
         cont True = next
@@ -286,7 +286,8 @@ jackOfAllTrades :: Action
 jackOfAllTrades = gain silver &&& spyTop &&& drawTo5 &&& optTrash
   where
     spyTop player state = maybe (State state) (chooseKeepDiscard player) (ensureCanDraw 1 state player)
-    chooseKeepDiscard player state = (info ("Top of deck is " ++ cardName top) &&& decision (YesNo QDiscard cont)) player state
+    chooseKeepDiscard player state = (info ("Top of deck is " ++ cardName top)
+      &&& decision (YesNo (QDiscard (TopOfDeck player)) top cont)) player state
       where
         top = head $ deck $ playerByName state player
         cont b = if b then discard top (TopOfDeck player) player state else State state
