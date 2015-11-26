@@ -36,7 +36,8 @@ type RandomState a = St.State StdGen a
 -- it would have an identity, and a location (and could be traced throughout the game)
 -- > it allows cards to be transferred without keeping location as a separate concept
 -- > it allows precise implementation of concepts like, 'if X then do Y to this card'
-data Card = Card { cardName :: String,
+data Card = Card { cardId :: Int,
+                   cardName :: String,
                    edition :: Edition,
                    -- TODO this only works for Base
                    -- breaks for cards like peddlar having state dependent cost
@@ -51,7 +52,7 @@ instance Show Card where
   show = cardName
 
 instance Eq Card where
-  (==) c1 c2 = cardName c1 == cardName c2
+  (==) c1 c2 = cardId c1 == cardId c2
 
 instance Ord Card where
   c1 <= c2 = show c1 <= show c2
@@ -273,7 +274,7 @@ points s = sum $ map (`cardPoints` s) $ allCards s
 turnNo :: GameState -> Int
 turnNo g = ((ply g + 1) `div` length (players g))
 
-unknown = Card "Unknown" Base 0 [] (\_ -> 0) pass
+unknown = Card (-1) "Unknown" Base 0 [] (\_ -> 0) pass
 
 -- Removes invisble information from the state such as opponents hands
 -- It assumes some intelligent information retention such as about own deck content
@@ -468,5 +469,5 @@ playTurn name state =
 
 finished :: GameState -> Bool
 finished state =
-  numInSupply state Card { cardName = "Province" } == 0
+  numInSupply state Card { cardId = 5, cardName = "Province" } == 0
   || Map.size (Map.filter (==0) (piles state)) >= 3

@@ -13,11 +13,11 @@ import System.Random (StdGen, mkStdGen, randomR, newStdGen)
 
 noPoints = const 0
 
-treasure name cost money edition = Card name edition cost [Treasure] noPoints (plusMoney money)
-action name cost effect edition = Card name edition cost [Action] noPoints effect
-attack name cost effect edition = Card name edition cost [Action, Attack] noPoints effect
-victory name cost points edition = Card name edition cost [Victory] (const points) pass
-carddef name cost types points effect edition = Card name edition cost types points effect
+treasure id name cost money edition = Card id name edition cost [Treasure] noPoints (plusMoney money)
+action id name cost effect edition = Card id name edition cost [Action] noPoints effect
+attack id name cost effect edition = Card id name edition cost [Action, Attack] noPoints effect
+victory id name cost points edition = Card id name edition cost [Victory] (const points) pass
+carddef id name cost types points effect edition = Card id name edition cost types points effect
 
 
 cardData :: Map.Map String Card
@@ -32,7 +32,6 @@ lookupCard name = cardData Map.! (map toLower name)
 
 
 -- Dummy card for hidden information
-unknown = Card "Unknown" Base 0 [] noPoints pass
 curse = cardData Map.! "curse"
 
 estate = cardData Map.! "estate"
@@ -55,45 +54,45 @@ platinum = cardData Map.! "platinum"
 -- Base Edition
 
 baseCards = map ($ Base)
-  [treasure "Copper" 0 1,
-   treasure "Silver" 3 2,
-   treasure "Gold" 6 3,
+  [treasure 0 "Copper" 0 1,
+   treasure 1 "Silver" 3 2,
+   treasure 2 "Gold" 6 3,
 
-   victory "Estate" 2 1,
-   victory "Duchy" 5 3,
-   victory "Province" 8 6,
+   victory 3 "Estate" 2 1,
+   victory 4 "Duchy" 5 3,
+   victory 5 "Province" 8 6,
 
-   carddef "Curse" 0 [CurseType] (const (-1)) pass,
+   carddef 6 "Curse" 0 [CurseType] (const (-1)) pass,
 
-   action "Cellar" 2 cellar,
-   action "Chapel" 2 chapel,
-   carddef "Moat" 2 [Action, Reaction] (const 0) (plusCards 2),
+   action 7 "Cellar" 2 cellar,
+   action 8 "Chapel" 2 chapel,
+   carddef 9 "Moat" 2 [Action, Reaction] (const 0) (plusCards 2),
 
-   action "Chancellor" 3 chancellor,
-   action "Village" 3 (plusActions 2 &&& plusCards 1),
-   action "Woodcutter" 3 (plusBuys 1 &&& plusMoney 2),
-   action "Workshop" 3 workshop,
+   action 10 "Chancellor" 3 chancellor,
+   action 11 "Village" 3 (plusActions 2 &&& plusCards 1),
+   action 12 "Woodcutter" 3 (plusBuys 1 &&& plusMoney 2),
+   action 13 "Workshop" 3 workshop,
 
-   attack "Bureaucrat" 4 bureaucrat,
-   action "Feast" 4 feast,
-   carddef "Gardens" 4 [Victory] (\p -> length (allCards p) `quot` 10) pass,
-   attack "Militia" 4 militia,
-   action "Moneylender" 4 moneylender,
-   action "Remodel" 4 remodel,
-   action "Smithy" 4 (plusCards 3),
-   attack "Spy" 4 spy,
-   attack "Thief" 4 thief,
-   action "Throne Room" 4 throneRoom,
+   attack 14 "Bureaucrat" 4 bureaucrat,
+   action 15 "Feast" 4 feast,
+   carddef 16 "Gardens" 4 [Victory] (\p -> length (allCards p) `quot` 10) pass,
+   attack 17 "Militia" 4 militia,
+   action 18 "Moneylender" 4 moneylender,
+   action 19 "Remodel" 4 remodel,
+   action 20 "Smithy" 4 (plusCards 3),
+   attack 21 "Spy" 4 spy,
+   attack 22"Thief" 4 thief,
+   action 23 "Throne Room" 4 throneRoom,
 
-   action "Council Room" 5 councilRoom,
-   action "Festival" 5 (plusActions 2 &&& plusBuys 1 &&& plusMoney 2),
-   action "Laboratory" 5 (plusCards 2 &&& plusActions 1),
-   action "Library" 5 (library []),
-   action "Market" 5 (plusCards 1 &&& plusActions 1 &&& plusBuys 1 &&& plusMoney 1),
-   action "Mine" 5 mine,
-   attack "Witch" 5 witch,
+   action 24 "Council Room" 5 councilRoom,
+   action 25 "Festival" 5 (plusActions 2 &&& plusBuys 1 &&& plusMoney 2),
+   action 26 "Laboratory" 5 (plusCards 2 &&& plusActions 1),
+   action 27 "Library" 5 (library []),
+   action 28 "Market" 5 (plusCards 1 &&& plusActions 1 &&& plusBuys 1 &&& plusMoney 1),
+   action 29 "Mine" 5 mine,
+   attack 30 "Witch" 5 witch,
 
-   action "Adventurer" 6 (adventurer [] [])
+   action 31 "Adventurer" 6 (adventurer [] [])
    ]
 
 seqSteps :: (a -> GameState -> GameStep) -> [a] -> GameState -> GameStep
@@ -273,14 +272,14 @@ adventurer treasures others player state
 -- Prosperity
 
 prosperityCards = map ($ Prosperity)
-  [treasure "Platinum" 9 5,
-   victory "Colony" 11 10]
+  [treasure 401 "Platinum" 9 5,
+   victory 402 "Colony" 11 10]
 
 
 -- Hinterlands
 
 hinterlandCards = map ($ Hinterlands)
-  [action "Jack of All Trades" 4 jackOfAllTrades]
+  [action 601 "Jack of All Trades" 4 jackOfAllTrades]
 
 jackOfAllTrades :: Action
 jackOfAllTrades = gain silver &&& spyTop &&& drawTo5 &&& optTrash
