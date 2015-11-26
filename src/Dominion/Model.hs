@@ -101,7 +101,7 @@ data DecisionType = QPlay | QBuy | QDraw | QTreasures | QTrash | QGain | QDiscar
 
 data Decision = YesNo DecisionType Card (Bool -> GameStep) |
                 Choice DecisionType [Card] (Card -> GameStep) |
-                Choices DecisionType [Card] ([Card] -> Bool) ([Card] -> GameStep) |
+                Choices DecisionType [Card] (Int,Int) ([Card] -> GameStep) |
                 Optional Decision GameStep
 
 data Interaction = Decision Decision | Info String GameStep
@@ -149,7 +149,7 @@ optDecision decision player state = Interaction player state (Decision (Optional
 andThenI :: Decision -> (GameState -> GameStep) -> Decision
 andThenI (YesNo caption card cont) f = YesNo caption card (\b -> cont b `andThen` f)
 andThenI (Choice caption cards cont) f = Choice caption cards (\c -> cont c `andThen` f)
-andThenI (Choices caption cards validator cont) f = Choices caption cards validator (\cs -> cont cs `andThen` f)
+andThenI (Choices caption cards lohi cont) f = Choices caption cards lohi (\cs -> cont cs `andThen` f)
 andThenI (Optional inner fallback) f = Optional (inner `andThenI` f) (fallback `andThen` f)
 
 andThen :: GameStep -> (GameState -> GameStep) -> GameStep
@@ -183,9 +183,9 @@ chooseOne :: DecisionType -> [Card] -> (Card -> Action) -> Action
 chooseOne typ choices cont player state =
   decision (Choice typ choices (\card -> cont card player state)) player state
 
-chooseMany :: DecisionType -> [Card] -> ([Card] -> Bool) -> ([Card] -> Action) -> Action
-chooseMany typ choices val cont player state =
-  decision (Choices typ choices val (\chosen -> cont chosen player state)) player state
+chooseMany :: DecisionType -> [Card] -> (Int,Int) -> ([Card] -> Action) -> Action
+chooseMany typ choices lohi cont player state =
+  decision (Choices typ choices lohi (\chosen -> cont chosen player state)) player state
 
 
 -- Game functions
@@ -441,7 +441,7 @@ buyPhase name state
 
     playTreasureDecision = optDecision (Choices QTreasures
                                              treasures
-                                             (const True)
+                                             (0,length treasures)
                                              (\cards -> playAll cards name state))
                             name state
       `andThen` buyDecision

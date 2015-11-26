@@ -54,12 +54,12 @@ decision2prompt player (Choice typ choices f) =
   where
     parse s = maybeCard s >>= \x -> if x `elem` choices then Just x else Nothing
 
-decision2prompt player (Choices typ choices validator f) =
+decision2prompt player (Choices typ choices (lo,hi) f) =
   (message player (decisionType2message typ ++ " " ++ summarizeCards choices), (fmap f) . parse)
   where
     parse s = if s == "all" then Just choices else (sequence $ map maybeCard (wordsBy (==',') s))
               >>= \xs -> if contains (list2MultiSet choices) (list2MultiSet xs) then Just xs else Nothing
-              >>= \xs -> if validator xs then Just xs else Nothing
+              >>= \xs -> if lo <= length xs && length xs <= hi then Just xs else Nothing
 
 decision2prompt player (Optional inner next) = (msg, parser)
   where
@@ -120,32 +120,28 @@ mkGame names kingdomCards gen =
 
 -- Simulation running
 
-runSimulation :: Map.Map PlayerId Bot -> [GameState] -> GameStep -> IO [GameState]
+runSimulation :: Map.Map PlayerId AIBot -> [GameState] -> GameStep -> [GameState]
 runSimulation bots accu (State state)
-  | finished state = return (reverse (state:accu))
+  | finished state = reverse (state:accu)
   | otherwise = runSimulation bots (state:accu) $ playTurn (activePlayerId state) state
 
 runSimulation bots accu (Interaction player state (Info _ next)) =
   runSimulation bots accu next
 
-runSimulation bots accu (Interaction player state interaction) =
-  do
-    next <- (bots Map.! player) (visibleState player state) interaction
-    runSimulation bots accu next
+runSimulation bots accu (Interaction player state interaction) = runSimulation bots accu next
+  where
+    next = (bots Map.! player) (visibleState player state) interaction
 
 -- Sample run:
 -- runSimulations [("Alice",bigSmithy), ("Bob",betterBigMoney)] (map lookupCard ["market", "library", "smithy", "cellar", "chapel", "witch", "village", "laboratory", "festival", "festival"]) 100 >>= stats
-runSimulations :: [(PlayerId,Bot)] -> [Card] -> Int -> IO [[GameState]]
-runSimulations _ _ 0 = return []
--- TODO this is horribly unlazy
-runSimulations bots tableau num =
-  do
-    gen <- newStdGen
-    let (players,gen') = shuffle' (map fst bots) gen
-    let initial = mkGame players tableau gen
-    states <- runSimulation (Map.fromList bots) [initial] $ State initial
-    sims <- runSimulations bots tableau (num-1)
-    return (states:sims)
+runSimulations :: [(PlayerId,AIBot)] -> [Card] -> Int -> StdGen -> [[GameState]]
+runSimulations _ _ 0 _ = []
+runSimulations bots tableau num ingen = states : runSimulations bots tableau (num-1) gen''
+  where
+    (players,gen') = shuffle' (map fst bots) ingen
+    initial = mkGame players tableau gen'
+    states = runSimulation (Map.fromList bots) [initial] $ State initial
+    gen'' = gen $ last states
 
 
 -- Stats

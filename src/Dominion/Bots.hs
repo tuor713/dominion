@@ -13,6 +13,7 @@ import qualified Data.Maybe as Maybe
 --    it presupposes bots are correctly implemented and not malicious
 -- => should we include bot state or is this covered by IO monad ?
 type Bot = GameState -> Interaction -> IO GameStep
+type AIBot = GameState -> Interaction -> GameStep
 
 
 -- Utilities for defining bots
@@ -20,10 +21,27 @@ type Bot = GameState -> Interaction -> IO GameStep
 type SimpleBot = PlayerId -> GameState -> Decision -> Maybe GameStep -> GameStep
 type PartialBot = PlayerId -> GameState -> Decision -> Maybe GameStep -> Maybe GameStep
 
-simpleBot :: SimpleBot -> PlayerId -> Bot
-simpleBot bot id state (Info _ next) = return next
-simpleBot bot id state (Decision (Optional inner next)) = return $ bot id state inner (Just next)
-simpleBot bot id state (Decision decision) = return $ bot id state decision Nothing
+simpleBot :: SimpleBot -> PlayerId -> AIBot
+simpleBot bot id state (Info _ next) = next
+simpleBot bot id state (Decision (Optional inner next)) = bot id state inner (Just next)
+simpleBot bot id state (Decision decision) = bot id state decision Nothing
+
+aiBot :: AIBot -> Bot
+aiBot bot state int = return $ bot state int
+
+
+-- Default AI
+
+-- Default predicate to rate a card, not context sensitive
+cardScore :: Card -> Int
+cardScore card
+  | card == curse = 0
+  | card == estate = 5
+  | card == copper = 10
+  | card == silver = 50
+  | card == gold = 100
+  | card == cSmithy = 60
+  | otherwise = 40
 
 defaultBot :: SimpleBot
 defaultBot _ _ (Choices QTreasures choices _ f) _ = f choices
@@ -42,17 +60,27 @@ defaultBot ownId _ (YesNo (QDiscard (TopOfDeck p)) card f) _
   where
     desirable = card /= copper && card /= curse && card /= estate && card /= duchy && card /= province
 
+-- Default choice take the alternative
 defaultBot _ _ _ (Just next) = next
+
+-- Bad or blind choices
+defaultBot pid _ (Choices (QDiscard (Hand p)) choices (lo,hi) f) _
+  | pid == p = f $ take lo $ L.sortOn cardScore choices
+  | otherwise = f $ take hi $ L.sortOn (negate . cardScore) choices
+
+
 defaultBot _ _ (YesNo _ _ f) _ = f False
-defaultBot _ _ (Choices _ choices val f) _ = f []
+defaultBot _ _ (Choices _ choices (lo,hi) f) _ = f (take lo choices)
 defaultBot _ _ (Choice _ choices f) _ = f (head choices)
 
-partialBot :: PartialBot -> PlayerId -> Bot
+
+-- Behavioural traits
+
+partialBot :: PartialBot -> PlayerId -> AIBot
 partialBot bot id = simpleBot (\id state decision option -> Maybe.fromMaybe (defaultBot id state decision option) $ bot id state decision option) id
 
 alt :: PartialBot -> PartialBot -> PartialBot
 alt bot1 bot2 id state decision opt = bot1 id state decision opt `M.mplus` bot2 id state decision opt
-
 
 buysC :: Card -> (GameState -> Bool) -> PartialBot
 buysC card pred _ state (Choice QBuy choices f) _
@@ -103,11 +131,11 @@ numInDeck name state = length $ filter (==card) $ allCards $ activePlayer state
   where
     card = lookupCard name
 
--- Actual Bots
+
+-- Actual Bots - mostly taken from dominiate
 
 basicBigMoney = partialBot $ buys "Province" `alt` buys "Gold" `alt` buys "Silver"
 
--- Weights taken from dominate
 betterBigMoney = partialBot $
   buysIf "Province" ((>15) . totalMoney)
   `alt` buysIf "Duchy" ((<=5) . gainsToEndGame)
@@ -131,3 +159,14 @@ doubleJack = partialBot $
   `alt` buys "Gold"
   `alt` buysIf "Jack of All Trades" ((<2) . (numInDeck "Jack of All Trades"))
   `alt` buys "Silver"
+
+doubleMilitia = partialBot $
+  buys "Province"
+  `alt` buysIf "Duchy" ((<=5) . gainsToEndGame)
+  `alt` buysIf "Militia" ((<2) . (numInDeck "Militia"))
+  `alt` buysIf "Estate" ((<=2) . gainsToEndGame)
+  `alt` buys "Gold"
+  `alt` buys "Silver"
+
+
+

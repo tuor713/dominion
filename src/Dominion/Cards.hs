@@ -44,6 +44,8 @@ silver = cardData Map.! "silver"
 gold = cardData Map.! "gold"
 platinum = cardData Map.! "platinum"
 
+cSmithy = cardData Map.! "smithy"
+
 
 -- Common patterns
 
@@ -117,14 +119,13 @@ playAttack attack attacker state = seqSteps checkAttack (opponentNames state att
 
 cellar :: Action
 cellar = plusActions 1
-  &&+ \p s -> chooseMany (QDiscard (Hand p)) (hand (playerByName s p)) (const True)
+  &&+ \p s -> chooseMany (QDiscard (Hand p)) (hand (playerByName s p)) (0,length $ (hand (playerByName s p)))
   &&= \cards -> seqActions (\c -> discard c (Hand p)) cards
   &&& plusCards (length cards)
 
 chapel :: Action
-chapel player state = decision (Choices QTrash (hand (playerByName state player)) valid cont) player state
+chapel player state = decision (Choices QTrash (hand (playerByName state player)) (0,4) cont) player state
   where
-    valid cards = length cards <= 4
     cont cards = seqSteps (\c -> trash c (Hand player) player) cards state
 
 chancellor :: Action
@@ -164,7 +165,7 @@ militia player state = (plusMoney 2 &&& playAttack discardTo3) player state
   where
     discardTo3 op state
       | length h <= 3 = State state
-      | otherwise = decision (Choices (QDiscard (Hand op)) h (\cs -> length h == length cs + 3) cont) op state
+      | otherwise = decision (Choices (QDiscard (Hand op)) h (length h - 3,length h - 3) cont) op state
       where
         h = hand $ playerByName state op
         cont cards = seqSteps (\c -> discard c (Hand op) op) cards state

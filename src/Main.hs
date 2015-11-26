@@ -19,6 +19,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as E
 import System.Log.FastLogger
 import qualified System.Environment as Env
+import System.Random (StdGen, mkStdGen, randomR, newStdGen)
 
 {-
 main :: IO ()
@@ -31,13 +32,14 @@ main :: IO ()
 main =
   do
     args <- Env.getArgs
-    traces <- runSimulations [("Alice",bigSmithy "Alice"), ("Bob",doubleJack "Bob")]
-      (map lookupCard ["market", "library", "smithy", "cellar", "chapel", "witch",
+    gen <- newStdGen
+    stats $ runSimulations [("Alice",bigSmithy "Alice"), ("Bob",doubleMilitia "Bob")]
+      (map lookupCard ["market", "library", "smithy", "cellar", "chapel", "militia",
                        "village", "laboratory", "festival", "jack of all trades"])
       (case args of
         (x:_) -> read x
         [] -> 10000)
-    stats traces
+      gen
 
 data Message = Message { message :: T.Text } deriving (Show)
 
