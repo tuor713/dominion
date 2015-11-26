@@ -42,8 +42,9 @@ Executable dominion
 
 Test-Suite dominion-tests
   type: exitcode-stdio-1.0
-  main-is: BotTest.hs
+  main-is: TestMain.hs
   hs-source-dirs: src, test
+  ghc-options: -fno-warn-missing-fields
   build-depends: base,
     tasty >= 0.11.0,
     tasty-hunit >= 0.9,

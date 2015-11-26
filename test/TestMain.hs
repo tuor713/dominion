@@ -11,6 +11,7 @@ import Test.Tasty.HUnit
 
 starterTableau = map lookupCard ["cellar", "moat", "village", "workshop", "woodcutter", "smithy", "remodel", "militia", "market", "mine"]
 
+
 botTests = testGroup "gainsToEndGame"
   [ testCase "number of provinces" $
     3 @=?
@@ -30,7 +31,13 @@ botTests = testGroup "gainsToEndGame"
                                        ++ zip starterTableau (repeat 10)) }
   ]
 
-tests = testGroup "Tests" [botTests]
+
+cardTests = testGroup "Cards"
+  [ testCase "Duke - points" $
+      4 @=? cardPoints (lookupCard "duke") Player { deck = [duchy,estate,copper], hand = [duchy,duchy], discardPile = [gold,duchy], inPlay = []}]
+
+
+tests = testGroup "Tests" [botTests, cardTests]
 
 main :: IO ()
 main = defaultMain tests

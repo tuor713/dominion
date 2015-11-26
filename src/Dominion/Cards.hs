@@ -22,7 +22,7 @@ carddef id name cost types points effect edition = Card id name edition cost typ
 
 cardData :: Map.Map String Card
 cardData = Map.fromList $ map (\c -> (map toLower $ cardName c, c))
-  (concat [baseCards, prosperityCards, hinterlandCards])
+  (concat [baseCards, intrigueCards, prosperityCards, hinterlandCards])
 
 maybeCard :: String -> Maybe Card
 maybeCard name = Map.lookup (map toLower name) cardData
@@ -270,17 +270,92 @@ adventurer treasures others player state
 
 
 
+-- Intrigue
+
+intrigueCards = map ($ Intrigue)
+  [carddef 117 "Duke" 5 [Victory] (\p -> length $ filter (==duchy) (allCards p)) pass]
+
+
 -- Prosperity
 
 prosperityCards = map ($ Prosperity)
   [treasure 401 "Platinum" 9 5,
-   victory 402 "Colony" 11 10]
+   victory 402 "Colony" 11 10,
+   -- 403 loan
+   -- 404 trade route
+   -- 405 watchtower
+   -- 406 bishop
+   -- 407 monument
+   -- 408 quarry
+   -- 409 talisman
+   action 410 "Worker's Village" 4 (plusCards 1 &&& plusActions 2 &&& plusBuys 1),
+   action 411 "City" 5 city,
+   -- 412 contraband
+   -- 413 counting house
+   -- 414 mint
+   -- 415 mountebank
+   -- 416 rabble
+   -- 417 royal seal
+   -- 418 vault
+   -- 419 venture
+   -- 420 goons
+   -- 421 grand market
+   -- 422 hoard
+   -- 423 bank
+   -- 424 expand
+   -- 425 forge
+   action 426 "King's Court" 7 kingsCourt
+   -- 427 peddler
+   ]
+
+city :: Action
+city = plusCards 1
+  &&& plusActions 2
+  &&& \player state -> let num = length $ filter ((==0) . snd) $ supply state in extra num player state
+  where
+    extra 0 = pass
+    extra 1 = plusCards 1
+    extra 2 = plusCards 1 &&& plusMoney 1 &&& plusBuys 1
+
+kingsCourt :: Action
+kingsCourt player state
+  | actions == [] = State state
+  | otherwise = decision (Choice QPlay actions cont) player state
+  where
+    actions = filter isAction (hand (playerByName state player))
+    cont card = (play card &&& playEffect card &&& playEffect card) player state
 
 
 -- Hinterlands
 
 hinterlandCards = map ($ Hinterlands)
-  [action 601 "Jack of All Trades" 4 jackOfAllTrades]
+  [-- 601 crossroads
+   -- 602 duchess
+   -- 603 fool's gold
+   -- 604 develop
+   -- 605 oasis
+   -- 606 oracle
+   -- 607 scheme
+   -- 608 tunnel
+   action 609 "Jack of All Trades" 4 jackOfAllTrades
+   -- 610 noble brigand
+   -- 611 nomad camp
+   -- 612 silk road
+   -- 613 spice merchant
+   -- 614 trader
+   -- 615 cache
+   -- 616 cartographer
+   -- 617 embassy
+   -- 618 haggler
+   -- 619 highway
+   -- 620 ill-gotten gains
+   -- 621 inn
+   -- 622 mandarin
+   -- 623 margrave
+   -- 624 stables
+   -- 625 border village
+   -- 626 farmland
+   ]
 
 jackOfAllTrades :: Action
 jackOfAllTrades = gain silver &&& spyTop &&& drawTo5 &&& optTrash
