@@ -149,19 +149,28 @@ runSimulations bots tableau num ingen = states : runSimulations bots tableau (nu
 frequencies :: Ord a => [a] -> [(a,Int)]
 frequencies xs = map (,1) xs |> Map.fromListWith (+) |> Map.toList |> L.sortOn (negate . snd)
 
+winner state
+  | rank one two == EQ = "Tie"
+  | otherwise = name one
+  where
+    (one:two:_) = players state |> Map.elems |> L.sortBy rank |> reverse
+    rank p1 p2
+      | pcompare == EQ = compare (hadFinalTurn p2) (hadFinalTurn p1)
+      | otherwise = pcompare
+      where
+        pcompare = compare (points p1) (points p2)
+
+    hadFinalTurn player = player `elem` playersHadFinalTurn
+
+    playersHadFinalTurn = drop (noPlayers - ((ply state + noPlayers - 1) `mod` noPlayers)) $ Map.elems $ players state
+    noPlayers = length $ players state
+
 winRatio games =
   games |>
   map last |>
   map winner |>
-  Maybe.catMaybes |>
   frequencies |>
   map (\(p,num) -> (p, fromIntegral num / fromIntegral (length games)))
-  where
-    winner state
-      | points one == points two = Just "Tie" -- Draw
-      | otherwise = Just $ name one
-      where
-        (one:two:_) = players state |> Map.elems |> L.sortOn points |> reverse
 
 stats :: [[GameState]] -> IO ()
 stats games =

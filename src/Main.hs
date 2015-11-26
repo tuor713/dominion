@@ -33,9 +33,9 @@ main =
   do
     args <- Env.getArgs
     gen <- newStdGen
-    stats $ runSimulations [("Alice",bigSmithy "Alice"), ("Bob",doubleMilitia "Bob")]
+    stats $ runSimulations [("Alice",bigSmithy "Alice"), ("Bob",chapelWitch "Bob")]
       (map lookupCard ["market", "library", "smithy", "cellar", "chapel", "militia",
-                       "village", "laboratory", "festival", "jack of all trades"])
+                       "village", "laboratory", "witch", "jack of all trades"])
       (case args of
         (x:_) -> read x
         [] -> 10000)

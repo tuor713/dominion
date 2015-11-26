@@ -255,7 +255,6 @@ inSupply state card = maybe False (>0) (Map.lookup card (piles state))
 numInSupply :: GameState -> Card -> Int
 numInSupply state card = maybe 0 id (Map.lookup card (piles state))
 
-
 hasCardType :: Card -> CardType -> Bool
 hasCardType card typ = typ `elem` types card
 

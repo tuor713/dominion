@@ -60,6 +60,12 @@ defaultBot ownId _ (YesNo (QDiscard (TopOfDeck p)) card f) _
   where
     desirable = card /= copper && card /= curse && card /= estate && card /= duchy && card /= province
 
+defaultBot _ _ (Choices QTrash cards (lo,hi) f) _ = f choices
+  where
+    wantsToTrash = filter (\c -> c == curse || c == copper || c == estate) cards
+    trashOrder = L.sortOn cardScore cards
+    choices = take (min (max lo (length wantsToTrash)) hi) trashOrder
+
 -- Default choice take the alternative
 defaultBot _ _ _ (Just next) = next
 
@@ -168,5 +174,12 @@ doubleMilitia = partialBot $
   `alt` buys "Gold"
   `alt` buys "Silver"
 
-
+chapelWitch = partialBot $
+  buys "Province"
+  `alt` buysIf "Witch" ((==0) . (numInDeck "Witch"))
+  `alt` buysIf "Duchy" ((<=5) . gainsToEndGame)
+  `alt` buysIf "Estate" ((<=2) . gainsToEndGame)
+  `alt` buys "Gold"
+  `alt` buysIf "Chapel" (\s -> numInDeck "Chapel" s == 0)
+  `alt` buys "Silver"
 
