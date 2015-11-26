@@ -73,10 +73,11 @@ colonyGame :: GameState -> Bool
 colonyGame state = Map.member colony (piles state)
 
 moneyValue :: Card -> Int
-moneyValue Card { cardName = "Gold" } = 3
-moneyValue Card { cardName = "Silver" } = 2
-moneyValue Card { cardName = "Copper" } = 1
-moneyValue _ = 0
+moneyValue card
+  | card == gold = 3
+  | card == silver = 2
+  | card == copper = 1
+  | otherwise = 0
 
 totalMoney :: GameState -> Int
 totalMoney state = state |> activePlayer |> allCards |> map moneyValue |> sum

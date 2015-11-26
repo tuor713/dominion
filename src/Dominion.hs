@@ -9,7 +9,6 @@ import Prelude hiding (interact)
 import qualified Control.Monad.Trans.State.Lazy as St
 import qualified Data.List as L
 import System.Random (StdGen, mkStdGen, randomR, newStdGen)
-import qualified System.Random.Shuffle as Shuffle
 import Data.List.Split (wordsBy)
 import qualified Data.Map.Strict as Map
 import qualified Data.Maybe as Maybe
@@ -94,7 +93,8 @@ isStandardVictory c
 
 mkGame :: [String] -> [Card] -> StdGen -> GameState
 mkGame names kingdomCards gen =
-  GameState { players = players,
+  GameState { players = Map.fromList $ zip names players,
+              turnOrder = names,
               piles = Map.fromList $ map (\c -> (c, noInPile c)) (standardCards ++ kingdomCards),
               trashPile = [],
               turn = newTurn,
@@ -141,7 +141,8 @@ runSimulations _ _ 0 = return []
 runSimulations bots tableau num =
   do
     gen <- newStdGen
-    let initial = mkGame (Shuffle.shuffle' (map fst bots) (length bots) gen) tableau gen
+    let (players,gen') = shuffle' (map fst bots) gen
+    let initial = mkGame players tableau gen
     states <- runSimulation (Map.fromList bots) [initial] $ State initial
     sims <- runSimulations bots tableau (num-1)
     return (states:sims)
@@ -164,7 +165,7 @@ winRatio games =
       | points one == points two = Just "Tie" -- Draw
       | otherwise = Just $ name one
       where
-        (one:two:_) = players state |> L.sortOn points |> reverse
+        (one:two:_) = players state |> Map.elems |> L.sortOn points |> reverse
 
 stats :: [[GameState]] -> IO ()
 stats games =
@@ -180,6 +181,7 @@ runGameConsole bots (State state)
     do
       putStrLn "Game Finished!"
       putStrLn $ "Final score: " ++ (players state
+                                      |> Map.elems
                                       |> L.sortOn points
                                       |> reverse
                                       |> map (\p -> name p ++ ": " ++ show (points p))

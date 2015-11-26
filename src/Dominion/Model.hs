@@ -73,7 +73,8 @@ data TurnState = TurnState { money :: Int,
                              }
                              deriving (Show)
 
-data GameState = GameState { players :: [Player],
+data GameState = GameState { players :: Map.Map PlayerId Player,
+                             turnOrder :: [PlayerId],
                              trashPile :: [Card],
                              turn :: TurnState,
                              piles :: Map.Map Card Int,
@@ -161,12 +162,15 @@ toAction step _ _ = step
 app :: PlayerId -> GameState -> Action -> GameStep
 app p s action = action p s
 
+{-# INLINE (&&&) #-}
 (&&&) :: Action -> Action -> Action
 (&&&) act1 act2 player state = act1 player state `andThen` act2 player
 
+{-# INLINE (&&+) #-}
 (&&+) :: Action -> (PlayerId -> GameState -> Action) -> Action
 (&&+) act1 act2 player state = act1 player state `andThen` (\s2 -> app player s2 $ act2 player s2)
 
+{-# INLINE (&&=) #-}
 (&&=) :: (a -> Action) -> a -> Action
 (&&=) = ($)
 
@@ -207,35 +211,35 @@ transfer :: Card -> Location -> Location -> GameState -> GameState
 transfer c from to state = moveTo c to (moveFrom c from state)
 
 updatePlayer :: GameState -> String -> (Player -> Player) -> GameState
-updatePlayer state pname f =
-  state { players = map (\p -> if name p == pname then f p else p) (players state) }
+updatePlayer state pname f = state { players = Map.adjust f pname (players state) }
 
 updatePlayerR :: GameState -> String -> (Player -> RandomState Player) -> GameState
 updatePlayerR state pname f =
-  state { players = ps, gen = resultgen }
+  state { players = Map.insert pname new (players state), gen = resultgen }
   where
-    (ps, resultgen) = St.runState (sequence $ map (\p -> if name p == pname then f p else return p) (players state)) (gen state)
+    prev = (players state) Map.! pname
+    (new, resultgen) = St.runState (f prev) (gen state)
 
 
 -- Queries and predicates
 
 activePlayer :: GameState -> Player
-activePlayer state = head $ players state
+activePlayer state = (players state) Map.! (activePlayerId state)
 
 activePlayerId :: GameState -> PlayerId
-activePlayerId = name . activePlayer
+activePlayerId = head . turnOrder
 
 playerByName :: GameState -> PlayerId -> Player
-playerByName state pname = head $ filter ((== pname) . name) (players state)
+playerByName state pname = (players state) Map.! pname
 
 playerNames :: GameState -> [String]
-playerNames state = map name (players state)
+playerNames = turnOrder
 
 opponentNames :: GameState -> String -> [String]
 opponentNames state player = map name $ opponents state player
 
 opponents :: GameState -> String -> [Player]
-opponents state player = filter ((/= player) . name) $ players state
+opponents state player = filter ((/= player) . name) $ Map.elems $ players state
 
 
 availableCards :: GameState -> [Card]
@@ -275,11 +279,12 @@ unknown = Card "Unknown" Base 0 [] (\_ -> 0) pass
 -- It assumes some intelligent information retention such as about own deck content
 -- but more could be done for opponents
 visibleState :: PlayerId -> GameState -> GameState
-visibleState id state = state { players = map anonymize (players state)}
+visibleState id state = state { players = Map.map anonymize (players state) }
   where
     anonymize p
       | id == name p = p { deck = L.sort (deck p) }
-      | otherwise = p { hand = replicate (length (hand p)) unknown, deck = replicate (length (deck p)) unknown }
+      | otherwise = p { hand = replicate (length (hand p)) unknown,
+                        deck = replicate (length (deck p)) unknown }
 
 
 -- Utilities
@@ -312,6 +317,7 @@ shuffle :: [a] -> RandomState [a]
 shuffle xs = St.state $ \gen -> shuffle' xs gen
 
 -- Clojure / F# style threading
+{-# INLINE (|>) #-}
 (|>) :: a -> (a -> b) -> b
 (|>) x f = f x
 
@@ -414,12 +420,15 @@ newTurn :: TurnState
 newTurn = TurnState { money = 0, buys = 1, actions = 1 }
 
 cleanupPhase :: Action
-cleanupPhase _ state = State $ state { turn = newTurn, players = tail (players state) ++ [current''], ply = 1 + ply state, gen = gen'}
+cleanupPhase _ state = State nnext
   where
-    current = head (players state)
+    current = head (turnOrder state)
+    next = state { turn = newTurn,
+                   turnOrder = tail (turnOrder state) ++ [current],
+                   ply = 1 + ply state}
+
     -- TODO can cleanup trigger anything like discard ?
-    current' = current { hand = [], inPlay = [], discardPile = hand current ++ inPlay current ++ discardPile current }
-    (current'',gen') = St.runState (draw current' 5) (gen state)
+    nnext = updatePlayerR next current (\p -> draw p { hand = [], inPlay = [], discardPile = hand p ++ inPlay p ++ discardPile p } 5)
 
 buyPhase :: Action
 buyPhase name state
