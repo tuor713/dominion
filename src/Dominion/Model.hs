@@ -113,7 +113,7 @@ type Action = PlayerId -> GameState -> GameStep
 
 instance Show GameState where
   show g = "Game {\n" ++
-    "  turn: " ++ (show (turnNo g)) ++ "\n" ++
+    "  turn: " ++ (show (turnNo g)) ++ " (ply: " ++ (show (ply g)) ++ ")\n" ++
     "  players: {\n" ++
     concatMap
       (\p ->
@@ -279,7 +279,8 @@ unknown = Card (-1) "Unknown" Base 0 [] (\_ -> 0) pass
 -- It assumes some intelligent information retention such as about own deck content
 -- but more could be done for opponents
 visibleState :: PlayerId -> GameState -> GameState
-visibleState id state = state { players = Map.map anonymize (players state) }
+-- TODO figure out a more efficient implementation that still gives access to a players full deck
+visibleState id state = state -- state { players = Map.map anonymize (players state) }
   where
     anonymize p
       | id == name p = p { deck = L.sort (deck p) }
