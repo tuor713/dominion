@@ -140,7 +140,7 @@ runSimulations bots tableau num ingen = states : runSimulations bots tableau (nu
   where
     (players,gen') = shuffle' (map fst bots) ingen
     initial = mkGame players tableau gen'
-    states = runSimulation (Map.fromList bots) [initial] $ State initial
+    states = runSimulation (Map.fromList bots) [] $ State initial
     gen'' = gen $ last states
 
 
@@ -160,9 +160,9 @@ winner state
       where
         pcompare = compare (points p1) (points p2)
 
-    hadFinalTurn player = player `elem` playersHadFinalTurn
+    hadFinalTurn player = (name player) `elem` playersHadFinalTurn
 
-    playersHadFinalTurn = drop (noPlayers - ((ply state + noPlayers - 1) `mod` noPlayers)) $ Map.elems $ players state
+    playersHadFinalTurn = drop (noPlayers - ((ply state + noPlayers - 1) `mod` noPlayers)) $ turnOrder state
     noPlayers = length $ players state
 
 winRatio games =
