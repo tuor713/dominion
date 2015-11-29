@@ -167,6 +167,14 @@ checkPPR state =
     firstPlayer = ply state `mod` 2 == 1
 
 
+
+botLibrary =
+  [("Big Money", betterBigMoney),
+   ("Big Money Smithy", bigSmithy),
+   ("Double Jack", doubleJack),
+   ("Double Militia", doubleMilitia),
+   ("Chapel Witch", chapelWitch)]
+
 betterBigMoney = partialBot $
   buysIf "Province" ((>15) . totalMoney)
   `alt` buysIf "Duchy" ((<=5) . gainsToEndGame)

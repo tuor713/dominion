@@ -119,12 +119,11 @@ winRatio games =
     winnerName (Win p) = p
     winnerName (Tie _) = "Tie"
 
-stats :: [[GameState]] -> IO ()
+stats :: [[GameState]] -> String
 stats games =
-  do
-    putStrLn $ "No of games: " ++ show (length games)
-    putStrLn $ "Wins ratios: " ++ show (winRatio games)
-    putStrLn $ "Length of games: " ++ show (L.sortOn fst $ frequencies (map (turnNo . last) games))
+  "No of games: " ++ show (length games) ++ "\n" ++
+  "Wins ratios: " ++ show (winRatio games) ++ "\n" ++
+  "Length of games: " ++ show (L.sortOn fst $ frequencies (map (turnNo . last) games))
 
 showInfos :: [Info] -> IO ()
 showInfos infos = M.mapM_ (\(vis,msg) -> putStrLn ("[" ++ show vis ++ "] " ++ msg)) infos
