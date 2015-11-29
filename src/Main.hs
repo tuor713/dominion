@@ -28,6 +28,9 @@ main = do
   quickHttpServe (site logset)
 -}
 
+-- For performance test use benchmark:
+-- bigSmithy v doubleJack
+
 main :: IO ()
 main =
   do
@@ -36,7 +39,7 @@ main =
     let numGames = case args of
                     (x:_) -> read x
                     [] -> 10000
-    let games = evalSim (runSimulations [("Alice",bigSmithy "Alice"), ("Bob",chapelWitch "Bob")] tableau numGames) gen
+    let games = evalSim (runSimulations [("Alice",bigSmithy "Alice"), ("Bob",doubleJack "Bob")] tableau numGames) gen
     stats games
   where
     tableau = map lookupCard ["market", "library", "smithy", "cellar", "chapel", "militia",

@@ -5,6 +5,7 @@ import Dominion.Model
 import Dominion.Cards
 import Dominion.Bots
 
+import qualified Control.Monad as M
 import Prelude hiding (interact)
 import qualified Data.List as L
 import System.Random (StdGen, mkStdGen, randomR, newStdGen)
@@ -139,8 +140,7 @@ stats games =
     putStrLn $ "Length of games: " ++ show (L.sortOn fst $ frequencies (map (turnNo . last) games))
 
 showInfos :: [Info] -> IO ()
-showInfos [] = return ()
-showInfos ((vis,msg):xs) = putStrLn ("[" ++ show vis ++ "] " ++ msg) >> showInfos xs
+showInfos infos = M.mapM_ (\(vis,msg) -> putStrLn ("[" ++ show vis ++ "] " ++ msg)) infos
 
 runGameConsole :: Map.Map PlayerId Bot -> GameStep -> StdGen -> IO ()
 runGameConsole bots (State state) gen

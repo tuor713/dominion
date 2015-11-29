@@ -35,16 +35,16 @@ data Edition = Base | Intrigue | Seaside | Alchemy | Prosperity | Cornucopia | H
 -- > it allows precise implementation of concepts like, 'if X then do Y to this card'
 
 data Card = Card { -- Card id is purely a performance artifact to avoid string comparisons
-                   cardId :: Int,
-                   cardName :: String,
-                   edition :: Edition,
+                   cardId :: !Int,
+                   cardName :: !String,
+                   edition :: !Edition,
                    -- TODO this only works for Base
                    -- breaks for cards like peddlar having state dependent cost
                    -- breaks for potion cost
-                   cost :: Int,
-                   types :: [CardType],
-                   cardPoints :: Player -> Int,
-                   onPlay :: Action
+                   cost :: !Int,
+                   types :: ![CardType],
+                   cardPoints :: !(Player -> Int),
+                   onPlay :: !Action
                    }
 
 instance Show Card where
@@ -54,7 +54,7 @@ instance Eq Card where
   (==) c1 c2 = cardId c1 == cardId c2
 
 instance Ord Card where
-  c1 <= c2 = show c1 <= show c2
+  c1 <= c2 = cardId c1 <= cardId c2
 
 -- Card definition helpers
 
@@ -283,12 +283,12 @@ chooseMany typ choices lohi cont player state =
 -- Game functions
 
 moveTo :: Card -> Location -> GameState -> GameState
-moveTo c (Hand player) state = updatePlayer state player (\p -> p { hand = c : hand p })
-moveTo c (Discard player) state = updatePlayer state player (\p -> p { discardPile = c : discardPile p })
+moveTo c (Hand player) state      = updatePlayer state player (\p -> p { hand = c : hand p })
+moveTo c (Discard player) state   = updatePlayer state player (\p -> p { discardPile = c : discardPile p })
 moveTo c (TopOfDeck player) state = updatePlayer state player (\p -> p { deck = c : deck p })
-moveTo c InPlay state = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = c : inPlay p })
-moveTo c Trash state = state { trashPile = c : trashPile state }
-moveTo c Supply state = error "Not implemented: moving card to supply"
+moveTo c InPlay state             = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = c : inPlay p })
+moveTo c Trash state              = state { trashPile = c : trashPile state }
+moveTo c Supply state             = state { piles = Map.adjust (+1) c (piles state) }
 
 moveFrom :: Card -> Location -> GameState -> GameState
 moveFrom c (Hand player) state      = updatePlayer state player (\p -> p { hand = L.delete c $ hand p })
@@ -297,8 +297,6 @@ moveFrom c (TopOfDeck player) state = updatePlayer state player (\p -> p { deck 
 moveFrom c InPlay state             = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = L.delete c $ inPlay p })
 moveFrom c Trash state              = state { trashPile = L.delete c $ trashPile state }
 moveFrom c Supply state             = state { piles = Map.adjust (+(-1)) c (piles state) }
-  where
-    takeOne (card,num) = (card,if card == c then num -1 else num)
 
 transfer :: Card -> Location -> Location -> GameState -> GameState
 transfer c from to state = moveTo c to (moveFrom c from state)
@@ -308,11 +306,8 @@ updatePlayer state pname f = state { players = Map.adjust f pname (players state
 
 updatePlayerR :: GameState -> String -> (Player -> SimulationT Player) -> SimulationT GameState
 updatePlayerR state pname f =
-  do
-    new <- f prev
-    return $ state { players = Map.insert pname new (players state) }
-  where
-    prev = (players state) Map.! pname
+  f ((players state) Map.! pname) >>= \new ->
+  return (state { players = Map.insert pname new (players state) })
 
 
 -- Queries and predicates

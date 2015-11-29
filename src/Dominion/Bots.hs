@@ -132,7 +132,8 @@ deckSize :: GameState -> Int
 deckSize state = length $ allCards $ activePlayer state
 
 numInDeck :: String -> GameState -> Int
-numInDeck name state = length $ filter (==card) $ allCards $ activePlayer state
+-- Leads to better caching, card is lookuped only once ...
+numInDeck name = \state -> length $ filter (==card) $ allCards $ activePlayer state
   where
     card = lookupCard name
 
