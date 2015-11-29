@@ -18,6 +18,7 @@ import qualified Data.ByteString.Builder as B
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Aeson as J
 import qualified Data.Maybe as Maybe
+import qualified Data.List as L
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as E
 import System.Log.FastLogger
@@ -77,7 +78,12 @@ site logset =
             ("simulation", simulationHandler),
             ("version", writeBS (BS.concat ["Running Snap: ", snapServerVersion, "\n"]))
           ] <|>
-    dir "static" (serveDirectory ".")
+    dir "static" (serveDirectory "static")
+
+dataToJavaScriptArray xs =
+  "[" `C8.append`
+  (C8.intercalate "," $ map (\(x,y) -> C8.pack ("{name:"++ show x ++ ", value:" ++ show y ++ "}")) xs)
+  `C8.append` "]"
 
 simulationHandler :: Snap ()
 simulationHandler =
@@ -92,8 +98,31 @@ simulationHandler =
 
     gen <- liftIO $ newStdGen
     let games = evalSim (runSimulations [("Alice",bigSmithy "Alice"), ("Bob",doubleJack "Bob")] tableau numGames) gen
+    let gameLengths = L.sortOn fst $ frequencies (map (turnNo . last) games)
 
-    writeBS $ LBS.toStrict $ B.toLazyByteString $ B.stringUtf8 $ stats games
+    writeBS $ "<html><head>"
+              `C8.append` "<link rel=\"stylesheet\" href=\"/static/site.css\">"
+              `C8.append` "<script src=\"//d3js.org/d3.v3.min.js\" charset=\"utf-8\"></script>"
+              `C8.append` "<script src=\"/static/js/graph.js\" charset=\"utf-8\"></script>"
+              `C8.append` "</head><html>"
+              `C8.append` "<h3>Stats</h3>"
+              `C8.append` "<pre>"
+              `C8.append` C8.pack (stats games)
+              `C8.append` "</pre>"
+              `C8.append` "<h3>Winners</h3><svg id=\"winners\" class=\"chart\" />"
+              `C8.append` "<h3>Turns per Game</h3><svg id=\"turns\" class=\"chart\" />"
+              `C8.append` "<script>"
+
+              `C8.append` "barChart(\"#winners\",300,200,percentageData("
+              `C8.append` dataToJavaScriptArray (winRatio games)
+              `C8.append` "));"
+
+              `C8.append` "barChart(\"#turns\",600,400,percentageData("
+              `C8.append` dataToJavaScriptArray gameLengths
+              `C8.append` "));"
+
+              `C8.append` "</script>"
+              `C8.append` "</body></html>"
 
 
 echoHandler :: Snap ()

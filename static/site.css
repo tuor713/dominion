@@ -1,0 +1,15 @@
+.chart rect {
+  fill: steelblue;
+}
+
+.axis text {
+  font: 10px sans-serif;
+  fill: steelblue;
+}
+
+.axis path,
+.axis line {
+  fill: none;
+  stroke: steelblue;
+  shape-rendering: crispEdges;
+}
