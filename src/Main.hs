@@ -33,13 +33,14 @@ main =
   do
     args <- Env.getArgs
     gen <- newStdGen
-    stats $ runSimulations [("Alice",bigSmithy "Alice"), ("Bob",chapelWitch "Bob")]
-      (map lookupCard ["market", "library", "smithy", "cellar", "chapel", "militia",
-                       "village", "laboratory", "witch", "jack of all trades"])
-      (case args of
-        (x:_) -> read x
-        [] -> 10000)
-      gen
+    let numGames = case args of
+                    (x:_) -> read x
+                    [] -> 10000
+    let games = evalSim (runSimulations [("Alice",bigSmithy "Alice"), ("Bob",chapelWitch "Bob")] tableau numGames) gen
+    stats games
+  where
+    tableau = map lookupCard ["market", "library", "smithy", "cellar", "chapel", "militia",
+                              "village", "laboratory", "witch", "jack of all trades"]
 
 data Message = Message { message :: T.Text } deriving (Show)
 

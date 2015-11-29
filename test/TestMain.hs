@@ -45,7 +45,7 @@ initialStateTest = testGroup "Game creation"
 
     ]
   where
-    [sut,sutColony] = map (\typ -> mkGame typ ["Alice","Bob"] starterTableau (mkStdGen 0)) [StandardGame, ColonyGame]
+    [sut,sutColony] = map (\typ -> evalSim (mkGame typ ["Alice","Bob"] starterTableau) (mkStdGen 0)) [StandardGame, ColonyGame]
 
 
 

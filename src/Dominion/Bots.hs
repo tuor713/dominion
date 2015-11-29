@@ -12,19 +12,18 @@ import qualified Data.Maybe as Maybe
 -- => the bot returning a GameStep directly is not a very safe pattern
 --    it presupposes bots are correctly implemented and not malicious
 -- => should we include bot state or is this covered by IO monad ?
-type Bot = GameState -> Interaction -> IO GameStep
-type AIBot = GameState -> Interaction -> GameStep
+type Bot = GameState -> Decision -> IO Simulation
+type AIBot = GameState -> Decision -> Simulation
 
 
 -- Utilities for defining bots
 
-type SimpleBot = PlayerId -> GameState -> Decision -> Maybe GameStep -> GameStep
-type PartialBot = PlayerId -> GameState -> Decision -> Maybe GameStep -> Maybe GameStep
+type SimpleBot = PlayerId -> GameState -> Decision -> Maybe Simulation -> Simulation
+type PartialBot = PlayerId -> GameState -> Decision -> Maybe Simulation -> Maybe Simulation
 
 simpleBot :: SimpleBot -> PlayerId -> AIBot
-simpleBot bot id state (Info _ next) = next
-simpleBot bot id state (Decision (Optional inner next)) = bot id state inner (Just next)
-simpleBot bot id state (Decision decision) = bot id state decision Nothing
+simpleBot bot id state (Optional inner next) = bot id state inner (Just next)
+simpleBot bot id state decision = bot id state decision Nothing
 
 aiBot :: AIBot -> Bot
 aiBot bot state int = return $ bot state int

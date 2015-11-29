@@ -1,13 +1,12 @@
 {-# LANGUAGE TupleSections #-}
 module Dominion.Model where
 
-import qualified Control.Monad.Random as MRandom
+import qualified Control.Monad as M
 import qualified Control.Monad.Trans.State.Lazy as St
 import qualified Data.List as L
 import qualified Data.Map.Strict as Map
-import qualified Data.Map.Lazy as LMap
 import qualified Data.Maybe as Maybe
-import System.Random (StdGen, mkStdGen, randomR, newStdGen)
+import System.Random (StdGen, randomR)
 
 
 import Data.Array.ST
@@ -25,8 +24,6 @@ data Location = Hand String | Discard String | TopOfDeck String | InPlay | Trash
 
 data Edition = Base | Intrigue | Seaside | Alchemy | Prosperity | Cornucopia | Hinterlands | DarkAges | Guilds | Adventures | Promo
   deriving (Eq, Read, Show)
-
-type RandomState a = St.State StdGen a
 
 
 -- The fundamental domain types
@@ -47,7 +44,7 @@ data Card = Card { -- Card id is purely a performance artifact to avoid string c
                    cost :: Int,
                    types :: [CardType],
                    cardPoints :: Player -> Int,
-                   onPlay :: PlayerId -> GameState -> GameStep
+                   onPlay :: Action
                    }
 
 instance Show Card where
@@ -88,7 +85,6 @@ basicCards = [copper, silver, gold, estate, duchy, province, curse, potion, plat
 
 
 type PlayerId = String
-allPlayerId = "::all::"
 
 data Player = Player { name :: PlayerId,
                        hand :: [Card],
@@ -112,10 +108,36 @@ data GameState = GameState { players :: Map.Map PlayerId Player,
                              trashPile :: [Card],
                              turn :: TurnState,
                              piles :: Map.Map Card Int,
-                             ply :: Int,
-                             -- TODO Is there a better to do this?
-                             gen :: StdGen
+                             ply :: Int
                              }
+
+data Visibility = AllPlayers | VisibleToPlayer PlayerId
+
+instance Show Visibility where
+  show AllPlayers = "All"
+  show (VisibleToPlayer player) = player
+
+
+type Info = (Visibility, String)
+type SimulationState = (StdGen, [Info])
+
+type SimulationT a = St.State SimulationState a
+type Simulation = SimulationT GameStep
+
+-- Simulation primitives
+
+randomGen :: SimulationT StdGen
+randomGen = M.liftM fst St.get
+
+setRandomGen :: StdGen -> SimulationT ()
+setRandomGen gen =
+  do
+    (_,infos) <- St.get
+    St.put (gen,infos)
+    return ()
+
+info :: Visibility -> String -> SimulationT ()
+info vis msg = St.get >>= \(gen,infos) -> St.put (gen,(vis,msg):infos) >> return ()
 
 -- Decision & decision type are not rich enough for smart bots
 -- they need to be able to known more about what the decision really is
@@ -129,16 +151,14 @@ data GameState = GameState { players :: Map.Map PlayerId Player,
 
 data DecisionType = QPlay | QBuy | QDraw | QTreasures | QTrash | QGain | QDiscard Location | QOption
 
-data Decision = YesNo DecisionType Card (Bool -> GameStep) |
-                Choice DecisionType [Card] (Card -> GameStep) |
-                Choices DecisionType [Card] (Int,Int) ([Card] -> GameStep) |
-                Optional Decision GameStep
+data Decision = YesNo DecisionType Card (Bool -> Simulation) |
+                Choice DecisionType [Card] (Card -> Simulation) |
+                Choices DecisionType [Card] (Int,Int) ([Card] -> Simulation) |
+                Optional Decision Simulation
 
-data Interaction = Decision Decision | Info String GameStep
+data GameStep = State GameState | Decision PlayerId GameState Decision
 
-data GameStep = State GameState | Interaction PlayerId GameState Interaction
-
-type Action = PlayerId -> GameState -> GameStep
+type Action = PlayerId -> GameState -> Simulation
 
 
 instance Show GameState where
@@ -167,7 +187,7 @@ instance Show GameState where
 
 -- Game creation
 
-mkPlayer :: String -> RandomState Player
+mkPlayer :: String -> SimulationT Player
 mkPlayer name = draw Player { name = name, hand = [], discardPile = initialDeck, deck = [], inPlay = [] } 5
 
 initialDeck :: [Card]
@@ -180,16 +200,17 @@ isStandardVictory c
   | c == colony = True
   | otherwise = False
 
-mkGame :: GameType -> [String] -> [Card] -> StdGen -> GameState
-mkGame typ names kingdomCards gen =
-  GameState { players = Map.fromList $ zip names players,
-              turnOrder = names,
-              piles = Map.fromList $ map (\c -> (c, noInPile c)) (standardCards ++ kingdomCards),
-              trashPile = [],
-              turn = newTurn,
-              ply = 1,
-              gen = gen'
-              }
+mkGame :: GameType -> [String] -> [Card] -> SimulationT GameState
+mkGame typ names kingdomCards =
+  (sequence $ map mkPlayer names) >>= \players ->
+    return $
+    GameState { players = Map.fromList $ zip names players,
+                turnOrder = names,
+                piles = Map.fromList $ map (\c -> (c, noInPile c)) (standardCards ++ kingdomCards),
+                trashPile = [],
+                turn = newTurn,
+                ply = 1
+                }
   where
     standardCards = extraCards ++ [estate,duchy,province,copper,silver,gold,curse]
     extraCards = if typ == ColonyGame then [platinum, colony] else []
@@ -205,36 +226,33 @@ mkGame typ names kingdomCards gen =
       | card == copper = 60 - 7 * playerNo
       | otherwise = 10
 
-    (players,gen') = St.runState (sequence $ map mkPlayer names) gen
-
 
 
 -- Combinators
 
-info :: String -> Action
-info msg to state = Interaction to state $ Info msg (State state)
-
 decision :: Decision -> Action
-decision decision player state = Interaction player state (Decision decision)
+decision decision player state = return $ Decision player state decision
 
 optDecision :: Decision -> Action
-optDecision decision player state = Interaction player state (Decision (Optional decision (State state)))
+optDecision decision player state = return $ Decision player state (Optional decision (return (State state)))
 
-andThenI :: Decision -> (GameState -> GameStep) -> Decision
+andThenI :: Decision -> (GameState -> Simulation) -> Decision
 andThenI (YesNo caption card cont) f = YesNo caption card (\b -> cont b `andThen` f)
 andThenI (Choice caption cards cont) f = Choice caption cards (\c -> cont c `andThen` f)
 andThenI (Choices caption cards lohi cont) f = Choices caption cards lohi (\cs -> cont cs `andThen` f)
 andThenI (Optional inner fallback) f = Optional (inner `andThenI` f) (fallback `andThen` f)
 
-andThen :: GameStep -> (GameState -> GameStep) -> GameStep
-andThen (State state) f = f state
-andThen (Interaction player state (Info msg next)) f = Interaction player state (Info msg (next `andThen` f))
-andThen (Interaction player state (Decision choice)) f = decision (choice `andThenI` f) player state
+andThen :: Simulation -> (GameState -> Simulation) -> Simulation
+andThen sim f = do
+  step <- sim
+  case step of
+    (State state) -> f state
+    (Decision player state choice) -> decision (choice `andThenI` f) player state
 
 toAction :: GameStep -> Action
-toAction step _ _ = step
+toAction step _ _ = return step
 
-app :: PlayerId -> GameState -> Action -> GameStep
+app :: PlayerId -> GameState -> Action -> Simulation
 app p s action = action p s
 
 {-# INLINE (&&&) #-}
@@ -288,12 +306,13 @@ transfer c from to state = moveTo c to (moveFrom c from state)
 updatePlayer :: GameState -> String -> (Player -> Player) -> GameState
 updatePlayer state pname f = state { players = Map.adjust f pname (players state) }
 
-updatePlayerR :: GameState -> String -> (Player -> RandomState Player) -> GameState
+updatePlayerR :: GameState -> String -> (Player -> SimulationT Player) -> SimulationT GameState
 updatePlayerR state pname f =
-  state { players = Map.insert pname new (players state), gen = resultgen }
+  do
+    new <- f prev
+    return $ state { players = Map.insert pname new (players state) }
   where
     prev = (players state) Map.! pname
-    (new, resultgen) = St.runState (f prev) (gen state)
 
 
 -- Queries and predicates
@@ -388,8 +407,8 @@ shuffle' xs gen = runST (do
     newArray :: Int -> [a] -> ST s (STArray s Int a)
     newArray n xs =  newListArray (1,n) xs
 
-shuffle :: [a] -> RandomState [a]
-shuffle xs = St.state $ \gen -> shuffle' xs gen
+shuffle :: [a] -> SimulationT [a]
+shuffle xs = randomGen >>= \gen -> let (cards,gen') = shuffle' xs gen in setRandomGen gen' >> return cards
 
 -- Clojure / F# style threading
 {-# INLINE (|>) #-}
@@ -405,7 +424,7 @@ summarizeCards cards =
   L.intersperse ", " |>
   concat
 
-reshuffleDiscard :: Player -> RandomState Player
+reshuffleDiscard :: Player -> SimulationT Player
 reshuffleDiscard p =
   do
     shuffled <- shuffle (discardPile p)
@@ -414,80 +433,79 @@ reshuffleDiscard p =
 canDraw :: Player -> Bool
 canDraw p = not (null (hand p)) || not (null (discardPile p))
 
-draw :: Player -> Int -> RandomState Player
+draw :: Player -> Int -> SimulationT
+ Player
 draw p num
   | length (deck p) < num = fmap (\p -> p !!! num) (reshuffleDiscard p)
   | otherwise = return $ p !!! num
   where
     (!!!) p num = p { hand = take num (deck p) ++ hand p, deck = drop num (deck p)}
 
-ensureCanDraw :: Int -> GameState -> PlayerId -> Maybe GameState
+ensureCanDraw :: Int -> GameState -> PlayerId -> SimulationT (Maybe GameState)
 ensureCanDraw num state name
-  | length (deck p) >= num = Just state
-  | length (deck p2) >= num = Just s2
-  | otherwise = Nothing
-  where
-    p = playerByName state name
-    s2 = updatePlayerR state name reshuffleDiscard
-    p2 = playerByName s2 name
+  | length (deck (playerByName state name)) >= num = return $ Just state
+  | otherwise =
+    updatePlayerR state name reshuffleDiscard >>= \s2 ->
+    return (if length (deck (playerByName s2 name)) >= num then Just s2 else Nothing)
 
 -- Game action
 
 playEffect :: Card -> Action
-playEffect card player state =
-  info (player ++ " plays " ++ cardName card) allPlayerId state `andThen` onPlay card player
+playEffect card player state = info AllPlayers (player ++ " plays " ++ cardName card) >> onPlay card player state
 
 play :: Card -> Action
 play card player state = playEffect card player (transfer card (Hand player) InPlay state)
 
 playAll :: [Card] -> Action
-playAll [] _ state = State $ state
-playAll (c:cs) player state = play c player state  `andThen` playAll cs player
+playAll [] _ state = return $ State $ state
+playAll (c:cs) player state = play c player state `andThen` playAll cs player
 
 gainFrom :: Card -> Location -> Action
 gainFrom card source player state =
-  info (player ++ " gains " ++ cardName card) allPlayerId $ transfer card source (Discard player) state
+  info AllPlayers (player ++ " gains " ++ cardName card) >> return (State $ transfer card source (Discard player) state)
 
 
 gainTo :: Card -> Location -> Action
 gainTo card target player state
   | inSupply state card =
-    info (player ++ " gains " ++ cardName card) allPlayerId $ transfer card Supply target state
-  | otherwise = State state
+    info AllPlayers (player ++ " gains " ++ cardName card) >> return (State $ transfer card Supply target state)
+  | otherwise = return $ State state
 
 gain :: Card -> Action
 gain card player = gainTo card (Discard player) player
 
 buy :: Card -> Action
 buy card player state =
-  info (player ++ " buys " ++ cardName card) allPlayerId $ transfer card Supply (Discard player) state
+  info AllPlayers (player ++ " buys " ++ cardName card) >> return (State $ transfer card Supply (Discard player) state)
 
 trash :: Card -> Location -> Action
 trash card source player state =
-  info (player ++ " trashes " ++ cardName card) allPlayerId $ transfer card source Trash state
+  info AllPlayers (player ++ " trashes " ++ cardName card) >> return (State $ transfer card source Trash state)
 
 discard :: Card -> Location -> Action
 discard card loc player state =
-  info (player ++ " discards " ++ cardName card) allPlayerId $ transfer card loc (Discard player) state
+  info AllPlayers (player ++ " discards " ++ cardName card) >> return (State $ transfer card loc (Discard player) state)
 
 plusMoney :: Int -> Action
-plusMoney num _ state = State $ state { turn = (turn state) { money = num + money (turn state) } }
+plusMoney num _ state = return $ State $ state { turn = (turn state) { money = num + money (turn state) } }
 
 plusCards :: Int -> Action
-plusCards num player state = info ("Drew " ++ summarizeCards newcards) player s2
-  where
-    s2 = updatePlayerR state player $ \p -> draw p num
-    newhand = hand (playerByName s2 player)
-    newcards = take (length newhand - length (hand (playerByName state player))) newhand
+plusCards num player state =
+  do
+    s2 <- updatePlayerR state player $ \p -> draw p num
+    let newhand = hand (playerByName s2 player)
+    let newcards = take (length newhand - length (hand (playerByName state player))) newhand
+    info (VisibleToPlayer player) ("Drew " ++ summarizeCards newcards)
+    return $ State s2
 
 plusBuys :: Int -> Action
-plusBuys num _ state = State $ state { turn = (turn state) { buys = num + buys (turn state) } }
+plusBuys num _ state = return $ State $ state { turn = (turn state) { buys = num + buys (turn state) } }
 
 plusActions :: Int -> Action
-plusActions num _ state = State $ state { turn = (turn state) { actions = num + actions (turn state) } }
+plusActions num _ state = return $ State $ state { turn = (turn state) { actions = num + actions (turn state) } }
 
 pass :: Action
-pass _ state = State state
+pass _ state = return $ State state
 
 -- Macro flows
 
@@ -495,7 +513,7 @@ newTurn :: TurnState
 newTurn = TurnState { money = 0, buys = 1, actions = 1 }
 
 cleanupPhase :: Action
-cleanupPhase _ state = State nnext
+cleanupPhase _ state = M.liftM State nnext
   where
     current = head (turnOrder state)
     next = state { turn = newTurn,
@@ -508,7 +526,7 @@ cleanupPhase _ state = State nnext
 buyPhase :: Action
 buyPhase name state
   | length treasures > 0 = playTreasureDecision
-  | buys (turn state) == 0 = State state
+  | buys (turn state) == 0 = return $ State state
   | otherwise = buyDecision state
   where
     treasures = filter isTreasure (hand (activePlayer state))
@@ -531,7 +549,7 @@ buyPhase name state
 
 actionPhase :: Action
 actionPhase name state
-  | actions (turn state) == 0 || null actionsInHand = State state
+  | actions (turn state) == 0 || null actionsInHand = return $ State state
   | otherwise = optDecision (Choice QPlay actionsInHand (\card -> (plusActions (-1) &&& play card &&& actionPhase) name state))
                          name state
   where
@@ -539,9 +557,21 @@ actionPhase name state
 
 playTurn :: Action
 playTurn name state =
-  (info ("Your turn:\n" ++ show (visibleState name state)) &&& actionPhase &&& buyPhase &&& cleanupPhase) name state
+  info (VisibleToPlayer name) ("Your turn:\n" ++ show (visibleState name state))
+  >> (actionPhase &&& buyPhase &&& cleanupPhase) name state
 
 finished :: GameState -> Bool
 finished state =
   numInSupply state province == 0
   || Map.size (Map.filter (==0) (piles state)) >= 3
+
+
+-- Simulation Stepping
+
+evalSim :: SimulationT a -> StdGen -> a
+evalSim sim gen = St.evalState sim (gen,[])
+
+runSim :: SimulationT a -> StdGen -> (a,SimulationState)
+runSim sim gen = (res,(resgen,reverse infos))
+  where
+    (res,(resgen,infos)) = St.runState sim (gen,[])

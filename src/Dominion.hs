@@ -6,7 +6,6 @@ import Dominion.Cards
 import Dominion.Bots
 
 import Prelude hiding (interact)
-import qualified Control.Monad.Trans.State.Lazy as St
 import qualified Data.List as L
 import System.Random (StdGen, mkStdGen, randomR, newStdGen)
 import Data.List.Split (wordsBy)
@@ -42,7 +41,7 @@ decisionType2message QTrash = "Trash a card?"
 decisionType2message (QDiscard _) = "Discard a card?"
 decisionType2message QOption = "Use effect?"
 
-decision2prompt :: PlayerId -> Decision -> (String, String -> Maybe GameStep)
+decision2prompt :: PlayerId -> Decision -> (String, String -> Maybe Simulation)
 decision2prompt player (YesNo typ card f) = (message player (decisionType2message typ ++ " " ++ cardName card ++ " [yn]"), (fmap f) . parse)
   where
     parse "y" = Just True
@@ -67,9 +66,8 @@ decision2prompt player (Optional inner next) = (msg, parser)
     parser "" = Just next
     parser s = handler s
 
-interact :: PlayerId -> Interaction -> IO GameStep
-interact player (Info info next) = putStrLn (message player info) >> return next
-interact player (Decision decision) = putStrLn info >> getInput handler
+interact :: PlayerId -> Decision -> IO Simulation
+interact player decision = putStrLn info >> getInput handler
   where
     (info, handler) = decision2prompt player decision
 
@@ -79,28 +77,30 @@ human player _ = interact player
 
 -- Simulation running
 
-runSimulation :: Map.Map PlayerId AIBot -> [GameState] -> GameStep -> [GameState]
+runSimulation :: Map.Map PlayerId AIBot -> [GameState] -> GameStep -> SimulationT [GameState]
 runSimulation bots accu (State state)
-  | finished state = reverse (state:accu)
-  | otherwise = runSimulation bots (state:accu) $ playTurn (activePlayerId state) state
+  | finished state = return $ reverse (state:accu)
+  | otherwise =
+    do
+      next <- playTurn (activePlayerId state) state
+      runSimulation bots (state:accu) next
 
-runSimulation bots accu (Interaction player state (Info _ next)) =
-  runSimulation bots accu next
-
-runSimulation bots accu (Interaction player state interaction) = runSimulation bots accu next
-  where
-    next = (bots Map.! player) (visibleState player state) interaction
+runSimulation bots accu (Decision player state decision) =
+  do
+    next <- (bots Map.! player) (visibleState player state) decision
+    runSimulation bots accu next
 
 -- Sample run:
 -- runSimulations [("Alice",bigSmithy), ("Bob",betterBigMoney)] (map lookupCard ["market", "library", "smithy", "cellar", "chapel", "witch", "village", "laboratory", "festival", "festival"]) 100 >>= stats
-runSimulations :: [(PlayerId,AIBot)] -> [Card] -> Int -> StdGen -> [[GameState]]
-runSimulations _ _ 0 _ = []
-runSimulations bots tableau num ingen = states : runSimulations bots tableau (num-1) gen''
-  where
-    (players,gen') = shuffle' (map fst bots) ingen
-    initial = mkGame StandardGame players tableau gen'
-    states = runSimulation (Map.fromList bots) [] $ State initial
-    gen'' = gen $ last states
+runSimulations :: [(PlayerId,AIBot)] -> [Card] -> Int -> SimulationT [[GameState]]
+runSimulations _ _ 0 = return []
+runSimulations bots tableau num =
+  do
+    players <- shuffle (map fst bots)
+    initial <- mkGame StandardGame players tableau
+    states <- runSimulation (Map.fromList bots) [] (State initial)
+    rest <- runSimulations bots tableau (num-1)
+    return (states:rest)
 
 
 -- Stats
@@ -138,9 +138,12 @@ stats games =
     putStrLn $ "Wins ratios: " ++ show (winRatio games)
     putStrLn $ "Length of games: " ++ show (L.sortOn fst $ frequencies (map (turnNo . last) games))
 
+showInfos :: [Info] -> IO ()
+showInfos [] = return ()
+showInfos ((vis,msg):xs) = putStrLn ("[" ++ show vis ++ "] " ++ msg) >> showInfos xs
 
-runGameConsole :: Map.Map PlayerId Bot -> GameStep -> IO ()
-runGameConsole bots (State state)
+runGameConsole :: Map.Map PlayerId Bot -> GameStep -> StdGen -> IO ()
+runGameConsole bots (State state) gen
   | finished state =
     do
       putStrLn "Game Finished!"
@@ -153,23 +156,16 @@ runGameConsole bots (State state)
                                       |> concat)
   | otherwise =
     do
-      putStrLn ("Turn " ++ (show (turnNo state)) ++ ", player " ++ activePlayerId state)
-      runGameConsole bots $ playTurn (activePlayerId state) state
+      let (next,(gen',infos)) = runSim (playTurn (activePlayerId state) state) gen
+      showInfos infos
+      runGameConsole bots next gen'
 
-runGameConsole bots (Interaction player state (Info msg next))
-  | player == allPlayerId =
-    do
-      putStrLn (message "All" msg)
-      runGameConsole bots next
-  | otherwise =
-    do
-      next <- (bots Map.! player) (visibleState player state) (Info msg next)
-      runGameConsole bots next
-
-runGameConsole bots (Interaction player state decision@(Decision _)) =
+runGameConsole bots (Decision player state decision) gen =
   do
-    next <- (bots Map.! player) (visibleState player state) decision
-    runGameConsole bots next
+    sim <- (bots Map.! player) (visibleState player state) decision
+    let (next,(gen',infos)) = runSim sim gen
+    showInfos infos
+    runGameConsole bots next gen'
 
 
 {- Sample invocation (ghci)
@@ -181,4 +177,5 @@ playOnConsole :: [(String,Bot)] -> [String] -> IO ()
 playOnConsole players cards =
   do
     gen <- newStdGen
-    runGameConsole (Map.fromList players) $ State $ mkGame StandardGame (map fst players) (map lookupCard cards) gen
+    let (initial,(gen',_)) = runSim (mkGame StandardGame (map fst players) (map lookupCard cards)) gen
+    runGameConsole (Map.fromList players) (State initial) gen'

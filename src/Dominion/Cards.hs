@@ -3,7 +3,6 @@ module Dominion.Cards where
 import Dominion.Model
 
 import qualified Control.Monad as M
-import qualified Control.Monad.Trans.State.Lazy as St
 import Data.Char (toLower)
 import qualified Data.List as L
 import qualified Data.Map.Strict as Map
@@ -57,12 +56,12 @@ baseCards = map ($ Base)
    action 125 "Adventurer" 6 (adventurer [] [])
    ]
 
-seqSteps :: (a -> GameState -> GameStep) -> [a] -> GameState -> GameStep
-seqSteps f [] state = State state
+seqSteps :: (a -> GameState -> Simulation) -> [a] -> GameState -> Simulation
+seqSteps f [] state = return $ State state
 seqSteps f (x:xs) state = f x state `andThen` seqSteps f xs
 
 seqActions :: (a -> Action) -> [a] -> Action
-seqActions _ [] _ state = State state
+seqActions _ [] _ state = return $ State state
 seqACtions f (x:xs) p state = f x p state `andThen` seqActions f xs p
 
 playAttack :: Action -> Action
@@ -72,7 +71,7 @@ playAttack attack attacker state = seqSteps checkAttack (opponentNames state att
     -- TODO can we do this more elegantly, triggers again?
     checkAttack op state
       | moat `elem` h =
-        decision (YesNo QOption moat (\b -> if b then State state else attack op state)) op state
+        decision (YesNo QOption moat (\b -> if b then return (State state) else attack op state)) op state
       | otherwise = attack op state
       where
         h = hand $ playerByName state op
@@ -92,9 +91,9 @@ chancellor :: Action
 chancellor player state = plusMoney 2 player state
   `andThen` \s2 -> decision (YesNo QOption (cardData Map.! "chancellor") (cont s2)) player s2
   where
-    cont state b = State $ if b then updatePlayer state player
-                                       (\p -> p { deck = [], discardPile = deck p ++ discardPile p })
-                                else state
+    cont state b = return $ State $ if b then updatePlayer state player
+                                                (\p -> p { deck = [], discardPile = deck p ++ discardPile p })
+                                         else state
 
 workshop :: Action
 workshop player state = app player state $ chooseOne QGain affordable &&= gain
@@ -105,14 +104,14 @@ bureaucrat :: Action
 bureaucrat player state = (gainTo silver (TopOfDeck player) &&& playAttack treasureToDeck) player state
   where
     treasureToDeck op state
-      | null treasures = info (op ++ " reveals hand " ++ summarizeCards h) allPlayerId state
+      | null treasures = info AllPlayers (op ++ " reveals hand " ++ summarizeCards h) >> return (State state)
       -- TODO QDiscard is an approximation only
       | otherwise = decision (Choice (QDiscard (Hand op)) treasures cont) op state
       where
         h = hand $ playerByName state op
         treasures = filter isTreasure h
-        cont card = info (op ++ " reveals " ++ cardName card) allPlayerId state
-          `andThen` (State . transfer card (Hand op) (TopOfDeck op))
+        cont card = info AllPlayers (op ++ " reveals " ++ cardName card)
+          >> return (State $ transfer card (Hand op) (TopOfDeck op) state)
 
 feast :: Action
 feast player state = trash (cardData Map.! "feast") InPlay player state
@@ -124,7 +123,7 @@ militia :: Action
 militia player state = (plusMoney 2 &&& playAttack discardTo3) player state
   where
     discardTo3 op state
-      | length h <= 3 = State state
+      | length h <= 3 = return $ State state
       | otherwise = decision (Choices (QDiscard (Hand op)) h (length h - 3,length h - 3) cont) op state
       where
         h = hand $ playerByName state op
@@ -133,13 +132,13 @@ militia player state = (plusMoney 2 &&& playAttack discardTo3) player state
 moneylender :: Action
 moneylender player state
   | copper `elem` h = (trash copper (Hand player) &&& plusMoney 3) player state
-  | otherwise = State state
+  | otherwise = return $ State state
   where
     h = hand $ playerByName state player
 
 remodel :: Action
 remodel player state
-  | null h = State state
+  | null h = return $ State state
   | otherwise = decision (Choice QTrash h cont) player state
   where
     h = hand $ playerByName state player
@@ -151,31 +150,40 @@ remodel player state
 spy :: Action
 spy player state = (plusCards 1 &&& plusActions 1 &&& spyAction &&& playAttack spyAction) player state
   where
-    spyAction attackee state = maybe (State state) (doSpy attackee) $ ensureCanDraw 1 state attackee
+    spyAction attackee state =
+      do
+        maybeS2 <- ensureCanDraw 1 state attackee
+        maybe (return $ State state) (doSpy attackee) maybeS2
     doSpy attackee state =
-      info (attackee ++ " reveals " ++ cardName top) allPlayerId state
-      `andThen` decision (YesNo (QDiscard (TopOfDeck player)) top cont) player
+      info AllPlayers (attackee ++ " reveals " ++ cardName top)
+      >> decision (YesNo (QDiscard (TopOfDeck player)) top cont) player state
       where
-        cont b = if b then discard top (TopOfDeck attackee) attackee state else State state
+        cont b = if b then discard top (TopOfDeck attackee) attackee state else return (State state)
         top = head $ deck $ playerByName state attackee
 
 thief :: Action
 thief player state = playAttack doThief player state
   where
+    doThief :: Action
     doThief op state =
-      maybe (State state) (decide op) (M.mplus (ensureCanDraw 2 state op) (ensureCanDraw 1 state op))
+      do
+        maybeS2 <- ensureCanDraw 2 state op
+        maybeS3 <- case maybeS2 of
+                    (Just _) -> return maybeS2
+                    Nothing -> ensureCanDraw 1 state op
+        maybe (return $ State state) (decide op) maybeS3
     decide op state
       | null (filter isTreasure top) = seqSteps (\c -> discard c (TopOfDeck op) op) top state
       | otherwise = decision (Choice QTrash (filter isTreasure top) cont) player state
       where
         top = take 2 $ hand $ playerByName state op
         cont card = trash card (TopOfDeck op) op state
-          `andThen` \s -> decision (YesNo QGain card (\b -> if b then gainFrom card Trash player s else State s)) player s
+          `andThen` \s -> decision (YesNo QGain card (\b -> if b then gainFrom card Trash player s else return $ State s)) player s
           `andThen` \s2 -> seqSteps (\c -> discard c (TopOfDeck op) op) (L.delete card top) s2
 
 throneRoom :: Action
 throneRoom player state
-  | actions == [] = State state
+  | actions == [] = return $ State state
   | otherwise = decision (Choice QPlay actions cont) player state
   where
     actions = filter isAction (hand (playerByName state player))
@@ -186,12 +194,12 @@ councilRoom player state = (plusCards 4 &&& plusBuys 1) player state `andThen` s
 
 library :: [Card] -> Action
 library aside name state
-  | length (hand (playerByName state name)) >= 7 = State finalState
-  | otherwise = maybe (State finalState) draw1 (ensureCanDraw 1 state name)
+  | length (hand (playerByName state name)) >= 7 = return $ State finalState
+  | otherwise = ensureCanDraw 1 state name >>= \maybeS2 -> maybe (return $ State finalState) draw1 maybeS2
   where
     finalState = updatePlayer state name (\p -> p { discardPile = aside ++ discardPile p})
     draw1 s2
-      | not (canDraw (activePlayer s2)) = State s2
+      | not (canDraw (activePlayer s2)) = return $ State s2
       | isAction card = decision (YesNo QDraw card cont) name s2
       | otherwise = next
       where
@@ -202,7 +210,7 @@ library aside name state
 
 mine :: Action
 mine player state
-  | treasures == [] = State state
+  | treasures == [] = return $ State state
   | otherwise = decision (Choice QTrash treasures cont) player state
   where
     cont card = trash card (Hand player) player state `andThen` gainDecision card
@@ -217,10 +225,10 @@ witch = plusCards 2 &&& playAttack (gain curse)
 adventurer :: [Card] -> [Card] -> Action
 adventurer treasures others player state
   | length treasures >= 2 = terminal
-  | otherwise = maybe terminal draw1 $ ensureCanDraw 1 state player
+  | otherwise =  ensureCanDraw 1 state player >>= \maybeS2 -> maybe terminal draw1 maybeS2
   where
     -- TODO this should probably trigger discard
-    terminal = State (updatePlayer state player (\p -> p { hand = treasures ++ hand p, discardPile = others ++ discardPile p }))
+    terminal = return $ State (updatePlayer state player (\p -> p { hand = treasures ++ hand p, discardPile = others ++ discardPile p }))
     draw1 state = adventurer (if isTreasure top then top:treasures else treasures)
                              (if isTreasure top then others else top:others)
                              player s2
@@ -277,7 +285,7 @@ city = plusCards 1
 
 kingsCourt :: Action
 kingsCourt player state
-  | actions == [] = State state
+  | actions == [] = return $ State state
   | otherwise = decision (Choice QPlay actions cont) player state
   where
     actions = filter isAction (hand (playerByName state player))
@@ -318,19 +326,20 @@ hinterlandCards = map ($ Hinterlands)
 jackOfAllTrades :: Action
 jackOfAllTrades = gain silver &&& spyTop &&& drawTo5 &&& optTrash
   where
-    spyTop player state = maybe (State state) (chooseKeepDiscard player) (ensureCanDraw 1 state player)
-    chooseKeepDiscard player state = (info ("Top of deck is " ++ cardName top)
-      &&& decision (YesNo (QDiscard (TopOfDeck player)) top cont)) player state
+    spyTop player state = ensureCanDraw 1 state player >>= \maybeS2 -> maybe (return $ State state) (chooseKeepDiscard player) maybeS2
+    chooseKeepDiscard player state =
+      info (VisibleToPlayer player) ("Top of deck is " ++ cardName top)
+      >> decision (YesNo (QDiscard (TopOfDeck player)) top cont) player state
       where
         top = head $ deck $ playerByName state player
-        cont b = if b then discard top (TopOfDeck player) player state else State state
+        cont b = if b then discard top (TopOfDeck player) player state else return (State state)
 
-    drawTo5 player state = if num >= 5 then State state else plusCards (5-num) player state
+    drawTo5 player state = if num >= 5 then return (State state) else plusCards (5-num) player state
       where
         num = length $ hand $ playerByName state player
 
     optTrash player state
-      | null candidates = State state
+      | null candidates = return $ State state
       | otherwise = optDecision (Choice QTrash candidates cont) player state
       where
         candidates = filter (not . isTreasure) $ hand $ playerByName state player
