@@ -111,7 +111,9 @@ data GameState = GameState { players :: Map.Map PlayerId Player,
                              ply :: Int
                              }
 
-data Visibility = AllPlayers | VisibleToPlayer PlayerId
+data Result = Tie [PlayerId] | Win PlayerId deriving (Eq, Read, Show)
+
+data Visibility = AllPlayers | VisibleToPlayer PlayerId deriving (Eq)
 
 instance Show Visibility where
   show AllPlayers = "All"
@@ -507,8 +509,8 @@ pass _ = toSimulation
 newTurn :: TurnState
 newTurn = TurnState { money = 0, buys = 1, actions = 1 }
 
-cleanupPhase :: Action
-cleanupPhase _ state = M.liftM State nnext
+nextTurn :: GameState -> SimulationT GameState
+nextTurn state = nnext
   where
     current = head (turnOrder state)
     next = state { turn = newTurn,
@@ -517,6 +519,10 @@ cleanupPhase _ state = M.liftM State nnext
 
     -- TODO can cleanup trigger anything like discard ?
     nnext = updatePlayerR next current (\p -> draw p { hand = [], inPlay = [], discardPile = hand p ++ inPlay p ++ discardPile p } 5)
+
+
+cleanupPhase :: Action
+cleanupPhase _ state = M.liftM State (nextTurn state)
 
 buyPhase :: Action
 buyPhase name state
@@ -559,6 +565,23 @@ finished :: GameState -> Bool
 finished state =
   numInSupply state province == 0
   || Map.size (Map.filter (==0) (piles state)) >= 3
+
+winner :: GameState -> Result
+winner state
+  | rank one two == EQ = Tie (L.sort $ map name $ takeWhile ((==EQ) . rank one) ranked)
+  | otherwise = Win (name one)
+  where
+    ranked@(one:two:_) = players state |> Map.elems |> L.sortBy rank |> reverse
+    rank p1 p2
+      | pcompare == EQ = compare (hadFinalTurn p2) (hadFinalTurn p1)
+      | otherwise = pcompare
+      where
+        pcompare = compare (points p1) (points p2)
+
+    hadFinalTurn player = (name player) `elem` playersHadFinalTurn
+
+    playersHadFinalTurn = drop (noPlayers - ((ply state + noPlayers - 1) `mod` noPlayers)) $ turnOrder state
+    noPlayers = length $ players state
 
 
 -- Simulation Stepping

@@ -22,7 +22,7 @@ tests = testGroup "Tests" [gameTests, cardTests, botTests]
 -- Core game engine
 
 gameTests = testGroup "Game"
-  [ initialStateTest]
+  [ initialStateTest, gameEndTest ]
 
 starterTableau = map lookupCard ["cellar", "moat", "village", "workshop", "woodcutter", "smithy", "remodel", "militia", "market", "mine"]
 
@@ -42,11 +42,28 @@ initialStateTest = testGroup "Game creation"
 
     testCase "A colony game has 19 piles" $
     19 @=? Map.size (piles sutColony)
-
     ]
   where
     [sut,sutColony] = map (\typ -> evalSim (mkGame typ ["Alice","Bob"] starterTableau) (mkStdGen 0)) [StandardGame, ColonyGame]
 
+toState :: GameStep -> GameState
+toState (State state) = state
+toState _ = error "Trying to extract state from decision"
+
+gameEndTest = testGroup "Game End"
+  [ testCase "Tie at the start of the game" $
+    Tie ["Alice","Bob"] @=? winner sut,
+
+    testCase "Win after one turn is second player" $
+    Win "Bob" @=? winner next,
+
+    testCase "Win with one extra estate" $
+    Win "Alice" @=? winner afterEstate
+    ]
+  where
+    sut = evalSim (mkGame StandardGame ["Alice","Bob"] starterTableau) (mkStdGen 0)
+    next = evalSim (nextTurn sut) (mkStdGen 0)
+    afterEstate = toState $ evalSim ((gain estate &&& cleanupPhase) "Alice" sut) (mkStdGen 0)
 
 
 -- Cards
