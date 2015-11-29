@@ -252,8 +252,8 @@ andThen sim f = do
 toAction :: GameStep -> Action
 toAction step _ _ = return step
 
-app :: PlayerId -> GameState -> Action -> Simulation
-app p s action = action p s
+toSimulation :: GameState -> Simulation
+toSimulation state = return (State state)
 
 {-# INLINE (&&&) #-}
 (&&&) :: Action -> Action -> Action
@@ -261,7 +261,7 @@ app p s action = action p s
 
 {-# INLINE (&&+) #-}
 (&&+) :: Action -> (PlayerId -> GameState -> Action) -> Action
-(&&+) act1 act2 player state = act1 player state `andThen` (\s2 -> app player s2 $ act2 player s2)
+(&&+) act1 act2 player state = act1 player state `andThen` (\s2 -> (act2 player s2) player s2)
 
 {-# INLINE (&&=) #-}
 (&&=) :: (a -> Action) -> a -> Action
@@ -457,7 +457,7 @@ play :: Card -> Action
 play card player state = playEffect card player (transfer card (Hand player) InPlay state)
 
 playAll :: [Card] -> Action
-playAll [] _ state = return $ State $ state
+playAll [] _ state = toSimulation state
 playAll (c:cs) player state = play c player state `andThen` playAll cs player
 
 gainFrom :: Card -> Location -> Action
@@ -469,7 +469,7 @@ gainTo :: Card -> Location -> Action
 gainTo card target player state
   | inSupply state card =
     info AllPlayers (player ++ " gains " ++ cardName card) >> return (State $ transfer card Supply target state)
-  | otherwise = return $ State state
+  | otherwise = toSimulation state
 
 gain :: Card -> Action
 gain card player = gainTo card (Discard player) player
@@ -487,7 +487,7 @@ discard card loc player state =
   info AllPlayers (player ++ " discards " ++ cardName card) >> return (State $ transfer card loc (Discard player) state)
 
 plusMoney :: Int -> Action
-plusMoney num _ state = return $ State $ state { turn = (turn state) { money = num + money (turn state) } }
+plusMoney num _ state = toSimulation $ state { turn = (turn state) { money = num + money (turn state) } }
 
 plusCards :: Int -> Action
 plusCards num player state =
@@ -496,16 +496,16 @@ plusCards num player state =
     let newhand = hand (playerByName s2 player)
     let newcards = take (length newhand - length (hand (playerByName state player))) newhand
     info (VisibleToPlayer player) ("Drew " ++ summarizeCards newcards)
-    return $ State s2
+    toSimulation s2
 
 plusBuys :: Int -> Action
-plusBuys num _ state = return $ State $ state { turn = (turn state) { buys = num + buys (turn state) } }
+plusBuys num _ state = toSimulation $ state { turn = (turn state) { buys = num + buys (turn state) } }
 
 plusActions :: Int -> Action
-plusActions num _ state = return $ State $ state { turn = (turn state) { actions = num + actions (turn state) } }
+plusActions num _ state = toSimulation $ state { turn = (turn state) { actions = num + actions (turn state) } }
 
 pass :: Action
-pass _ state = return $ State state
+pass _ = toSimulation
 
 -- Macro flows
 
@@ -526,7 +526,7 @@ cleanupPhase _ state = M.liftM State nnext
 buyPhase :: Action
 buyPhase name state
   | length treasures > 0 = playTreasureDecision
-  | buys (turn state) == 0 = return $ State state
+  | buys (turn state) == 0 = toSimulation state
   | otherwise = buyDecision state
   where
     treasures = filter isTreasure (hand (activePlayer state))
@@ -549,7 +549,7 @@ buyPhase name state
 
 actionPhase :: Action
 actionPhase name state
-  | actions (turn state) == 0 || null actionsInHand = return $ State state
+  | actions (turn state) == 0 || null actionsInHand = toSimulation state
   | otherwise = optDecision (Choice QPlay actionsInHand (\card -> (plusActions (-1) &&& play card &&& actionPhase) name state))
                          name state
   where
