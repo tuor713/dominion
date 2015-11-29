@@ -77,47 +77,6 @@ human :: PlayerId -> Bot
 human player _ = interact player
 
 
-mkPlayer :: String -> RandomState Player
-mkPlayer name = draw Player { name = name, hand = [], discardPile = initialDeck, deck = [], inPlay = [] } 5
-
-initialDeck :: [Card]
-initialDeck = replicate 7 copper ++ replicate 3 estate
-
--- TODO card as data has made this less type safe
-isStandardVictory c
-  | c == estate = True
-  | c == duchy = True
-  | c == province = True
-  | c == colony = True
-  | otherwise = False
-
-mkGame :: [String] -> [Card] -> StdGen -> GameState
-mkGame names kingdomCards gen =
-  GameState { players = Map.fromList $ zip names players,
-              turnOrder = names,
-              piles = Map.fromList $ map (\c -> (c, noInPile c)) (standardCards ++ kingdomCards),
-              trashPile = [],
-              turn = newTurn,
-              ply = 1,
-              gen = gen'
-              }
-  where
-    standardCards = [estate,duchy,province,copper,silver,gold,curse]
-    playerNo = length names
-    noInPile card
-      | isStandardVictory card && playerNo == 2 = 8
-      | isStandardVictory card = 12
-      | card == curse && playerNo == 2 = 10
-      | card == curse && playerNo == 3 = 20
-      | card == curse = 30
-      | card == gold = 30
-      | card == silver = 40
-      | card == copper = 60 - 7 * playerNo
-      | otherwise = 10
-
-    (players,gen') = St.runState (sequence $ map mkPlayer names) gen
-
-
 -- Simulation running
 
 runSimulation :: Map.Map PlayerId AIBot -> [GameState] -> GameStep -> [GameState]
@@ -139,7 +98,7 @@ runSimulations _ _ 0 _ = []
 runSimulations bots tableau num ingen = states : runSimulations bots tableau (num-1) gen''
   where
     (players,gen') = shuffle' (map fst bots) ingen
-    initial = mkGame players tableau gen'
+    initial = mkGame StandardGame players tableau gen'
     states = runSimulation (Map.fromList bots) [] $ State initial
     gen'' = gen $ last states
 
@@ -222,4 +181,4 @@ playOnConsole :: [(String,Bot)] -> [String] -> IO ()
 playOnConsole players cards =
   do
     gen <- newStdGen
-    runGameConsole (Map.fromList players) $ State $ mkGame (map fst players) (map lookupCard cards) gen
+    runGameConsole (Map.fromList players) $ State $ mkGame StandardGame (map fst players) (map lookupCard cards) gen

@@ -36,7 +36,9 @@ type RandomState a = St.State StdGen a
 -- it would have an identity, and a location (and could be traced throughout the game)
 -- > it allows cards to be transferred without keeping location as a separate concept
 -- > it allows precise implementation of concepts like, 'if X then do Y to this card'
-data Card = Card { cardId :: Int,
+
+data Card = Card { -- Card id is purely a performance artifact to avoid string comparisons
+                   cardId :: Int,
                    cardName :: String,
                    edition :: Edition,
                    -- TODO this only works for Base
@@ -57,6 +59,34 @@ instance Eq Card where
 instance Ord Card where
   c1 <= c2 = show c1 <= show c2
 
+-- Card definition helpers
+
+noPoints = const 0
+
+treasure id name cost money edition = Card id name edition cost [Treasure] noPoints (plusMoney money)
+action id name cost effect edition = Card id name edition cost [Action] noPoints effect
+attack id name cost effect edition = Card id name edition cost [Action, Attack] noPoints effect
+victory id name cost points edition = Card id name edition cost [Victory] (const points) pass
+carddef id name cost types points effect edition = Card id name edition cost types points effect
+
+-- Basic cards
+
+copper   = treasure 0 "Copper" 0 1 Base
+silver   = treasure 1 "Silver" 3 2 Base
+gold     = treasure 2 "Gold" 6 3 Base
+estate   = victory 3 "Estate" 2 1 Base
+duchy    = victory 4 "Duchy" 5 3 Base
+province = victory 5 "Province" 8 6 Base
+curse    = carddef 6 "Curse" 0 [CurseType] (const (-1)) pass Base
+-- TODO Potion obviously does not actually do anything here yet
+potion   = treasure 7 "Potion" 4 0 Alchemy
+platinum = treasure 8 "Platinum" 9 5 Prosperity
+colony   = victory 9 "Colony" 11 10 Prosperity
+
+basicCards = [copper, silver, gold, estate, duchy, province, curse, potion, platinum, colony]
+
+
+
 type PlayerId = String
 allPlayerId = "::all::"
 
@@ -73,6 +103,9 @@ data TurnState = TurnState { money :: Int,
                              actions :: Int
                              }
                              deriving (Show)
+
+
+data GameType = StandardGame | ColonyGame deriving (Eq, Read, Show)
 
 data GameState = GameState { players :: Map.Map PlayerId Player,
                              turnOrder :: [PlayerId],
@@ -93,9 +126,6 @@ data GameState = GameState { players :: Map.Map PlayerId Player,
 -- > what is decided (the crux)
 --   > what action
 --   > what target
-
-
-
 
 data DecisionType = QPlay | QBuy | QDraw | QTreasures | QTrash | QGain | QDiscard Location | QOption
 
@@ -133,6 +163,50 @@ instance Show GameState where
     "actions: " ++ show (actions (turn g)) ++ ", buys: " ++ show (buys (turn g)) ++ ", money: " ++ show (money (turn g)) ++
     " }\n" ++
     "}"
+
+
+-- Game creation
+
+mkPlayer :: String -> RandomState Player
+mkPlayer name = draw Player { name = name, hand = [], discardPile = initialDeck, deck = [], inPlay = [] } 5
+
+initialDeck :: [Card]
+initialDeck = replicate 7 copper ++ replicate 3 estate
+
+isStandardVictory c
+  | c == estate = True
+  | c == duchy = True
+  | c == province = True
+  | c == colony = True
+  | otherwise = False
+
+mkGame :: GameType -> [String] -> [Card] -> StdGen -> GameState
+mkGame typ names kingdomCards gen =
+  GameState { players = Map.fromList $ zip names players,
+              turnOrder = names,
+              piles = Map.fromList $ map (\c -> (c, noInPile c)) (standardCards ++ kingdomCards),
+              trashPile = [],
+              turn = newTurn,
+              ply = 1,
+              gen = gen'
+              }
+  where
+    standardCards = extraCards ++ [estate,duchy,province,copper,silver,gold,curse]
+    extraCards = if typ == ColonyGame then [platinum, colony] else []
+    playerNo = length names
+    noInPile card
+      | isStandardVictory card && playerNo == 2 = 8
+      | isStandardVictory card = 12
+      | card == curse && playerNo == 2 = 10
+      | card == curse && playerNo == 3 = 20
+      | card == curse = 30
+      | card == gold = 30
+      | card == silver = 40
+      | card == copper = 60 - 7 * playerNo
+      | otherwise = 10
+
+    (players,gen') = St.runState (sequence $ map mkPlayer names) gen
+
 
 
 -- Combinators
@@ -469,5 +543,5 @@ playTurn name state =
 
 finished :: GameState -> Bool
 finished state =
-  numInSupply state Card { cardId = 5, cardName = "Province" } == 0
+  numInSupply state province == 0
   || Map.size (Map.filter (==0) (piles state)) >= 3

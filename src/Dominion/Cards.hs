@@ -10,19 +10,9 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Maybe as Maybe
 import System.Random (StdGen, mkStdGen, randomR, newStdGen)
 
-
-noPoints = const 0
-
-treasure id name cost money edition = Card id name edition cost [Treasure] noPoints (plusMoney money)
-action id name cost effect edition = Card id name edition cost [Action] noPoints effect
-attack id name cost effect edition = Card id name edition cost [Action, Attack] noPoints effect
-victory id name cost points edition = Card id name edition cost [Victory] (const points) pass
-carddef id name cost types points effect edition = Card id name edition cost types points effect
-
-
 cardData :: Map.Map String Card
 cardData = Map.fromList $ map (\c -> (map toLower $ cardName c, c))
-  (concat [baseCards, intrigueCards, prosperityCards, hinterlandCards])
+  (concat [basicCards, baseCards, intrigueCards, prosperityCards, hinterlandCards])
 
 maybeCard :: String -> Maybe Card
 maybeCard name = Map.lookup (map toLower name) cardData
@@ -31,70 +21,40 @@ lookupCard :: String -> Card
 lookupCard name = cardData Map.! (map toLower name)
 
 
--- Dummy card for hidden information
-curse = cardData Map.! "curse"
-
-estate = cardData Map.! "estate"
-duchy = cardData Map.! "duchy"
-province = cardData Map.! "province"
-colony = cardData Map.! "colony"
-
-copper = cardData Map.! "copper"
-silver = cardData Map.! "silver"
-gold = cardData Map.! "gold"
-platinum = cardData Map.! "platinum"
-
 cSmithy = cardData Map.! "smithy"
-
-
--- Common patterns
-
-
-
-
 
 -- Base Edition
 
 baseCards = map ($ Base)
-  [treasure 0 "Copper" 0 1,
-   treasure 1 "Silver" 3 2,
-   treasure 2 "Gold" 6 3,
+  [action 101 "Cellar" 2 cellar,
+   action 102 "Chapel" 2 chapel,
+   carddef 103 "Moat" 2 [Action, Reaction] (const 0) (plusCards 2),
 
-   victory 3 "Estate" 2 1,
-   victory 4 "Duchy" 5 3,
-   victory 5 "Province" 8 6,
+   action 104 "Chancellor" 3 chancellor,
+   action 105 "Village" 3 (plusActions 2 &&& plusCards 1),
+   action 106 "Woodcutter" 3 (plusBuys 1 &&& plusMoney 2),
+   action 107 "Workshop" 3 workshop,
 
-   carddef 6 "Curse" 0 [CurseType] (const (-1)) pass,
+   attack 108 "Bureaucrat" 4 bureaucrat,
+   action 109 "Feast" 4 feast,
+   carddef 110 "Gardens" 4 [Victory] (\p -> length (allCards p) `quot` 10) pass,
+   attack 111 "Militia" 4 militia,
+   action 112 "Moneylender" 4 moneylender,
+   action 113 "Remodel" 4 remodel,
+   action 114 "Smithy" 4 (plusCards 3),
+   attack 115 "Spy" 4 spy,
+   attack 116 "Thief" 4 thief,
+   action 117 "Throne Room" 4 throneRoom,
 
-   action 7 "Cellar" 2 cellar,
-   action 8 "Chapel" 2 chapel,
-   carddef 9 "Moat" 2 [Action, Reaction] (const 0) (plusCards 2),
+   action 118 "Council Room" 5 councilRoom,
+   action 119 "Festival" 5 (plusActions 2 &&& plusBuys 1 &&& plusMoney 2),
+   action 120 "Laboratory" 5 (plusCards 2 &&& plusActions 1),
+   action 121 "Library" 5 (library []),
+   action 122 "Market" 5 (plusCards 1 &&& plusActions 1 &&& plusBuys 1 &&& plusMoney 1),
+   action 123 "Mine" 5 mine,
+   attack 124 "Witch" 5 witch,
 
-   action 10 "Chancellor" 3 chancellor,
-   action 11 "Village" 3 (plusActions 2 &&& plusCards 1),
-   action 12 "Woodcutter" 3 (plusBuys 1 &&& plusMoney 2),
-   action 13 "Workshop" 3 workshop,
-
-   attack 14 "Bureaucrat" 4 bureaucrat,
-   action 15 "Feast" 4 feast,
-   carddef 16 "Gardens" 4 [Victory] (\p -> length (allCards p) `quot` 10) pass,
-   attack 17 "Militia" 4 militia,
-   action 18 "Moneylender" 4 moneylender,
-   action 19 "Remodel" 4 remodel,
-   action 20 "Smithy" 4 (plusCards 3),
-   attack 21 "Spy" 4 spy,
-   attack 22"Thief" 4 thief,
-   action 23 "Throne Room" 4 throneRoom,
-
-   action 24 "Council Room" 5 councilRoom,
-   action 25 "Festival" 5 (plusActions 2 &&& plusBuys 1 &&& plusMoney 2),
-   action 26 "Laboratory" 5 (plusCards 2 &&& plusActions 1),
-   action 27 "Library" 5 (library []),
-   action 28 "Market" 5 (plusCards 1 &&& plusActions 1 &&& plusBuys 1 &&& plusMoney 1),
-   action 29 "Mine" 5 mine,
-   attack 30 "Witch" 5 witch,
-
-   action 31 "Adventurer" 6 (adventurer [] [])
+   action 125 "Adventurer" 6 (adventurer [] [])
    ]
 
 seqSteps :: (a -> GameState -> GameStep) -> [a] -> GameState -> GameStep
@@ -279,33 +239,31 @@ intrigueCards = map ($ Intrigue)
 -- Prosperity
 
 prosperityCards = map ($ Prosperity)
-  [treasure 401 "Platinum" 9 5,
-   victory 402 "Colony" 11 10,
-   -- 403 loan
-   -- 404 trade route
-   -- 405 watchtower
-   -- 406 bishop
-   -- 407 monument
-   -- 408 quarry
-   -- 409 talisman
-   action 410 "Worker's Village" 4 (plusCards 1 &&& plusActions 2 &&& plusBuys 1),
-   action 411 "City" 5 city,
-   -- 412 contraband
-   -- 413 counting house
-   -- 414 mint
-   -- 415 mountebank
-   -- 416 rabble
-   -- 417 royal seal
-   -- 418 vault
-   -- 419 venture
-   -- 420 goons
-   -- 421 grand market
-   -- 422 hoard
-   -- 423 bank
-   -- 424 expand
-   -- 425 forge
-   action 426 "King's Court" 7 kingsCourt
-   -- 427 peddler
+  [-- 401 loan
+   -- 402 trade route
+   -- 403 watchtower
+   -- 404 bishop
+   -- 405 monument
+   -- 406 quarry
+   -- 407 talisman
+   action 408 "Worker's Village" 4 (plusCards 1 &&& plusActions 2 &&& plusBuys 1),
+   action 409 "City" 5 city,
+   -- 410 contraband
+   -- 411 counting house
+   -- 412 mint
+   -- 413 mountebank
+   -- 414 rabble
+   -- 415 royal seal
+   -- 416 vault
+   -- 417 venture
+   -- 418 goons
+   -- 419 grand market
+   -- 420 hoard
+   -- 421 bank
+   -- 422 expand
+   -- 423 forge
+   action 424 "King's Court" 7 kingsCourt
+   -- 425 peddler
    ]
 
 city :: Action
