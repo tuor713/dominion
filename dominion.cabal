@@ -32,6 +32,8 @@ Executable dominion
     split                     >= 0.2.2,
     random                    >= 1.0,
     parsec                    >= 3.1.9,
+    blaze-markup              >= 0.7.0,
+    blaze-html                >= 0.8.1.1,
     -- for Control.Monad.IO.Class
     transformers              >= 0.4.3.0
 

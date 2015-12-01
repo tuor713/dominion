@@ -12,18 +12,26 @@ import Control.Monad.IO.Class
 import Snap.Core
 import Snap.Util.FileServe
 import Snap.Http.Server
+import qualified Data.Aeson as J
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as C8
 import qualified Data.ByteString.Builder as B
 import qualified Data.ByteString.Lazy as LBS
-import qualified Data.Aeson as J
-import qualified Data.Maybe as Maybe
+import Data.Char (toLower)
 import qualified Data.List as L
+import qualified Data.Maybe as Maybe
+import Data.String (fromString)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as E
 import System.Log.FastLogger
 import qualified System.Environment as Env
 import System.Random (StdGen, mkStdGen, randomR, newStdGen)
+
+import Text.Blaze.Html.Renderer.Utf8 (renderHtml)
+import Text.Blaze.Html (toHtml)
+import qualified Text.Blaze.Html5 as H
+import qualified Text.Blaze.Html5.Attributes as A
+import Text.Blaze.Internal (MarkupM(Parent))
 
 runConsole :: [String] -> IO ()
 runConsole (num:_) =
@@ -81,9 +89,16 @@ site logset =
     dir "static" (serveDirectory "static")
 
 dataToJavaScriptArray xs =
-  "[" `C8.append`
-  (C8.intercalate "," $ map (\(x,y) -> C8.pack ("{name:"++ show x ++ ", value:" ++ show y ++ "}")) xs)
-  `C8.append` "]"
+  C8.unpack $
+    "[" `C8.append`
+    (C8.intercalate "," $ map (\(x,y) -> C8.pack ("{name:"++ show x ++ ", value:" ++ show y ++ "}")) xs)
+    `C8.append` "]"
+
+cardImagePath :: Card -> String
+cardImagePath card = "/static/images/cards/" ++ map (\c -> if c == ' ' then '_' else toLower c) (cardName card) ++ ".jpeg"
+
+svg :: H.Html -> H.Html
+svg = Parent "svg" "<svg" "</svg>"
 
 simulationHandler :: Snap ()
 simulationHandler =
@@ -100,29 +115,38 @@ simulationHandler =
     let games = evalSim (runSimulations [("Alice",bigSmithy "Alice"), ("Bob",doubleJack "Bob")] tableau numGames) gen
     let gameLengths = L.sortOn fst $ frequencies (map (turnNo . last) games)
 
-    writeBS $ "<html><head>"
-              `C8.append` "<link rel=\"stylesheet\" href=\"/static/site.css\">"
-              `C8.append` "<script src=\"//d3js.org/d3.v3.min.js\" charset=\"utf-8\"></script>"
-              `C8.append` "<script src=\"/static/js/graph.js\" charset=\"utf-8\"></script>"
-              `C8.append` "</head><html>"
-              `C8.append` "<h3>Stats</h3>"
-              `C8.append` "<pre>"
-              `C8.append` C8.pack (stats games)
-              `C8.append` "</pre>"
-              `C8.append` "<h3>Winners</h3><svg id=\"winners\" class=\"chart\" />"
-              `C8.append` "<h3>Turns per Game</h3><svg id=\"turns\" class=\"chart\" />"
-              `C8.append` "<script>"
+    writeLBS $ renderHtml $
+      H.html $ do
+        H.head $ do
+          H.link H.! A.href "/static/site.css" H.! A.rel "stylesheet"
+          H.script H.! A.src "//d3js.org/d3.v3.min.js" H.! A.charset "utf-8" $ ""
+          H.script H.! A.src "/static/js/graph.js" H.! A.charset "utf-8" $ ""
 
-              `C8.append` "barChart(\"#winners\",300,200,percentageData("
-              `C8.append` dataToJavaScriptArray (winRatio games)
-              `C8.append` "));"
+        H.body $ do
+          H.h3 "Tableau"
 
-              `C8.append` "barChart(\"#turns\",600,400,percentageData("
-              `C8.append` dataToJavaScriptArray gameLengths
-              `C8.append` "));"
+          H.div $ do
+            forM_ (L.sortBy (\c1 c2 -> compare (cost c1) (cost c2) `mappend` compare (cardName c1) (cardName c2)) tableau) $ \card ->
+              H.img H.! A.style "margin: 5px; width: 150px; height: 238px"
+                    H.! A.src (fromString (cardImagePath card))
 
-              `C8.append` "</script>"
-              `C8.append` "</body></html>"
+          H.h3 "Stats"
+          H.pre $ toHtml $ stats games
+
+          H.h3 "Winners"
+          svg H.! A.id "winners" H.! A.class_ "chart" $ ""
+
+          H.h3 "Turns per Game"
+          svg H.! A.id "turns" H.! A.class_ "chart" $ ""
+
+          H.script $ fromString
+                     ("barChart(\"#winners\",300,200,percentageData(" ++
+                      dataToJavaScriptArray (winRatio games) ++
+                      "));\n" ++
+                      "barChart(\"#turns\",600,400,percentageData(" ++
+                      dataToJavaScriptArray gameLengths ++
+                      "));")
+
 
 
 echoHandler :: Snap ()
