@@ -5,6 +5,7 @@ import Dominion
 import Dominion.Model
 import Dominion.Cards
 import Dominion.Bots
+import Dominion.Stats
 
 import Control.Applicative
 import Control.Monad
@@ -20,6 +21,7 @@ import qualified Data.ByteString.Lazy as LBS
 import Data.Char (toLower)
 import qualified Data.List as L
 import qualified Data.Maybe as Maybe
+import qualified Data.Map.Strict as Map
 import Data.String (fromString)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as E
@@ -37,8 +39,13 @@ runConsole :: [String] -> IO ()
 runConsole (num:_) =
   do
     gen <- newStdGen
-    let games = evalSim (runSimulations [("Alice",bigSmithy "Alice"), ("Bob",doubleJack "Bob")] tableau (read num)) gen
-    putStrLn (stats games)
+    let stats = evalSim (runSimulations
+                          [("Alice",bigSmithy "Alice"), ("Bob",doubleJack "Bob")]
+                          tableau
+                          (emptyStats ["Alice","Bob"])
+                          (read num))
+                        gen
+    putStrLn (showStats stats)
   where
     tableau = map lookupCard ["market", "library", "smithy", "cellar", "chapel", "militia",
                               "village", "laboratory", "witch", "jack of all trades"]
@@ -112,14 +119,18 @@ simulationHandler =
     let tableau = map (lookupCard . C8.unpack) cardNames
 
     gen <- liftIO $ newStdGen
-    let games = evalSim (runSimulations [("Alice",bigSmithy "Alice"), ("Bob",doubleJack "Bob")] tableau numGames) gen
-    let gameLengths = L.sortOn fst $ frequencies (map (turnNo . last) games)
+    let stats = evalSim (runSimulations [("Alice",bigSmithy "Alice"), ("Bob",doubleJack "Bob")]
+                                        tableau
+                                        (emptyStats ["Alice","Bob"])
+                                        numGames)
+                        gen
+    let gameLengths = statTurnsPerGame stats
 
     writeLBS $ renderHtml $
       H.html $ do
         H.head $ do
           H.link H.! A.href "/static/site.css" H.! A.rel "stylesheet"
-          H.script H.! A.src "//d3js.org/d3.v3.min.js" H.! A.charset "utf-8" $ ""
+          H.script H.! A.src "/static/js/d3.v3.min.js" H.! A.charset "utf-8" $ ""
           H.script H.! A.src "/static/js/graph.js" H.! A.charset "utf-8" $ ""
 
         H.body $ do
@@ -131,7 +142,7 @@ simulationHandler =
                     H.! A.src (fromString (cardImagePath card))
 
           H.h3 "Stats"
-          H.pre $ toHtml $ stats games
+          H.pre $ toHtml $ showStats stats
 
           H.h3 "Winners"
           svg H.! A.id "winners" H.! A.class_ "chart" $ ""
@@ -139,14 +150,23 @@ simulationHandler =
           H.h3 "Turns per Game"
           svg H.! A.id "turns" H.! A.class_ "chart" $ ""
 
+          H.h3 "Average Victory Points per Turn"
+          svg H.! A.id "avgVictory" H.! A.class_ "chart" $ ""
+
           H.script $ fromString
                      ("barChart(\"#winners\",300,200,percentageData(" ++
-                      dataToJavaScriptArray (winRatio games) ++
+                      dataToJavaScriptArray (statWinRatio stats) ++
                       "));\n" ++
+
                       "barChart(\"#turns\",600,400,percentageData(" ++
                       dataToJavaScriptArray gameLengths ++
-                      "));")
+                      "));\n" ++
 
+                      "scatterPlot(\"#avgVictory\",600,400,"++
+                      dataToJavaScriptArray ((statAvgVictoryPerTurn stats) Map.! "Alice") ++ "," ++
+                      dataToJavaScriptArray ((statAvgVictoryPerTurn stats) Map.! "Bob") ++
+                      ");\n"
+                      )
 
 
 echoHandler :: Snap ()

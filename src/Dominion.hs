@@ -4,6 +4,7 @@ module Dominion where
 import Dominion.Model
 import Dominion.Cards
 import Dominion.Bots
+import Dominion.Stats
 
 import qualified Control.Monad as M
 import Prelude hiding (interact)
@@ -12,7 +13,6 @@ import System.Random (StdGen, mkStdGen, randomR, newStdGen)
 import Data.List.Split (wordsBy)
 import qualified Data.Map.Strict as Map
 import qualified Data.Maybe as Maybe
-
 
 list2MultiSet :: Ord a => [a] -> Map.Map a Int
 list2MultiSet xs = Map.fromListWith (+) $ map (,1) xs
@@ -93,37 +93,23 @@ runSimulation bots accu (Decision player state decision) =
 
 -- Sample run:
 -- runSimulations [("Alice",bigSmithy), ("Bob",betterBigMoney)] (map lookupCard ["market", "library", "smithy", "cellar", "chapel", "witch", "village", "laboratory", "festival", "festival"]) 100 >>= stats
-runSimulations :: [(PlayerId,AIBot)] -> [Card] -> Int -> SimulationT [[GameState]]
-runSimulations _ _ 0 = return []
-runSimulations bots tableau num =
+runSimulations :: [(PlayerId,AIBot)] -> [Card] -> Stats -> Int -> SimulationT Stats
+runSimulations _ _ stats 0 = return stats
+runSimulations bots tableau stats num =
   do
     players <- shuffle (map fst bots)
     initial <- mkGame StandardGame players tableau
     states <- runSimulation (Map.fromList bots) [] (State initial)
-    rest <- runSimulations bots tableau (num-1)
-    return (states:rest)
+    runSimulations bots tableau (collectStats stats states) (num-1)
 
 
 -- Stats
 
-frequencies :: Ord a => [a] -> [(a,Int)]
-frequencies xs = map (,1) xs |> Map.fromListWith (+) |> Map.toList |> L.sortOn (negate . snd)
-
-winRatio games =
-  games |>
-  map last |>
-  map (winnerName . winner) |>
-  frequencies |>
-  map (\(p,num) -> (p, fromIntegral num / fromIntegral (length games)))
-  where
-    winnerName (Win p) = p
-    winnerName (Tie _) = "Tie"
-
-stats :: [[GameState]] -> String
-stats games =
-  "No of games: " ++ show (length games) ++ "\n" ++
-  "Wins ratios: " ++ show (winRatio games) ++ "\n" ++
-  "Length of games: " ++ show (L.sortOn fst $ frequencies (map (turnNo . last) games))
+showStats :: Stats -> String
+showStats stats =
+  "No of games: " ++ show (statNumberOfGames stats) ++ "\n" ++
+  "Wins ratios: " ++ show (statWinRatio stats) ++ "\n" ++
+  "Length of games: " ++ show (statTurnsPerGame stats)
 
 showInfos :: [Info] -> IO ()
 showInfos infos = M.mapM_ (\(vis,msg) -> putStrLn ("[" ++ show vis ++ "] " ++ msg)) infos
