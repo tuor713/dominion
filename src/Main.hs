@@ -265,7 +265,7 @@ cardListToMap cards =
   Map.fromListWith (+) $ map (,1) cards
 
 decisionPage :: PlayerId -> (GameState,[Info],Decision) -> LBS.ByteString
-decisionPage pid (state,infos,decision) =
+decisionPage _ (state,infos,decision) =
   renderHtml $
     H.html $ do
       H.head $ do
@@ -277,42 +277,46 @@ decisionPage pid (state,infos,decision) =
       H.body $ do
         H.div H.! A.class_ "ui grid" $ do
           H.div H.! A.class_ "ten wide column" $ do
+            H.section H.! A.class_ "decision" $ do
+              H.h3 "Decision"
+              decisionHtml decision
+
             H.section H.! A.class_ "state" $ do
-              H.h4 "State"
               H.div $ do
-                H.h5 "Tableau:"
+                H.h4 "Turn: "
+                H.span $ toHtml $ "Turn: " ++ show (turnNo state) ++ ", "
+                H.span $ toHtml $ "Actions: " ++ show (actions (turn state)) ++ ", "
+                H.span $ toHtml $ "Buys: " ++ show (buys (turn state)) ++ ", "
+                H.span $ toHtml $ "Money: " ++ show (money (turn state)) ++ ", "
+
+              H.div $ do
+                H.h4 "Tableau:"
                 showCards (piles state)
 
               forM_ (Map.toAscList (players state)) $ \(pid,player) ->
                 H.div $ do
                   H.h4 $ toHtml $ "Player - " ++ pid
-                  H.h5 "Deck: "
-                  showCards (cardListToMap (deck player))
-                  H.h5 "Discard: "
-                  showCards (cardListToMap (discardPile player))
-                  H.h5 "Hand: "
-                  showCards (cardListToMap (hand player))
-                  H.h5 "InPlay: "
-                  showCards (cardListToMap (inPlay player))
-
-
-              H.div $ do
-                H.h4 "Turn: "
-                H.span $ toHtml $ "Actions: " ++ show (actions (turn state)) ++ ", "
-                H.span $ toHtml $ "Buys: " ++ show (buys (turn state)) ++ ", "
-                H.span $ toHtml $ "Money: " ++ show (money (turn state)) ++ ", "
-
-
-            H.section H.! A.class_ "decision" $ do
-              H.h3 "Decision"
-              decisionHtml decision
+                  when (not (null (deck player))) $ do
+                    H.h5 "Deck: "
+                    showCards (cardListToMap (deck player))
+                  when (not (null (discardPile player))) $ do
+                    H.h5 "Discard: "
+                    showCards (cardListToMap (discardPile player))
+                  when (not (null (hand player))) $ do
+                    H.h5 "Hand: "
+                    showCards (cardListToMap (hand player))
+                  when (not (null (inPlay player))) $ do
+                    H.h5 "InPlay: "
+                    showCards (cardListToMap (inPlay player))
 
           H.div H.! A.class_ "six wide column" $ do
             H.section H.! A.class_ "logs" $ do
               H.h3 "Game Log"
               H.div $ do
-                forM_  infos $ \info ->
-                  H.div H.! A.class_ "log" $ fromString $ showInfo info
+                forM_  infos $ \(vis,msg) ->
+                  H.div H.! A.class_ "log" $ do
+                    H.span H.! A.class_ "player" $ toHtml ("@" ++ show vis ++ " ")
+                    H.span $ toHtml msg
 
 
 nextDecision :: IORef.IORef GameRepository -> Int -> PlayerId -> Snap ()
