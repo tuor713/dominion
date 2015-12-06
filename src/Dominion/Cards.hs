@@ -5,8 +5,6 @@ import Dominion.Model
 import Data.Char (toLower)
 import qualified Data.List as L
 import qualified Data.Map.Strict as Map
-import qualified Data.Maybe as Maybe
-import System.Random (StdGen, mkStdGen, randomR, newStdGen)
 
 cardData :: Map.Map String Card
 cardData = Map.fromList $ map (\c -> (map toLower $ cardName c, c))
@@ -56,12 +54,12 @@ baseCards = map ($ Base)
    ]
 
 seqSteps :: (a -> GameState -> Simulation) -> [a] -> GameState -> Simulation
-seqSteps f [] state = toSimulation state
+seqSteps _ [] state = toSimulation state
 seqSteps f (x:xs) state = f x state `andThen` seqSteps f xs
 
 seqActions :: (a -> Action) -> [a] -> Action
 seqActions _ [] _ state = toSimulation state
-seqACtions f (x:xs) p state = f x p state `andThen` seqActions f xs p
+seqActions f (x:xs) p state = f x p state `andThen` seqActions f xs p
 
 playAttack :: Action -> Action
 playAttack attack attacker state = seqSteps checkAttack (opponentNames state attacker) state
@@ -280,7 +278,7 @@ city = plusCards 1
   where
     extra 0 = pass
     extra 1 = plusCards 1
-    extra 2 = plusCards 1 &&& plusMoney 1 &&& plusBuys 1
+    extra _ = plusCards 1 &&& plusMoney 1 &&& plusBuys 1
 
 kingsCourt :: Action
 kingsCourt player state

@@ -13,3 +13,26 @@
   stroke: steelblue;
   shape-rendering: crispEdges;
 }
+
+section {
+  margin: 10px;
+}
+
+.choice-button {
+  margin: 5px;
+}
+
+.imageoverlay {
+  position: relative;
+  display:inline-block;
+}
+
+.overlay {
+  position: absolute;
+  left: 0px;
+  text-align: center;
+  color: white;
+  top: 40px;
+  width: 100%;
+  font-size: xx-large;
+}

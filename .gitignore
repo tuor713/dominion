@@ -6,3 +6,6 @@ log
 .DS_Store
 .ghci
 dominion.prof
+static/images/cards
+static/js/jquery-2.1.4.min.js
+static/libs

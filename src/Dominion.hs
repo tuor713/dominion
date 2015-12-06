@@ -9,10 +9,9 @@ import Dominion.Stats
 import qualified Control.Monad as M
 import Prelude hiding (interact)
 import qualified Data.List as L
-import System.Random (StdGen, mkStdGen, randomR, newStdGen)
+import System.Random (StdGen, newStdGen)
 import Data.List.Split (wordsBy)
 import qualified Data.Map.Strict as Map
-import qualified Data.Maybe as Maybe
 
 list2MultiSet :: Ord a => [a] -> Map.Map a Int
 list2MultiSet xs = Map.fromListWith (+) $ map (,1) xs

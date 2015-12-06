@@ -2,7 +2,6 @@
 module Dominion.Stats where
 
 import Dominion.Model
-import qualified Data.List as L
 import qualified Data.Map.Strict as Map
 
 
@@ -40,14 +39,18 @@ emptyStats players = Stats { totalGames = 0,
                              turnsPerGame = Map.empty
                              }
 
+statWinRatio :: Stats -> [(PlayerId,Double)]
 statWinRatio stats =
   Map.toAscList $ Map.map ((/ fromIntegral (totalGames stats)) . fromIntegral) (winRatio stats)
 
+statNumberOfGames :: Stats -> Int
 statNumberOfGames stats = totalGames stats
 
+statTurnsPerGame :: Stats -> [(Int,Double)]
 statTurnsPerGame stats =
   Map.toAscList $ Map.map ((/ fromIntegral (totalGames stats)) . fromIntegral) (turnsPerGame stats)
 
+statAvgVictoryPerTurn :: Stats -> Map.Map PlayerId [(Int,Double)]
 statAvgVictoryPerTurn stats =
   Map.map
     (\m -> Map.toAscList $ Map.map (\(s,n) -> fromIntegral s / fromIntegral n) m)

@@ -75,7 +75,7 @@ defaultBot pid _ (Choices (QDiscard (Hand p)) choices (lo,hi) f) _
 
 
 defaultBot _ _ (YesNo _ _ f) _ = f False
-defaultBot _ _ (Choices _ choices (lo,hi) f) _ = f (take lo choices)
+defaultBot _ _ (Choices _ choices (lo,_) f) _ = f (take lo choices)
 defaultBot _ _ (Choice _ choices f) _ = f (head choices)
 
 

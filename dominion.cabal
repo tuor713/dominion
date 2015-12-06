@@ -34,13 +34,18 @@ Executable dominion
     parsec                    >= 3.1.9,
     blaze-markup              >= 0.7.0,
     blaze-html                >= 0.8.1.1,
+    scientific                >= 0.3.3,
+    unordered-containers      >= 0.2.5,
+    vector                    >= 0.11.0,
     -- for Control.Monad.IO.Class
     transformers              >= 0.4.3.0
 
-  -- TODO put -Wall back after fixing all the warnings
   ghc-options: -threaded -fwarn-tabs -funbox-strict-fields -O2
                -fno-warn-unused-do-bind
-               -- -prof -fprof-auto
+               -Wall
+               -fno-warn-missing-signatures
+               -fno-warn-name-shadowing
+               -fno-warn-orphans
 
 Test-Suite dominion-tests
   type: exitcode-stdio-1.0

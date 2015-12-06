@@ -5,7 +5,6 @@ import qualified Control.Monad as M
 import qualified Control.Monad.Trans.State.Lazy as St
 import qualified Data.List as L
 import qualified Data.Map.Strict as Map
-import qualified Data.Maybe as Maybe
 import System.Random (StdGen, randomR)
 
 
@@ -20,7 +19,7 @@ data CardType = Action | Treasure | Victory | CurseType {- This is a bit of a ha
     deriving (Eq, Read, Show)
 
 data Location = Hand String | Discard String | TopOfDeck String | InPlay | Trash | Supply
-  deriving (Eq, Show)
+  deriving (Eq, Read, Show)
 
 data Edition = Base | Intrigue | Seaside | Alchemy | Prosperity | Cornucopia | Hinterlands | DarkAges | Guilds | Adventures | Promo
   deriving (Eq, Read, Show)
@@ -58,12 +57,22 @@ instance Ord Card where
 
 -- Card definition helpers
 
+noPoints :: a -> Int
 noPoints = const 0
 
+treasure :: Int -> String -> Int -> Int -> Edition -> Card
 treasure id name cost money edition = Card id name edition cost [Treasure] noPoints (plusMoney money)
+
+action :: Int -> String -> Int -> Action -> Edition -> Card
 action id name cost effect edition = Card id name edition cost [Action] noPoints effect
+
+attack :: Int -> String -> Int -> Action -> Edition -> Card
 attack id name cost effect edition = Card id name edition cost [Action, Attack] noPoints effect
+
+victory :: Int -> String -> Int -> Int -> Edition -> Card
 victory id name cost points edition = Card id name edition cost [Victory] (const points) pass
+
+carddef :: Int -> String -> Int -> [CardType] -> (Player -> Int) -> Action -> Edition -> Card
 carddef id name cost types points effect edition = Card id name edition cost types points effect
 
 -- Basic cards
@@ -119,7 +128,6 @@ instance Show Visibility where
   show AllPlayers = "All"
   show (VisibleToPlayer player) = player
 
-
 type Info = (Visibility, String)
 type SimulationState = (StdGen, [Info])
 
@@ -141,6 +149,10 @@ setRandomGen gen =
 info :: Visibility -> String -> SimulationT ()
 info vis msg = St.get >>= \(gen,infos) -> St.put (gen,(vis,msg):infos) >> return ()
 
+canSee :: PlayerId -> Info -> Bool
+canSee _ (AllPlayers,_) = True
+canSee pid (VisibleToPlayer p,_) = pid == p
+
 -- Decision & decision type are not rich enough for smart bots
 -- they need to be able to known more about what the decision really is
 -- What drives a decision:
@@ -151,7 +163,17 @@ info vis msg = St.get >>= \(gen,infos) -> St.put (gen,(vis,msg):infos) >> return
 --   > what action
 --   > what target
 
-data DecisionType = QPlay | QBuy | QDraw | QTreasures | QTrash | QGain | QDiscard Location | QOption
+data DecisionType = QPlay | QBuy | QDraw | QTreasures | QTrash | QGain | QDiscard Location | QOption deriving (Eq)
+
+instance Show DecisionType where
+  show QPlay = "play"
+  show QBuy = "buy"
+  show QDraw = "draw"
+  show QTreasures = "play treasures"
+  show QTrash = "trash"
+  show QGain = "gain"
+  show (QDiscard loc) = "discard to " ++ show loc
+  show QOption = "option"
 
 data Decision = YesNo DecisionType Card (Bool -> Simulation) |
                 Choice DecisionType [Card] (Card -> Simulation) |
@@ -363,14 +385,13 @@ points s = sum $ map (`cardPoints` s) $ allCards s
 turnNo :: GameState -> Int
 turnNo g = ((ply g + 1) `div` length (players g))
 
-unknown = Card (-1) "Unknown" Base 0 [] (\_ -> 0) pass
+unknown = Card (-1) "XXX" Base 0 [] (\_ -> 0) pass
 
 -- Removes invisble information from the state such as opponents hands
 -- It assumes some intelligent information retention such as about own deck content
 -- but more could be done for opponents
 visibleState :: PlayerId -> GameState -> GameState
--- TODO figure out a more efficient implementation that still gives access to a players full deck
-visibleState id state = state -- state { players = Map.map anonymize (players state) }
+visibleState id state = state { players = Map.map anonymize (players state) }
   where
     anonymize p
       | id == name p = p { deck = L.sort (deck p) }
@@ -558,7 +579,7 @@ actionPhase name state
 
 playTurn :: Action
 playTurn name state =
-  info (VisibleToPlayer name) ("Your turn:\n" ++ show (visibleState name state))
+  info (VisibleToPlayer name) ("Your turn")
   >> (actionPhase &&& buyPhase &&& cleanupPhase) name state
 
 finished :: GameState -> Bool
@@ -593,3 +614,12 @@ runSim :: SimulationT a -> StdGen -> (a,SimulationState)
 runSim sim gen = (res,(resgen,reverse infos))
   where
     (res,(resgen,infos)) = St.runState sim (gen,[])
+
+sim2Gen :: SimulationState -> StdGen
+sim2Gen = fst
+
+sim2Infos :: SimulationState -> [Info]
+sim2Infos = snd
+
+combineSimStates :: SimulationState -> SimulationState -> SimulationState
+combineSimStates (_,infosA) (genB, infosB) = (genB, infosA ++ infosB)
