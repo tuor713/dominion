@@ -41,3 +41,8 @@ section {
   font-weight: bold;
   color: steelblue;
 }
+
+.checkbox.checked {
+  opacity: 0.4;
+  filter: alpha(opacity=40);
+}

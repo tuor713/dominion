@@ -13,7 +13,7 @@ function pass() {
 function choices(id,low,high) {
   var choices = [];
 
-  $("#"+id+" input:checked").each(function () {
+  $("#"+id+" input.checked").each(function () {
     choices.push($(this).attr('name'));
   });
 
@@ -25,3 +25,9 @@ function choices(id,low,high) {
     choose(choices.join(','));
   }
 }
+
+$(function () {
+  $(".checkbox").click(function(){
+    $(this).toggleClass('checked');
+  })
+});

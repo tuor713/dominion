@@ -240,8 +240,10 @@ decisionHtml (Choices typ choices (lo,hi) _) =
     toHtml $ "Choose between " ++ show lo ++ " and " ++ show hi ++ " cards to " ++ show typ ++ ":"
     H.div H.! A.id "choices" $ do
       forM_ choices $ \card -> do
-        input H.! A.type_ "checkbox" H.! A.name (fromString (cardName card)) $ do
-          H.img H.! A.style "margin: 5px; width: 100px; height: 159px"
+        H.input H.! A.type_ "image"
+                H.! A.name (fromString (cardName card))
+                H.! A.class_ "checkbox"
+                H.! A.style "margin: 5px; width: 100px; height: 159px"
                 H.! A.src (fromString (cardImagePath card))
     if length choices <= hi
       then H.button H.! A.class_ "choice-button"
