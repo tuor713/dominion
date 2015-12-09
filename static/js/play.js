@@ -29,5 +29,23 @@ function choices(id,low,high) {
 $(function () {
   $(".checkbox").click(function(){
     $(this).toggleClass('checked');
-  })
+  });
 });
+
+function start() {
+  var tableau = [];
+
+  $(".item.selected").each(function () {
+    tableau.push($(this).attr('id'));
+  });
+
+  if (tableau.length != 10) {
+    alert("Please select exactly 10 cards.")
+  } else {
+    $.post("/game/start",
+      JSON.stringify({"players":["Alice","Bob"], "cards":tableau}),
+      function (id) { window.location.href = "/game/"+id +"/decision/Alice?format=html"; },
+      'text'
+    );
+  }
+}

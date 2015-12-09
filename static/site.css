@@ -46,3 +46,8 @@ section {
   opacity: 0.4;
   filter: alpha(opacity=40);
 }
+
+.item.selected {
+  opacity: 0.6;
+  filter: alpha(opacity=60);
+}

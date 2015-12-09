@@ -7,7 +7,6 @@ import qualified Data.List as L
 import qualified Data.Map.Strict as Map
 import System.Random (StdGen, randomR)
 
-
 import Data.Array.ST
 import Control.Monad
 import Control.Monad.ST
@@ -579,7 +578,7 @@ actionPhase name state
 
 playTurn :: Action
 playTurn name state =
-  info (VisibleToPlayer name) ("Your turn")
+  info AllPlayers ("Turn " ++ show (turnNo state) ++ " - " ++ name)
   >> (actionPhase &&& buyPhase &&& cleanupPhase) name state
 
 finished :: GameState -> Bool

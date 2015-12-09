@@ -6,9 +6,12 @@ import Data.Char (toLower)
 import qualified Data.List as L
 import qualified Data.Map.Strict as Map
 
+kingdomCards :: [Card]
+kingdomCards = concat [baseCards, intrigueCards, prosperityCards, hinterlandCards]
+
 cardData :: Map.Map String Card
 cardData = Map.fromList $ map (\c -> (map toLower $ cardName c, c))
-  (concat [basicCards, baseCards, intrigueCards, prosperityCards, hinterlandCards])
+  (concat [basicCards, kingdomCards])
 
 maybeCard :: String -> Maybe Card
 maybeCard name = Map.lookup (map toLower name) cardData
