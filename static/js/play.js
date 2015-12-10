@@ -1,3 +1,14 @@
+function showWarning (msg) {
+  $("#flash").addClass("ui negative message")
+    .append("<i class='close icon'></i><div class='header'>"+msg+"</div>");
+
+  $("#flash .close").click(function () {
+    // revert the changes
+    $("#flash").empty();
+    $("#flash").removeClass("ui negative message");
+  });
+}
+
 function choose(val) {
   $.post(location.href,
     val,
@@ -18,9 +29,9 @@ function choices(id,low,high) {
   });
 
   if (choices.length < low) {
-    alert("Not enough cards selected. Please select at least " + low + " card(s).")
+    showWarning("Not enough cards selected. Please select at least " + low + " card(s).");
   } else if (choices.length > high) {
-    alert("Too many cards selected. Please select at most " + high + " card(s).");
+    showWarning("Too many cards selected. Please select at most " + high + " card(s).");
   } else {
     choose(choices.join(','));
   }
@@ -40,7 +51,7 @@ function start() {
   });
 
   if (tableau.length != 10) {
-    alert("Please select exactly 10 cards.")
+    showWarning("Please select exactly 10 cards.");
   } else {
     $.post("/game/start",
       JSON.stringify({"players":["Alice","Bob"], "cards":tableau}),

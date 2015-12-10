@@ -140,6 +140,7 @@ htmlDecision :: PlayerId -> (GameState,[Info],Decision) -> H.Html
 htmlDecision _ (state,infos,decision) =
   template "/play" $ do
     H.div H.! A.class_ "ten wide column" $ do
+      H.div H.! A.id "flash" $ ""
       H.section H.! A.class_ "decision" $ do
         H.h3 "Decision"
         decisionHtml decision
@@ -214,6 +215,7 @@ htmlSetupGame =
   template "/game/play" $ do
     H.div H.! A.class_ "one wide column" $ ""
     H.div H.! A.class_ "fourteen wide column" $ do
+      H.div H.! A.id "flash" $ ""
       H.h3 "Choose tableau"
       H.div H.! A.class_ "ui horizontal selection list" $ do
         forM_ (L.sortOn cardName kingdomCards) $ \card ->
