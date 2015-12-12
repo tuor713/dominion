@@ -7,7 +7,7 @@ import qualified Data.List as L
 import qualified Data.Map.Strict as Map
 
 kingdomCards :: [Card]
-kingdomCards = concat [baseCards, intrigueCards, prosperityCards, hinterlandCards]
+kingdomCards = concat [baseCards, intrigueCards, alchemyCards, prosperityCards, hinterlandCards]
 
 cardData :: Map.Map String Card
 cardData = Map.fromList $ map (\c -> (map toLower $ cardName c, c))
@@ -28,7 +28,7 @@ cChancellor = cardData Map.! "chancellor"
 baseCards = map ($ Base)
   [action 101 "Cellar" 2 cellar,
    action 102 "Chapel" 2 chapel,
-   carddef 103 "Moat" 2 [Action, Reaction] (const 0) (plusCards 2),
+   carddef 103 "Moat" (simpleCost 2) [Action, Reaction] (const 0) (plusCards 2),
 
    action 104 "Chancellor" 3 chancellor,
    action 105 "Village" 3 (plusActions 2 &&& plusCards 1),
@@ -37,7 +37,7 @@ baseCards = map ($ Base)
 
    attack 108 "Bureaucrat" 4 bureaucrat,
    action 109 "Feast" 4 feast,
-   carddef 110 "Gardens" 4 [Victory] (\p -> length (allCards p) `quot` 10) pass,
+   carddef 110 "Gardens" (simpleCost 4) [Victory] (\p -> length (allCards p) `quot` 10) pass,
    attack 111 "Militia" 4 militia,
    action 112 "Moneylender" 4 moneylender,
    action 113 "Remodel" 4 remodel,
@@ -99,7 +99,7 @@ chancellor player state = plusMoney 2 player state
 workshop :: Action
 workshop player state = (chooseOne (EffectGain unknown Supply (Discard player)) affordable &&= gain) player state
   where
-    affordable = filter ((<=4) . cost) (availableCards state)
+    affordable = filter ((`smallerEqCost` (simpleCost 4)) . cost) (availableCards state)
 
 bureaucrat :: Action
 bureaucrat player state = (gainTo silver (TopOfDeck player) &&& playAttack treasureToDeck) player state
@@ -118,7 +118,7 @@ feast :: Action
 feast player state = trash (cardData Map.! "feast") InPlay player state
   `andThen` \s2 -> decision (ChooseCard (EffectGain unknown Supply (Discard player)) (affordable s2) (\c -> gain c player s2)) player s2
   where
-    affordable state = filter ((<=5) . cost) (availableCards state)
+    affordable state = filter ((`smallerEqCost` (simpleCost 5)) . cost) (availableCards state)
 
 militia :: Action
 militia player state = (plusMoney 2 &&& playAttack discardTo3) player state
@@ -145,7 +145,7 @@ remodel player state
     h = hand $ playerByName state player
     cont card = trash card (Hand player) player state `andThen` chooseToGain card
     chooseToGain trashed s2 = decision (ChooseCard (EffectGain unknown Supply (Discard player)) (affordable trashed s2) (cont2 s2)) player s2
-    affordable trashed state = filter ((<= cost trashed + 2) . cost) (availableCards state)
+    affordable trashed state = filter ((`smallerEqCost` (addCost (cost trashed) (simpleCost 2))) . cost) (availableCards state)
     cont2 state card = gain card player state
 
 spy :: Action
@@ -217,7 +217,7 @@ mine player state
   where
     cont card = trash card (Hand player) player state `andThen` gainDecision card
     gainDecision trashed s2 = decision (ChooseCard (EffectGain unknown Supply (Hand player)) (affordable trashed s2) (\c -> gain c player s2)) player s2
-    affordable trashed state = filter (\c -> cost c <= cost trashed + 3 && isTreasure c) (availableCards state)
+    affordable trashed state = filter (\c -> cost c `smallerEqCost` (addCost (cost trashed) (simpleCost 3)) && isTreasure c) (availableCards state)
     treasures = filter isTreasure (hand (playerByName state player))
 
 witch :: Action
@@ -240,40 +240,51 @@ adventurer treasures others player state
 
 
 
--- Intrigue
+-- Intrigue 2xx
 
 intrigueCards = map ($ Intrigue)
-  [carddef 117 "Duke" 5 [Victory] (\p -> length $ filter (==duchy) (allCards p)) pass]
+  [carddef 217 "Duke" (simpleCost 5) [Victory] (\p -> length $ filter (==duchy) (allCards p)) pass]
+
+-- Seaside 3xx
+
+-- Alchemy 4xx
+
+alchemyCards = map ($ Alchemy)
+  [-- 401 Herbalist
+   -- 402 Apprentice
+   -- 403 Transmute
+   carddef 404 "Vineyard" (fullCost 0 1) [Victory] (\p -> length (filter isAction (allCards p)) `quot` 3) pass
+  ]
 
 
--- Prosperity
+-- Prosperity 5xx
 
 prosperityCards = map ($ Prosperity)
-  [-- 401 loan
-   -- 402 trade route
-   -- 403 watchtower
-   -- 404 bishop
-   -- 405 monument
-   -- 406 quarry
-   -- 407 talisman
-   action 408 "Worker's Village" 4 (plusCards 1 &&& plusActions 2 &&& plusBuys 1),
-   action 409 "City" 5 city,
-   -- 410 contraband
-   -- 411 counting house
-   -- 412 mint
-   -- 413 mountebank
-   -- 414 rabble
-   -- 415 royal seal
-   -- 416 vault
-   -- 417 venture
-   -- 418 goons
-   -- 419 grand market
-   -- 420 hoard
-   -- 421 bank
-   -- 422 expand
-   -- 423 forge
-   action 424 "King's Court" 7 kingsCourt
-   -- 425 peddler
+  [-- 501 loan
+   -- 502 trade route
+   -- 503 watchtower
+   -- 504 bishop
+   -- 505 monument
+   -- 506 quarry
+   -- 507 talisman
+   action 508 "Worker's Village" 4 (plusCards 1 &&& plusActions 2 &&& plusBuys 1),
+   action 509 "City" 5 city,
+   -- 510 contraband
+   -- 511 counting house
+   -- 512 mint
+   -- 513 mountebank
+   -- 514 rabble
+   -- 515 royal seal
+   -- 516 vault
+   -- 517 venture
+   -- 518 goons
+   -- 519 grand market
+   -- 520 hoard
+   -- 521 bank
+   -- 522 expand
+   -- 523 forge
+   action 524 "King's Court" 7 kingsCourt
+   -- 525 peddler
    ]
 
 city :: Action
@@ -294,35 +305,37 @@ kingsCourt player state
     cont card = (play card &&& playEffect card &&& playEffect card) player state
 
 
--- Hinterlands
+-- Cornucopia 6xx
+
+-- Hinterlands 7xx
 
 hinterlandCards = map ($ Hinterlands)
-  [-- 601 crossroads
-   -- 602 duchess
-   -- 603 fool's gold
-   -- 604 develop
-   -- 605 oasis
-   -- 606 oracle
-   -- 607 scheme
-   -- 608 tunnel
-   action 609 "Jack of All Trades" 4 jackOfAllTrades
-   -- 610 noble brigand
-   -- 611 nomad camp
-   -- 612 silk road
-   -- 613 spice merchant
-   -- 614 trader
-   -- 615 cache
-   -- 616 cartographer
-   -- 617 embassy
-   -- 618 haggler
-   -- 619 highway
-   -- 620 ill-gotten gains
-   -- 621 inn
-   -- 622 mandarin
-   -- 623 margrave
-   -- 624 stables
-   -- 625 border village
-   -- 626 farmland
+  [-- 701 crossroads
+   -- 702 duchess
+   -- 703 fool's gold
+   -- 704 develop
+   -- 705 oasis
+   -- 706 oracle
+   -- 707 scheme
+   -- 708 tunnel
+   action 709 "Jack of All Trades" 4 jackOfAllTrades
+   -- 710 noble brigand
+   -- 711 nomad camp
+   -- 712 silk road
+   -- 713 spice merchant
+   -- 714 trader
+   -- 715 cache
+   -- 716 cartographer
+   -- 717 embassy
+   -- 718 haggler
+   -- 719 highway
+   -- 720 ill-gotten gains
+   -- 721 inn
+   -- 722 mandarin
+   -- 723 margrave
+   -- 724 stables
+   -- 725 border village
+   -- 726 farmland
    ]
 
 jackOfAllTrades :: Action
@@ -346,3 +359,12 @@ jackOfAllTrades = gain silver &&& spyTop &&& drawTo5 &&& optTrash
       where
         candidates = filter (not . isTreasure) $ hand $ playerByName state player
         cont card = trash card (Hand player) player state
+
+
+-- Dark Ages 8xx
+
+-- Guilds 9xx
+
+-- Adventures 10xx
+
+-- Promo 20xx

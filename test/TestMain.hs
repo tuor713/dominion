@@ -40,11 +40,15 @@ initialStateTest = testGroup "Game creation"
     testCase "A game has 17 piles (10 kingdom cards + 7 basic supply" $
     17 @=? Map.size (piles sut),
 
+    testCase "A game with potion cards has 18 piles, one extra for potion" $
+    18 @=? Map.size (piles sutPotion),
+
     testCase "A colony game has 19 piles" $
     19 @=? Map.size (piles sutColony)
     ]
   where
     [sut,sutColony] = map (\typ -> evalSim (mkGame typ ["Alice","Bob"] starterTableau) (mkStdGen 0)) [StandardGame, ColonyGame]
+    sutPotion = evalSim (mkGame StandardGame ["Alice","Bob"] (lookupCard "vineyard":tail starterTableau)) (mkStdGen 0)
 
 toState :: GameStep -> GameState
 toState (State state) = state

@@ -26,12 +26,40 @@ data Edition = Base | Intrigue | Seaside | Alchemy | Prosperity | Cornucopia | H
 
 -- The fundamental domain types
 
+-- Could have chosen to implement this with complex numbers ;)
+newtype Cost = Cost (Int,Int)
+
+moneyCost :: Cost -> Int
+moneyCost (Cost (m,_)) = m
+
+potionCost :: Cost -> Int
+potionCost (Cost (_,p)) = p
+
+simpleCost :: Int -> Cost
+simpleCost m = Cost (m,0)
+
+fullCost :: Int -> Int -> Cost
+fullCost money potions = Cost (money,potions)
+
+instance Eq Cost where
+  (==) (Cost (m1,p1)) (Cost (m2,p2)) = m1 == m2 && p1 == p2
+
+-- Note this is a partial order, hence we do not implement Ord
+smallerEqCost :: Cost -> Cost -> Bool
+smallerEqCost (Cost (m1,p1)) (Cost (m2,p2)) = m1 <= m2 && p1 <= p2
+
+addCost :: Cost -> Cost -> Cost
+addCost (Cost (m1,p1)) (Cost (m2,p2)) = Cost (m1+m2,p1+p2)
+
+subtractCost :: Cost -> Cost -> Cost
+subtractCost (Cost (m1,p1)) (Cost (m2,p2)) = Cost (m1-m2,p1-p2)
+
+
 -- TODO this is really a card type, rather than a concrete card sitting somewhere ...
 -- there is design potential to include the concept of a concrete card in the model
 -- it would have an identity, and a location (and could be traced throughout the game)
 -- > it allows cards to be transferred without keeping location as a separate concept
 -- > it allows precise implementation of concepts like, 'if X then do Y to this card'
-
 data Card = Card { -- Card id is purely a performance artifact to avoid string comparisons
                    cardId :: !Int,
                    cardName :: !String,
@@ -39,7 +67,7 @@ data Card = Card { -- Card id is purely a performance artifact to avoid string c
                    -- TODO this only works for Base
                    -- breaks for cards like peddlar having state dependent cost
                    -- breaks for potion cost
-                   cost :: !Int,
+                   cost :: !Cost,
                    types :: ![CardType],
                    cardPoints :: !(Player -> Int),
                    onPlay :: !Action
@@ -60,18 +88,18 @@ noPoints :: a -> Int
 noPoints = const 0
 
 treasure :: Int -> String -> Int -> Int -> Edition -> Card
-treasure id name cost money edition = Card id name edition cost [Treasure] noPoints (plusMoney money)
+treasure id name cost money edition = Card id name edition (simpleCost cost) [Treasure] noPoints (plusMoney money)
 
 action :: Int -> String -> Int -> Action -> Edition -> Card
-action id name cost effect edition = Card id name edition cost [Action] noPoints effect
+action id name cost effect edition = Card id name edition (simpleCost cost) [Action] noPoints effect
 
 attack :: Int -> String -> Int -> Action -> Edition -> Card
-attack id name cost effect edition = Card id name edition cost [Action, Attack] noPoints effect
+attack id name cost effect edition = Card id name edition (simpleCost cost) [Action, Attack] noPoints effect
 
 victory :: Int -> String -> Int -> Int -> Edition -> Card
-victory id name cost points edition = Card id name edition cost [Victory] (const points) pass
+victory id name cost points edition = Card id name edition (simpleCost cost) [Victory] (const points) pass
 
-carddef :: Int -> String -> Int -> [CardType] -> (Player -> Int) -> Action -> Edition -> Card
+carddef :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> Action -> Edition -> Card
 carddef id name cost types points effect edition = Card id name edition cost types points effect
 
 -- Basic cards
@@ -82,9 +110,8 @@ gold     = treasure 2 "Gold" 6 3 Base
 estate   = victory 3 "Estate" 2 1 Base
 duchy    = victory 4 "Duchy" 5 3 Base
 province = victory 5 "Province" 8 6 Base
-curse    = carddef 6 "Curse" 0 [CurseType] (const (-1)) pass Base
--- TODO Potion obviously does not actually do anything here yet
-potion   = treasure 7 "Potion" 4 0 Alchemy
+curse    = carddef 6 "Curse" (simpleCost 0) [CurseType] (const (-1)) pass Base
+potion   = carddef 7 "Potion" (simpleCost 4) [Treasure] (const 0) plusPotion Alchemy
 platinum = treasure 8 "Platinum" 9 5 Prosperity
 colony   = victory 9 "Colony" 11 10 Prosperity
 
@@ -103,6 +130,7 @@ data Player = Player { name :: PlayerId,
                        deriving (Eq, Show)
 
 data TurnState = TurnState { money :: Int,
+                             potions :: Int,
                              buys :: Int,
                              actions :: Int
                              }
@@ -265,8 +293,9 @@ mkGame typ names kingdomCards =
                 ply = 1
                 }
   where
-    standardCards = extraCards ++ [estate,duchy,province,copper,silver,gold,curse]
-    extraCards = if typ == ColonyGame then [platinum, colony] else []
+    standardCards = colonyCards ++ potionCards ++ [estate,duchy,province,copper,silver,gold,curse]
+    colonyCards = if typ == ColonyGame then [platinum, colony] else []
+    potionCards = if any ((0<) . potionCost . cost) kingdomCards then [potion] else []
     playerNo = length names
     noInPile card
       | isStandardVictory card && playerNo == 2 = 8
@@ -412,7 +441,7 @@ points s = sum $ map (`cardPoints` s) $ allCards s
 turnNo :: GameState -> Int
 turnNo g = ((ply g + 1) `div` length (players g))
 
-unknown = Card (-1) "XXX" Base 0 [] (\_ -> 0) pass
+unknown = Card (-1) "XXX" Base (simpleCost 0) [] (\_ -> 0) pass
 
 -- Removes invisble information from the state such as opponents hands
 -- It assumes some intelligent information retention such as about own deck content
@@ -534,6 +563,9 @@ discard card loc player state =
 plusMoney :: Int -> Action
 plusMoney num _ state = toSimulation $ state { turn = (turn state) { money = num + money (turn state) } }
 
+plusPotion :: Action
+plusPotion _ state = toSimulation $ state { turn = (turn state) { potions = 1 + potions (turn state) } }
+
 plusCards :: Int -> Action
 plusCards num player state =
   do
@@ -555,7 +587,7 @@ pass _ = toSimulation
 -- Macro flows
 
 newTurn :: TurnState
-newTurn = TurnState { money = 0, buys = 1, actions = 1 }
+newTurn = TurnState { money = 0, buys = 1, actions = 1, potions = 0 }
 
 nextTurn :: GameState -> SimulationT GameState
 nextTurn state = nnext
@@ -591,11 +623,16 @@ buyPhase name state
                                       affordableCards
                                       -- TODO this is not correct (see FAQ on Mint), we play treasures once and then buy without the ability
                                       -- to play more treasures
-                                      (\card -> (plusBuys (-1) &&& plusMoney (- (cost card)) &&& buy card &&& buyPhase) name s2))
+                                      (\card -> (plusBuys (-1) &&& payCosts (cost card) &&& buy card &&& buyPhase) name s2))
                                     name s2
       where
+        payCosts cost _ state = toSimulation $
+          state { turn = t { money = money t - moneyCost cost, potions = potions t - potionCost cost }}
+          where
+            t = turn state
         moneyToSpend = money (turn s2)
-        affordableCards = filter ((<=moneyToSpend) . cost) $ availableCards s2
+        potionToSpend = potions (turn s2)
+        affordableCards = filter ((`smallerEqCost` (fullCost moneyToSpend potionToSpend)) . cost) $ availableCards s2
 
 
 actionPhase :: Action

@@ -139,8 +139,15 @@ decisionHtml (ChooseEffects no effects _) =
              H.! A.onclick (fromString ("choices('choices'," ++ show no ++ "," ++ show no ++ ");")) $ "Go"
 
 
+compareCard :: Card -> Card -> Ordering
+compareCard c1 c2 =
+  compare (moneyCost (cost c1)) (moneyCost (cost c2))
+  `mappend` compare (potionCost (cost c1)) (potionCost (cost c2))
+  `mappend` compare (cardName c1) (cardName c2)
+
+
 showCards cards =
-  forM_ (L.sortBy (\(c1,_) (c2,_) -> compare (cost c1) (cost c2) `mappend` compare (cardName c1) (cardName c2)) (Map.toList cards))
+  forM_ (L.sortBy (\(c1,_) (c2,_) -> compareCard c1 c2) (Map.toList cards))
     $ \(card,num) ->
       H.div H.! A.class_ "imageoverlay" $ do
         H.img H.! A.style "margin: 5px; width: 100px; height: 159px"
@@ -167,7 +174,8 @@ htmlDecision _ (state,infos,decision) =
           H.span $ toHtml $ "Turn: " ++ show (turnNo state) ++ ", "
           H.span $ toHtml $ "Actions: " ++ show (actions (turn state)) ++ ", "
           H.span $ toHtml $ "Buys: " ++ show (buys (turn state)) ++ ", "
-          H.span $ toHtml $ "Money: " ++ show (money (turn state)) ++ ", "
+          H.span $ toHtml $ "Money: " ++ show (money (turn state))
+          when (0 < potions (turn state)) $ H.span $ toHtml $ ", Potions: " ++ show (potions (turn state))
 
         H.div $ do
           H.h4 "Tableau:"
@@ -252,7 +260,7 @@ htmlSimulation tableau stats =
       H.h3 "Tableau"
 
       H.div $ do
-        forM_ (L.sortBy (\c1 c2 -> compare (cost c1) (cost c2) `mappend` compare (cardName c1) (cardName c2)) tableau) $ \card ->
+        forM_ (L.sortBy compareCard tableau) $ \card ->
           H.img H.! A.style "margin: 5px; width: 150px; height: 238px"
                 H.! A.src (fromString (cardImagePath card))
 
