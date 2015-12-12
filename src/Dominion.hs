@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE ScopedTypeVariables, TupleSections #-}
 module Dominion where
 
 import Dominion.Model
@@ -8,6 +8,7 @@ import Dominion.Stats
 
 import qualified Control.Monad as M
 import Prelude hiding (interact)
+import qualified Data.ByteString.Char8 as C8
 import qualified Data.List as L
 import System.Random (StdGen, newStdGen)
 import Data.List.Split (wordsBy)
@@ -31,34 +32,42 @@ getInput parser =
       Just v -> return v
       Nothing -> getInput parser
 
-decisionType2message :: DecisionType -> String
-decisionType2message QDraw = "Draw?"
-decisionType2message QPlay = "Play a card?"
-decisionType2message QTreasures = "Play treasures?"
-decisionType2message QBuy = "Buy a card?"
-decisionType2message QGain = "Gain a card?"
-decisionType2message QTrash = "Trash a card?"
-decisionType2message (QDiscard _) = "Discard a card?"
-decisionType2message QOption = "Use effect?"
+parseBool :: String -> Maybe Bool
+parseBool "y" = Just True
+parseBool "n" = Just False
+parseBool _ = Nothing
 
 decision2prompt :: PlayerId -> Decision -> (String, String -> Maybe Simulation)
-decision2prompt player (YesNo typ card f) = (message player (decisionType2message typ ++ " " ++ cardName card ++ " [yn]"), (fmap f) . parse)
-  where
-    parse "y" = Just True
-    parse "n" = Just False
-    parse _ = Nothing
+decision2prompt player (ChooseToUse effect f) = (message player (show effect ++ " [yn]"), (fmap f) . parseBool)
 
-decision2prompt player (Choice typ choices f) =
-  (message player (decisionType2message typ ++ " " ++ summarizeCards choices), (fmap f) . parse)
+decision2prompt player (ChooseCard effect choices f) =
+  (message player (show effect ++ " " ++ summarizeCards choices), (fmap f) . parse)
   where
     parse s = maybeCard s >>= \x -> if x `elem` choices then Just x else Nothing
 
-decision2prompt player (Choices typ choices (lo,hi) f) =
-  (message player (decisionType2message typ ++ " " ++ summarizeCards choices), (fmap f) . parse)
+decision2prompt player (ChooseCards effect choices (lo,hi) f) =
+  (message player (show effect ++ " " ++ summarizeCards choices), (fmap f) . parse)
   where
     parse s = if s == "all" then Just choices else (sequence $ map maybeCard (wordsBy (==',') s))
               >>= \xs -> if contains (list2MultiSet choices) (list2MultiSet xs) then Just xs else Nothing
               >>= \xs -> if lo <= length xs && length xs <= hi then Just xs else Nothing
+
+decision2prompt player (ChooseToReact card trigger f) =
+  (message player ("Choose to react (" ++ show card ++ ") to " ++ show trigger),
+   (fmap f) . parseBool)
+
+decision2prompt player (ChooseEffects no effects f) =
+  (message player ("Choose " ++ show no ++ ": " ++ (concat $ map (\(no::Int,effect) -> "[" ++ show no ++ "] " ++ show effect) $ zip [1..] effects)),
+   (fmap f) . parse)
+  where
+    parse s =
+      fmap (map (effects!!))
+      $ M.mfilter (all (\x -> 0 <= x && x < length effects))
+      $ fmap (map (+ (-1)))
+      $ M.mfilter ((==no) . length . L.nub)
+      $ M.mfilter ((==no) . length)
+      $ fmap (map fst)
+      $ (sequence (map (C8.readInt . C8.pack) (wordsBy (==',') s)))
 
 decision2prompt player (Optional inner next) = (msg, parser)
   where

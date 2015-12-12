@@ -21,6 +21,7 @@ lookupCard name = cardData Map.! (map toLower name)
 
 
 cSmithy = cardData Map.! "smithy"
+cChancellor = cardData Map.! "chancellor"
 
 -- Base Edition
 
@@ -71,32 +72,32 @@ playAttack attack attacker state = seqSteps checkAttack (opponentNames state att
     -- TODO can we do this more elegantly, triggers again?
     checkAttack op state
       | moat `elem` h =
-        decision (YesNo QOption moat (\b -> if b then toSimulation state else attack op state)) op state
+        decision (ChooseToReact moat AttackTrigger (\b -> if b then toSimulation state else attack op state)) op state
       | otherwise = attack op state
       where
         h = hand $ playerByName state op
 
 cellar :: Action
 cellar = plusActions 1
-  &&+ \p s -> chooseMany (QDiscard (Hand p)) (hand (playerByName s p)) (0,length $ (hand (playerByName s p)))
+  &&+ \p s -> chooseMany (EffectDiscard unknown (Hand p)) (hand (playerByName s p)) (0,length $ (hand (playerByName s p)))
   &&= \cards -> seqActions (\c -> discard c (Hand p)) cards
   &&& plusCards (length cards)
 
 chapel :: Action
-chapel player state = decision (Choices QTrash (hand (playerByName state player)) (0,4) cont) player state
+chapel player state = decision (ChooseCards (EffectTrash unknown (Hand player)) (hand (playerByName state player)) (0,4) cont) player state
   where
     cont cards = seqSteps (\c -> trash c (Hand player) player) cards state
 
 chancellor :: Action
 chancellor player state = plusMoney 2 player state
-  `andThen` \s2 -> decision (YesNo QOption (cardData Map.! "chancellor") (cont s2)) player s2
+  `andThen` \s2 -> decision (ChooseToUse (SpecialEffect cChancellor) (cont s2)) player s2
   where
     cont state b = toSimulation $ if b then updatePlayer state player
                                                 (\p -> p { deck = [], discardPile = deck p ++ discardPile p })
                                        else state
 
 workshop :: Action
-workshop player state = (chooseOne QGain affordable &&= gain) player state
+workshop player state = (chooseOne (EffectGain unknown Supply (Discard player)) affordable &&= gain) player state
   where
     affordable = filter ((<=4) . cost) (availableCards state)
 
@@ -106,7 +107,7 @@ bureaucrat player state = (gainTo silver (TopOfDeck player) &&& playAttack treas
     treasureToDeck op state
       | null treasures = info AllPlayers (op ++ " reveals hand " ++ summarizeCards h) >> toSimulation state
       -- TODO QDiscard is an approximation only
-      | otherwise = decision (Choice (QDiscard (Hand op)) treasures cont) op state
+      | otherwise = decision (ChooseCard (EffectDiscard unknown (Hand op)) treasures cont) op state
       where
         h = hand $ playerByName state op
         treasures = filter isTreasure h
@@ -115,7 +116,7 @@ bureaucrat player state = (gainTo silver (TopOfDeck player) &&& playAttack treas
 
 feast :: Action
 feast player state = trash (cardData Map.! "feast") InPlay player state
-  `andThen` \s2 -> decision (Choice QGain (affordable s2) (\c -> gain c player s2)) player s2
+  `andThen` \s2 -> decision (ChooseCard (EffectGain unknown Supply (Discard player)) (affordable s2) (\c -> gain c player s2)) player s2
   where
     affordable state = filter ((<=5) . cost) (availableCards state)
 
@@ -124,7 +125,7 @@ militia player state = (plusMoney 2 &&& playAttack discardTo3) player state
   where
     discardTo3 op state
       | length h <= 3 = toSimulation state
-      | otherwise = decision (Choices (QDiscard (Hand op)) h (length h - 3,length h - 3) cont) op state
+      | otherwise = decision (ChooseCards (EffectDiscard unknown (Hand op)) h (length h - 3,length h - 3) cont) op state
       where
         h = hand $ playerByName state op
         cont cards = seqSteps (\c -> discard c (Hand op) op) cards state
@@ -139,11 +140,11 @@ moneylender player state
 remodel :: Action
 remodel player state
   | null h = toSimulation state
-  | otherwise = decision (Choice QTrash h cont) player state
+  | otherwise = decision (ChooseCard (EffectTrash unknown (Hand player)) h cont) player state
   where
     h = hand $ playerByName state player
     cont card = trash card (Hand player) player state `andThen` chooseToGain card
-    chooseToGain trashed s2 = decision (Choice QGain (affordable trashed s2) (cont2 s2)) player s2
+    chooseToGain trashed s2 = decision (ChooseCard (EffectGain unknown Supply (Discard player)) (affordable trashed s2) (cont2 s2)) player s2
     affordable trashed state = filter ((<= cost trashed + 2) . cost) (availableCards state)
     cont2 state card = gain card player state
 
@@ -156,7 +157,7 @@ spy player state = (plusCards 1 &&& plusActions 1 &&& spyAction &&& playAttack s
         maybe (toSimulation state) (doSpy attackee) maybeS2
     doSpy attackee state =
       info AllPlayers (attackee ++ " reveals " ++ cardName top)
-      >> decision (YesNo (QDiscard (TopOfDeck player)) top cont) player state
+      >> decision (ChooseToUse (EffectDiscard top (TopOfDeck player)) cont) player state
       where
         cont b = if b then discard top (TopOfDeck attackee) attackee state else toSimulation state
         top = head $ deck $ playerByName state attackee
@@ -174,17 +175,17 @@ thief player state = playAttack doThief player state
         maybe (toSimulation state) (decide op) maybeS3
     decide op state
       | null (filter isTreasure top) = seqSteps (\c -> discard c (TopOfDeck op) op) top state
-      | otherwise = decision (Choice QTrash (filter isTreasure top) cont) player state
+      | otherwise = decision (ChooseCard (EffectTrash unknown (TopOfDeck op)) (filter isTreasure top) cont) player state
       where
         top = take 2 $ hand $ playerByName state op
         cont card = trash card (TopOfDeck op) op state
-          `andThen` \s -> decision (YesNo QGain card (\b -> if b then gainFrom card Trash player s else toSimulation s)) player s
+          `andThen` \s -> decision (ChooseToUse (EffectGain card Trash (Hand player)) (\b -> if b then gainFrom card Trash player s else toSimulation s)) player s
           `andThen` \s2 -> seqSteps (\c -> discard c (TopOfDeck op) op) (L.delete card top) s2
 
 throneRoom :: Action
 throneRoom player state
   | actions == [] = toSimulation state
-  | otherwise = decision (Choice QPlay actions cont) player state
+  | otherwise = decision (ChooseCard (EffectPlayCopy unknown) actions cont) player state
   where
     actions = filter isAction (hand (playerByName state player))
     cont card = (play card &&& playEffect card) player state
@@ -199,22 +200,23 @@ library aside name state
   where
     finalState = updatePlayer state name (\p -> p { discardPile = aside ++ discardPile p})
     draw1 s2
+      -- TODO check if this correctly handles aside
       | not (canDraw (activePlayer s2)) = toSimulation s2
-      | isAction card = decision (YesNo QDraw card cont) name s2
+      | isAction card = decision (ChooseToUse (EffectDiscard card (TopOfDeck name)) cont) name s2
       | otherwise = next
       where
-        cont True = next
-        cont False = library (card:aside) name (updatePlayer s2 name (\p -> p { deck = tail (deck p) }))
+        cont False = next
+        cont True = library (card:aside) name (updatePlayer s2 name (\p -> p { deck = tail (deck p) }))
         next = (plusCards 1 &&& library aside) name s2
         card = head $ deck $ activePlayer s2
 
 mine :: Action
 mine player state
   | treasures == [] = toSimulation state
-  | otherwise = decision (Choice QTrash treasures cont) player state
+  | otherwise = decision (ChooseCard (EffectTrash unknown (Hand player)) treasures cont) player state
   where
     cont card = trash card (Hand player) player state `andThen` gainDecision card
-    gainDecision trashed s2 = decision (Choice QGain (affordable trashed s2) (\c -> gain c player s2)) player s2
+    gainDecision trashed s2 = decision (ChooseCard (EffectGain unknown Supply (Hand player)) (affordable trashed s2) (\c -> gain c player s2)) player s2
     affordable trashed state = filter (\c -> cost c <= cost trashed + 3 && isTreasure c) (availableCards state)
     treasures = filter isTreasure (hand (playerByName state player))
 
@@ -286,7 +288,7 @@ city = plusCards 1
 kingsCourt :: Action
 kingsCourt player state
   | actions == [] = toSimulation state
-  | otherwise = decision (Choice QPlay actions cont) player state
+  | otherwise = decision (ChooseCard (EffectPlayCopy unknown) actions cont) player state
   where
     actions = filter isAction (hand (playerByName state player))
     cont card = (play card &&& playEffect card &&& playEffect card) player state
@@ -329,7 +331,7 @@ jackOfAllTrades = gain silver &&& spyTop &&& drawTo5 &&& optTrash
     spyTop player state = ensureCanDraw 1 state player >>= \maybeS2 -> maybe (toSimulation state) (chooseKeepDiscard player) maybeS2
     chooseKeepDiscard player state =
       info (VisibleToPlayer player) ("Top of deck is " ++ cardName top)
-      >> decision (YesNo (QDiscard (TopOfDeck player)) top cont) player state
+      >> decision (ChooseToUse (EffectDiscard top (TopOfDeck player)) cont) player state
       where
         top = head $ deck $ playerByName state player
         cont b = if b then discard top (TopOfDeck player) player state else toSimulation state
@@ -340,7 +342,7 @@ jackOfAllTrades = gain silver &&& spyTop &&& drawTo5 &&& optTrash
 
     optTrash player state
       | null candidates = toSimulation state
-      | otherwise = optDecision (Choice QTrash candidates cont) player state
+      | otherwise = optDecision (ChooseCard (EffectTrash unknown (Hand player)) candidates cont) player state
       where
         candidates = filter (not . isTreasure) $ hand $ playerByName state player
         cont card = trash card (Hand player) player state

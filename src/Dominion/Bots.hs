@@ -43,9 +43,9 @@ cardScore card
   | otherwise = 40
 
 defaultBot :: SimpleBot
-defaultBot _ _ (Choices QTreasures choices _ f) _ = f choices
-defaultBot _ _ (Choice QPlay actions f) _ = f (head actions)
-defaultBot _ state (Choice QTrash cards f) alt
+defaultBot _ _ (ChooseCards (EffectPlayTreasure _) choices _ f) _ = f choices
+defaultBot _ _ (ChooseCard (EffectPlayAction _) actions f) _ = f (head actions)
+defaultBot _ state (ChooseCard (EffectTrash _ _) cards f) alt
   | curse `elem` cards = f curse
   | estate `elem` cards && gainsToEndGame state > 2 = f estate
   | copper `elem` cards = f copper
@@ -53,13 +53,13 @@ defaultBot _ state (Choice QTrash cards f) alt
                   Just next -> next
                   Nothing -> f (head cards)
 
-defaultBot ownId _ (YesNo (QDiscard (TopOfDeck p)) card f) _
+defaultBot ownId _ (ChooseToUse (EffectDiscard card (TopOfDeck p)) f) _
   | ownId == p = f (not desirable)
   | otherwise = f desirable
   where
     desirable = card /= copper && card /= curse && card /= estate && card /= duchy && card /= province
 
-defaultBot _ _ (Choices QTrash cards (lo,hi) f) _ = f choices
+defaultBot _ _ (ChooseCards (EffectTrash _ _) cards (lo,hi) f) _ = f choices
   where
     wantsToTrash = filter (\c -> c == curse || c == copper || c == estate) cards
     trashOrder = L.sortOn cardScore cards
@@ -69,14 +69,18 @@ defaultBot _ _ (Choices QTrash cards (lo,hi) f) _ = f choices
 defaultBot _ _ _ (Just next) = next
 
 -- Bad or blind choices
-defaultBot pid _ (Choices (QDiscard (Hand p)) choices (lo,hi) f) _
+defaultBot pid _ (ChooseCards (EffectDiscard _ (Hand p)) choices (lo,hi) f) _
   | pid == p = f $ take lo $ L.sortOn cardScore choices
   | otherwise = f $ take hi $ L.sortOn (negate . cardScore) choices
 
 
-defaultBot _ _ (YesNo _ _ f) _ = f False
-defaultBot _ _ (Choices _ choices (lo,_) f) _ = f (take lo choices)
-defaultBot _ _ (Choice _ choices f) _ = f (head choices)
+defaultBot _ _ (ChooseToReact _ _ f) _ = f False
+defaultBot _ _ (ChooseToUse _ f) _ = f False
+defaultBot _ _ (ChooseCards _ choices (lo,_) f) _ = f (take lo choices)
+defaultBot _ _ (ChooseCard _ choices f) _ = f (head choices)
+defaultBot _ _ (ChooseEffects no effects f) _ = f (take no effects)
+-- this is handled earlier ...
+defaultBot _ _ (Optional _ alt) _ = alt
 
 
 -- Behavioural traits
@@ -88,7 +92,7 @@ alt :: PartialBot -> PartialBot -> PartialBot
 alt bot1 bot2 id state decision opt = bot1 id state decision opt `M.mplus` bot2 id state decision opt
 
 buysC :: Card -> (GameState -> Bool) -> PartialBot
-buysC card pred _ state (Choice QBuy choices f) _
+buysC card pred _ state (ChooseCard (EffectBuy _) choices f) _
   | card `elem` choices && pred state = Just $ f card
   | otherwise = Nothing
 buysC _ _ _ _ _ _ = Nothing
@@ -167,7 +171,7 @@ checkPPR state =
     firstPlayer = ply state `mod` 2 == 1
 
 
-
+botLibrary :: [(String, PlayerId -> AIBot)]
 botLibrary =
   [("Big Money", betterBigMoney),
    ("Big Money Smithy", bigSmithy),

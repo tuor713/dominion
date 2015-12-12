@@ -60,13 +60,13 @@ runWeb :: IO ()
 runWeb = do
   logset <- newStdoutLoggerSet 10000
   gamesRepository <- IORef.newIORef (0,Map.empty)
-  quickHttpServe (site gamesRepository logset)
+  quickHttpServe (site gamesRepository)
 
 homePage :: Snap ()
 homePage = writeHtml htmlHomePage
 
-site :: IORef.IORef GameRepository -> LoggerSet -> Snap ()
-site gamesRepository logset =
+site :: IORef.IORef GameRepository -> Snap ()
+site gamesRepository =
     ifTop homePage <|>
     route [ ("simulation", simulationHandler),
             ("game/start", method POST $ startGameHandler gamesRepository),
@@ -163,21 +163,65 @@ startGameHandler gamesRepository = do
 jMap :: J.ToJSON a => Map.Map String a -> J.Value
 jMap m = J.object $ map (\(k,v) -> T.pack k J..= J.toJSON v) $ Map.toList m
 
+jString :: String -> J.Value
+jString = J.String . T.pack
+
+instance J.ToJSON Card where
+  toJSON card = J.String $ T.pack (cardName card)
+
+instance J.ToJSON Trigger where
+  toJSON AttackTrigger = J.String "attack"
+
+instance J.ToJSON Location where
+  toJSON Supply = J.toJSON [J.String "supply"]
+  toJSON (Hand p) = J.toJSON [J.String "hand" , jString p]
+  toJSON (Discard p) = J.toJSON [J.String "discardPile", jString p]
+  toJSON Trash = J.toJSON [J.String "trash"]
+  toJSON (TopOfDeck p) = J.toJSON [J.String "topOfDeck", jString p]
+  toJSON InPlay = J.toJSON [J.String "inPlay"]
+
+instance J.ToJSON Effect where
+  toJSON (EffectPlusCards no) = J.toJSON [J.String "plusCards", J.toJSON no]
+  toJSON (EffectPlusActions no) = J.toJSON [J.String "plusActions", J.toJSON no]
+  toJSON (EffectPlusBuys no) = J.toJSON [J.String "plusBuys", J.toJSON no]
+  toJSON (EffectPlusMoney no) = J.toJSON [J.String "plusMoney", J.toJSON no]
+  toJSON (EffectDiscardNo no) = J.toJSON [J.String "discardNo", J.toJSON no]
+  toJSON (EffectTrashNo no) = J.toJSON [J.String "trashNo", J.toJSON no]
+  toJSON (EffectDiscard card from) = J.toJSON [J.String "discard", J.toJSON card, J.toJSON from]
+  toJSON (EffectBuy card) = J.toJSON [J.String "buy", J.toJSON card]
+  toJSON (EffectGain card from to) = J.toJSON [J.String "gain", J.toJSON card, J.toJSON from, J.toJSON to]
+  toJSON (EffectPass card from to) = J.toJSON [J.String "pass", J.toJSON card, J.toJSON from, J.toJSON to]
+  toJSON (EffectPut card from to) = J.toJSON [J.String "put", J.toJSON card, J.toJSON from, J.toJSON to]
+  toJSON (EffectTrash card from) = J.toJSON [J.String "trash", J.toJSON card, J.toJSON from]
+  toJSON (EffectReveal card) = J.toJSON [J.String "reveal", J.toJSON card]
+  toJSON (EffectPlayAction card) = J.toJSON [J.String "playAction", J.toJSON card]
+  toJSON (EffectPlayCopy card) = J.toJSON [J.String "playCopy", J.toJSON card]
+  toJSON (EffectPlayTreasure card) = J.toJSON [J.String "playTreasure", J.toJSON card]
+  toJSON (SpecialEffect card) = J.toJSON [J.String "useAbility", J.toJSON card]
+
 instance J.ToJSON Decision where
-  toJSON (YesNo typ card _) = J.object ["type"   J..= J.String "yesNo",
-                                        "card"   J..= J.toJSON (cardName card),
-                                        "action" J..= T.pack (show typ)]
+  toJSON (ChooseToUse effect _) = J.object ["type"   J..= J.String "use",
+                                            "effect" J..= T.pack (show effect)]
 
-  toJSON (Choice typ choices _) = J.object ["type"   J..= J.String "choice",
-                                            "cards"  J..= J.Array (V.fromList (map (J.toJSON . cardName) choices)),
-                                            "action" J..= T.pack (show typ)]
+  toJSON (ChooseCard effect choices _) = J.object ["type"   J..= J.String "chooseCard",
+                                                   "cards"  J..= J.Array (V.fromList (map (J.toJSON . cardName) choices)),
+                                                   "effect" J..= T.pack (show effect)]
 
-  toJSON (Choices typ choices (lo,hi) _) = J.object ["type"   J..= J.String "choices",
-                                                     "cards"  J..= J.Array (V.fromList (map (J.toJSON . cardName) choices)),
-                                                     "min"    J..= J.toJSON lo,
-                                                     "max"    J..= J.toJSON hi,
-                                                     "action" J..= J.toJSON (show typ)
-                                                     ]
+  toJSON (ChooseCards effect choices (lo,hi) _) = J.object ["type"   J..= J.String "chooseCards",
+                                                            "cards"  J..= J.Array (V.fromList (map J.toJSON choices)),
+                                                            "min"    J..= J.toJSON lo,
+                                                            "max"    J..= J.toJSON hi,
+                                                            "action" J..= J.toJSON (show effect)
+                                                            ]
+
+  toJSON (ChooseToReact card trigger _) = J.object ["type" J..= J.String "react",
+                                                    "card" J..= J.toJSON card,
+                                                    "trigger" J..= J.toJSON trigger]
+
+  toJSON (ChooseEffects no effects _) = J.object ["type" J..= J.String "chooseEffects",
+                                                  "num" J..= J.toJSON no,
+                                                  "effects" J..= J.Array (V.fromList (map J.toJSON effects))
+                                                  ]
 
   toJSON (Optional inner _) = J.object ["type"     J..= J.String "optional",
                                         "decision" J..= J.toJSON inner]
@@ -235,10 +279,12 @@ decisionHandler gamesRepository = do
 
 
 parseDecision :: Decision -> String -> Simulation
-parseDecision (YesNo _ _ f) input = f (input == "true")
-parseDecision (Choice _ _ f) input = f (lookupCard input)
-parseDecision (Choices _ _ _ f) input = f (map lookupCard (wordsBy (==',') input))
-parseDecision (Optional inner other) input = if input == "" then other else parseDecision inner input
+parseDecision (ChooseToUse _ f) input           = f (input == "true")
+parseDecision (ChooseToReact _ _ f) input       = f (input == "true")
+parseDecision (ChooseCard _ _ f) input          = f (lookupCard input)
+parseDecision (ChooseCards _ _ _ f) input       = f (map lookupCard (wordsBy (==',') input))
+parseDecision (ChooseEffects _ effects f) input = f (map ((effects!!) . read) (wordsBy (==',') input))
+parseDecision (Optional inner other) input      = if input == "" then other else parseDecision inner input
 
 makeDecisionHandler :: IORef.IORef GameRepository -> Snap ()
 makeDecisionHandler gamesRepository = do

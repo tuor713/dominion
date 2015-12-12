@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, TupleSections #-}
+{-# LANGUAGE OverloadedStrings, ScopedTypeVariables, TupleSections #-}
 module Dominion.Web.Pages where
 
 import Dominion.Model
@@ -87,26 +87,31 @@ decisionHtml (Optional inner _) =
     decisionHtml inner
     H.button H.! A.class_ "choice-button" H.! A.onclick "pass();" $ "Pass"
 
-decisionHtml (YesNo typ card _) =
+decisionHtml (ChooseToUse effect _) =
   H.div $ do
-    toHtml $ (show typ) ++ " of " ++ cardName card
+    toHtml $ "Use " ++ show effect
     H.button H.! A.class_ "choice-button" H.! A.onclick "choose('true');" $ "Yes"
     H.button H.! A.class_ "choice-button" H.! A.onclick "choose('false');" $ "No"
 
-decisionHtml (Choice typ choices _) =
+decisionHtml (ChooseToReact card trigger _) =
   H.div $ do
-    toHtml $ "Choose a cards to " ++ show typ ++ ":"
+    toHtml $ "Use " ++ show card ++ "'s reaction to respond to " ++ show trigger
+    H.button H.! A.class_ "choice-button" H.! A.onclick "choose('true');" $ "Yes"
+    H.button H.! A.class_ "choice-button" H.! A.onclick "choose('false');" $ "No"
+
+decisionHtml (ChooseCard effect choices _) =
+  H.div $ do
+    toHtml $ "Choose a cards to " ++ show effect ++ ":"
     H.div H.! A.id "choices" $ do
       forM_ choices $ \card -> do
         H.input H.! A.type_ "image"
-                H.! A.onclick (fromString ("choose('"++ cardName card ++ "',1,1);"))
+                H.! A.onclick (fromString ("choose(\""++ cardName card ++ "\",1,1);"))
                 H.! A.style "margin: 5px; width: 100px; height: 159px"
                 H.! A.src (fromString (cardImagePath card))
 
-
-decisionHtml (Choices typ choices (lo,hi) _) =
+decisionHtml (ChooseCards effect choices (lo,hi) _) =
   H.div $ do
-    toHtml $ "Choose between " ++ show lo ++ " and " ++ show hi ++ " cards to " ++ show typ ++ ":"
+    toHtml $ "Choose between " ++ show lo ++ " and " ++ show hi ++ " cards to " ++ show effect ++ ":"
     H.div H.! A.id "choices" $ do
       forM_ choices $ \card -> do
         H.input H.! A.type_ "image"
@@ -116,11 +121,22 @@ decisionHtml (Choices typ choices (lo,hi) _) =
                 H.! A.src (fromString (cardImagePath card))
     if length choices <= hi
       then H.button H.! A.class_ "choice-button"
-                    H.! A.onclick (fromString ("choose('"++ L.intercalate "," (map cardName choices) ++ "');"))
+                    H.! A.onclick (fromString ("choose(\""++ L.intercalate "," (map cardName choices) ++ "\");"))
                     $ "All"
       else return ()
     H.button H.! A.class_ "choice-button"
              H.! A.onclick (fromString ("choices('choices'," ++ show lo ++ "," ++ show hi ++ ");")) $ "Go"
+
+decisionHtml (ChooseEffects no effects _) =
+  H.div $ do
+    H.p $ toHtml $ "Choose " ++ show no ++ ":"
+    H.div H.! A.id "choices" $ do
+      forM_ (zip [0..] effects) $ \(no::Int,effect) ->
+        H.div H.! A.class_ "ui checkbox" $ do
+          H.input H.! A.type_ "checkbox" H.! A.name (fromString (show no))
+          H.label $ toHtml (show effect)
+    H.button H.! A.class_ "choice-button"
+             H.! A.onclick (fromString ("choices('choices'," ++ show no ++ "," ++ show no ++ ");")) $ "Go"
 
 
 showCards cards =

@@ -152,34 +152,44 @@ canSee :: PlayerId -> Info -> Bool
 canSee _ (AllPlayers,_) = True
 canSee pid (VisibleToPlayer p,_) = pid == p
 
--- Decision & decision type are not rich enough for smart bots
--- they need to be able to known more about what the decision really is
--- What drives a decision:
--- > the current state
--- > who decides
--- > who & what triggered the decision (card, effect)
--- > what is decided (the crux)
---   > what action
---   > what target
+-- TODO add source card
+data Trigger = AttackTrigger deriving (Eq, Show)
 
-data DecisionType = QPlay | QBuy | QDraw | QTreasures | QTrash | QGain | QDiscard Location | QOption deriving (Eq)
+-- Numeric generic effect and placeholder effects
+-- are not the same
+-- 'trash 2' is not the same as 'trash X'
+data Effect =
+  EffectPlusCards Int |
+  EffectPlusActions Int |
+  EffectPlusBuys Int |
+  EffectPlusMoney Int |
+  EffectDiscardNo Int |
+  EffectTrashNo Int |
 
-instance Show DecisionType where
-  show QPlay = "play"
-  show QBuy = "buy"
-  show QDraw = "draw"
-  show QTreasures = "play treasures"
-  show QTrash = "trash"
-  show QGain = "gain"
-  show (QDiscard loc) = "discard to " ++ show loc
-  show QOption = "option"
+  EffectDiscard Card Location |
+  EffectBuy Card |
+  EffectGain Card Location Location |
+  EffectPass Card Location Location |
+  EffectPut Card Location Location |
+  EffectTrash Card Location |
+  EffectReveal Card |
+  EffectPlayAction Card |
+  EffectPlayCopy Card |
+  EffectPlayTreasure Card |
+  SpecialEffect Card
 
-data Decision = YesNo DecisionType Card (Bool -> Simulation) |
-                Choice DecisionType [Card] (Card -> Simulation) |
-                Choices DecisionType [Card] (Int,Int) ([Card] -> Simulation) |
-                Optional Decision Simulation
+data Decision =
+  Optional Decision Simulation |
+  ChooseCard Effect [Card] (Card -> Simulation) |
+  ChooseCards Effect [Card] (Int,Int) ([Card] -> Simulation) |
+  ChooseToUse Effect (Bool -> Simulation) |
+  ChooseToReact Card Trigger (Bool -> Simulation) | -- Or actually, ChooseToReact Trigger Effect, but the original is more descriptive of the decision
+  ChooseEffects Int [Effect] ([Effect] -> Simulation)
 
-data GameStep = State GameState | Decision PlayerId GameState Decision
+data DecisionSource = GameMechanics | CardDecision Card
+
+-- TODO add source of decision
+data GameStep = State GameState | Decision PlayerId {- DecisionSource -} GameState Decision
 
 type Action = PlayerId -> GameState -> Simulation
 
@@ -206,6 +216,26 @@ instance Show GameState where
     "actions: " ++ show (actions (turn g)) ++ ", buys: " ++ show (buys (turn g)) ++ ", money: " ++ show (money (turn g)) ++
     " }\n" ++
     "}"
+
+instance Show Effect where
+  show (EffectPlusCards no) = "+" ++ show no ++ " card(s)"
+  show (EffectPlusActions no) = "+" ++ show no ++ " action(s)"
+  show (EffectPlusBuys no) = "+" ++ show no ++ " buy(s)"
+  show (EffectPlusMoney no) = "+" ++ show no ++ " money"
+  show (EffectDiscardNo no) = "discard " ++ show no ++ " card(s)"
+  show (EffectTrashNo no) = "trash " ++ show no ++ " card(s)"
+  show (EffectDiscard card from) = "discard " ++ show card ++ " from " ++ show from
+  show (EffectBuy card) = "buy " ++ show card
+  show (EffectGain card from to) = "gain " ++ show card ++ " from " ++ show from ++ " to " ++ show to
+  show (EffectPass card from to) = "pass " ++ show card ++ " from " ++ show from ++ " to " ++ show to
+  show (EffectPut card from to) = "put " ++ show card ++ " from " ++ show from ++ " to " ++ show to
+  show (EffectTrash card from) = "trash " ++ show card ++ " from " ++ show from
+  show (EffectReveal card) = "reveal " ++ show card
+  show (EffectPlayAction card) = "play " ++ show card
+  show (EffectPlayCopy card) = "play copy of " ++ show card
+  show (EffectPlayTreasure card) = "play treasure " ++ show card
+  show (SpecialEffect card) = "use ability of " ++ show card
+
 
 
 -- Game creation
@@ -260,9 +290,11 @@ optDecision :: Decision -> Action
 optDecision decision player state = return $ Decision player state (Optional decision (return (State state)))
 
 andThenI :: Decision -> (GameState -> Simulation) -> Decision
-andThenI (YesNo caption card cont) f = YesNo caption card (\b -> cont b `andThen` f)
-andThenI (Choice caption cards cont) f = Choice caption cards (\c -> cont c `andThen` f)
-andThenI (Choices caption cards lohi cont) f = Choices caption cards lohi (\cs -> cont cs `andThen` f)
+andThenI (ChooseToReact caption card cont) f = ChooseToReact caption card (\b -> cont b `andThen` f)
+andThenI (ChooseToUse effect cont) f = ChooseToUse effect (\b -> cont b `andThen` f)
+andThenI (ChooseCard caption cards cont) f = ChooseCard caption cards (\c -> cont c `andThen` f)
+andThenI (ChooseCards caption cards lohi cont) f = ChooseCards caption cards lohi (\cs -> cont cs `andThen` f)
+andThenI (ChooseEffects num effects cont) f = ChooseEffects num effects (\cs -> cont cs `andThen` f)
 andThenI (Optional inner fallback) f = Optional (inner `andThenI` f) (fallback `andThen` f)
 
 andThen :: Simulation -> (GameState -> Simulation) -> Simulation
@@ -290,17 +322,13 @@ toSimulation state = return (State state)
 (&&=) :: (a -> Action) -> a -> Action
 (&&=) = ($)
 
-yesNo :: DecisionType -> Card -> (Bool -> Action) -> Action
-yesNo typ card cont player state =
-  decision (YesNo typ card (\bool -> cont bool player state)) player state
-
-chooseOne :: DecisionType -> [Card] -> (Card -> Action) -> Action
+chooseOne :: Effect -> [Card] -> (Card -> Action) -> Action
 chooseOne typ choices cont player state =
-  decision (Choice typ choices (\card -> cont card player state)) player state
+  decision (ChooseCard typ choices (\card -> cont card player state)) player state
 
-chooseMany :: DecisionType -> [Card] -> (Int,Int) -> ([Card] -> Action) -> Action
+chooseMany :: Effect -> [Card] -> (Int,Int) -> ([Card] -> Action) -> Action
 chooseMany typ choices lohi cont player state =
-  decision (Choices typ choices lohi (\chosen -> cont chosen player state)) player state
+  decision (ChooseCards typ choices lohi (\chosen -> cont chosen player state)) player state
 
 
 -- Game functions
@@ -552,15 +580,17 @@ buyPhase name state
   where
     treasures = filter isTreasure (hand (activePlayer state))
 
-    playTreasureDecision = optDecision (Choices QTreasures
+    playTreasureDecision = optDecision (ChooseCards (EffectPlayTreasure unknown)
                                              treasures
                                              (0,length treasures)
                                              (\cards -> playAll cards name state))
                             name state
       `andThen` buyDecision
 
-    buyDecision s2 = optDecision (Choice QBuy
+    buyDecision s2 = optDecision (ChooseCard (EffectBuy unknown)
                                       affordableCards
+                                      -- TODO this is not correct (see FAQ on Mint), we play treasures once and then buy without the ability
+                                      -- to play more treasures
                                       (\card -> (plusBuys (-1) &&& plusMoney (- (cost card)) &&& buy card &&& buyPhase) name s2))
                                     name s2
       where
@@ -571,7 +601,7 @@ buyPhase name state
 actionPhase :: Action
 actionPhase name state
   | actions (turn state) == 0 || null actionsInHand = toSimulation state
-  | otherwise = optDecision (Choice QPlay actionsInHand (\card -> (plusActions (-1) &&& play card &&& actionPhase) name state))
+  | otherwise = optDecision (ChooseCard (EffectPlayAction unknown) actionsInHand (\card -> (plusActions (-1) &&& play card &&& actionPhase) name state))
                          name state
   where
     actionsInHand = filter isAction (hand (activePlayer state))
