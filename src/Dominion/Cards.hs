@@ -243,7 +243,57 @@ adventurer treasures others player state
 -- Intrigue 2xx
 
 intrigueCards = map ($ Intrigue)
-  [carddef 217 "Duke" (simpleCost 5) [Victory] (\p -> length $ filter (==duchy) (allCards p)) pass]
+  [action 201 "Courtyard" 2 courtyard,
+   action 202 "Pawn" 2 pawn,
+   -- 203 secret chamber
+   carddef 204 "Great Hall" (simpleCost 3) [Action, Victory] (const 1) (plusCards 1 &&& plusActions 1),
+   -- 205 masquerade
+   -- 206 shanty town
+   -- 207 steward
+   -- 208 swindler
+   -- 209 wishing well
+   -- 210 baron
+   -- 211 bridge
+   -- 212 conspirator
+   -- 213 coppersmith
+   -- 214 ironworks
+   -- 215 mining village
+   -- 216 scout
+   carddef 217 "Duke" (simpleCost 5) [Victory] (\p -> length $ filter (==duchy) (allCards p)) pass,
+   -- 218 minion
+   -- 219 saboteur
+   -- 220 torturer
+   -- 221 trading post
+   -- 222 tribute
+   -- 223 upgrade
+   carddef 224 "Harem" (simpleCost 6) [Treasure, Victory] (const 2) (plusMoney 2),
+   carddef 225 "Nobles" (simpleCost 6) [Action, Victory] (const 2) nobles
+   ]
+
+courtyard = plusCards 3 &&& putOneBack
+  where
+    putOneBack :: Action
+    putOneBack player state =
+      chooseOne (EffectPut unknown (Hand player) (TopOfDeck player))
+                (hand (playerByName state player))
+                cont
+                player
+                state
+    cont card player state = toSimulation $ transfer card (Hand player) (TopOfDeck player) state
+
+enactEffect :: Effect -> Action
+enactEffect (EffectPlusCards no) = plusCards no
+enactEffect (EffectPlusActions no) = plusActions no
+enactEffect (EffectPlusBuys no) = plusBuys no
+enactEffect (EffectPlusMoney no) = plusMoney no
+enactEffect _ = error "Effect not implemented"
+
+enactEffects :: [Effect] -> Action
+enactEffects = foldr (\e a -> enactEffect e &&& a) pass
+
+pawn = chooseEffects 2 [EffectPlusCards 1, EffectPlusActions 1, EffectPlusBuys 1, EffectPlusMoney 1] enactEffects
+nobles = chooseEffects 1 [EffectPlusCards 3, EffectPlusActions 2] enactEffects
+
 
 -- Seaside 3xx
 
@@ -253,9 +303,22 @@ alchemyCards = map ($ Alchemy)
   [-- 401 Herbalist
    -- 402 Apprentice
    -- 403 Transmute
-   carddef 404 "Vineyard" (fullCost 0 1) [Victory] (\p -> length (filter isAction (allCards p)) `quot` 3) pass
+   carddef 404 "Vineyard" (fullCost 0 1) [Victory] (\p -> length (filter isAction (allCards p)) `quot` 3) pass,
+   -- 405 Apothecary -> needs ordering of cards
+   -- 406 Scrying Pool
+   -- 407 University
+   -- 408 Alchemist
+   carddef 409 "Familiar" (fullCost 3 1) [Action, Attack] (const 0) familiar,
+   carddef 410 "Philosopher's Stone" (fullCost 3 1) [Treasure] (const 0) philosophersStone
+   -- 411 Golem -> needs ordering of cards (can be simulated through repeated selection)
+   -- 412 Possession
   ]
 
+familiar = plusCards 1 &&& plusActions 1 &&& playAttack (gain curse)
+philosophersStone player state = plusMoney num player state
+  where
+    p = playerByName state player
+    num = (length (discardPile p) + length (deck p)) `quot` 5
 
 -- Prosperity 5xx
 

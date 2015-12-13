@@ -28,6 +28,12 @@ function choices(id,low,high) {
     choices.push($(this).attr('name'));
   });
 
+  // semantic ui checkboxes put checked on the div
+  $("#"+id+" .checked input").each(function () {
+    choices.push($(this).attr('name'));
+  });
+
+
   if (choices.length < low) {
     showWarning("Not enough cards selected. Please select at least " + low + " card(s).");
   } else if (choices.length > high) {

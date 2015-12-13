@@ -149,7 +149,7 @@ startGameHandler gamesRepository = do
     let mvars = Map.fromList
                   ((head players, External aliceVar) :
                     (map
-                      (\name -> (name, Bot $ aiBot (betterBigMoney name)))
+                      (\name -> (name, Bot $ aiBot (doubleJack name)))
                       (tail players)))
 
     game <- nextStep (mvars,simState) (State newGame)

@@ -359,6 +359,9 @@ chooseMany :: Effect -> [Card] -> (Int,Int) -> ([Card] -> Action) -> Action
 chooseMany typ choices lohi cont player state =
   decision (ChooseCards typ choices lohi (\chosen -> cont chosen player state)) player state
 
+chooseEffects :: Int -> [Effect] -> ([Effect] -> Action) -> Action
+chooseEffects num effects cont player state =
+  decision (ChooseEffects num effects (\chosen -> cont chosen player state)) player state
 
 -- Game functions
 
