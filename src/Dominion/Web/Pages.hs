@@ -141,8 +141,8 @@ decisionHtml (ChooseEffects no effects _) =
 
 compareCard :: Card -> Card -> Ordering
 compareCard c1 c2 =
-  compare (moneyCost (cost c1)) (moneyCost (cost c2))
-  `mappend` compare (potionCost (cost c1)) (potionCost (cost c2))
+  compare (moneyCost (cost NullModifier c1)) (moneyCost (cost NullModifier c2))
+  `mappend` compare (potionCost (cost NullModifier c1)) (potionCost (cost NullModifier c2))
   `mappend` compare (cardName c1) (cardName c2)
 
 

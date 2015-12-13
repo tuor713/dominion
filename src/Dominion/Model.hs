@@ -64,10 +64,7 @@ data Card = Card { -- Card id is purely a performance artifact to avoid string c
                    cardId :: !Int,
                    cardName :: !String,
                    edition :: !Edition,
-                   -- TODO this only works for Base
-                   -- breaks for cards like peddlar having state dependent cost
-                   -- breaks for potion cost
-                   cost :: !Cost,
+                   cardCost :: Cost,
                    types :: ![CardType],
                    cardPoints :: !(Player -> Int),
                    onPlay :: !Action
@@ -129,10 +126,28 @@ data Player = Player { name :: PlayerId,
                        }
                        deriving (Eq, Show)
 
+data ModAttribute = ModCost deriving (Eq, Ord, Show)
+data Modifier = NullModifier | CappedDecModifier Int | StackedModifier [Modifier]
+  deriving (Eq, Show)
+
+applyMod :: Modifier -> Int -> Int
+applyMod NullModifier x = x
+applyMod (CappedDecModifier num) x = max 0 (x - num)
+applyMod (StackedModifier mods) x = foldr applyMod x mods
+
+stackMod :: Modifier -> Modifier -> Modifier
+stackMod mod NullModifier = mod
+stackMod NullModifier mod = mod
+stackMod (StackedModifier xs) (StackedModifier ys) = StackedModifier (xs ++ ys)
+stackMod mod (StackedModifier xs) = StackedModifier (mod:xs)
+stackMod (StackedModifier xs) mod = StackedModifier (xs ++ [mod])
+stackMod m1 m2 = StackedModifier [m1,m2]
+
 data TurnState = TurnState { money :: Int,
                              potions :: Int,
                              buys :: Int,
-                             actions :: Int
+                             actions :: Int,
+                             modifiers :: Map.Map ModAttribute Modifier
                              }
                              deriving (Show)
 
@@ -295,7 +310,7 @@ mkGame typ names kingdomCards =
   where
     standardCards = colonyCards ++ potionCards ++ [estate,duchy,province,copper,silver,gold,curse]
     colonyCards = if typ == ColonyGame then [platinum, colony] else []
-    potionCards = if any ((0<) . potionCost . cost) kingdomCards then [potion] else []
+    potionCards = if any ((0<) . potionCost . cost NullModifier) kingdomCards then [potion] else []
     playerNo = length names
     noInPile card
       | isStandardVictory card && playerNo == 2 = 8
@@ -435,6 +450,22 @@ isTreasure card = hasCardType card Treasure
 isAttack card = hasCardType card Attack
 
 
+cost :: Modifier -> Card -> Cost
+cost mod card = Cost ((applyMod mod m),p)
+  where
+    (Cost (m,p)) = cardCost card
+
+affordableCards :: Cost -> GameState -> [Card]
+affordableCards bound state =
+  filter ((`smallerEqCost` bound) . cost (currentModifier state ModCost)) (availableCards state)
+
+affordableCardsM :: Int -> GameState -> [Card]
+affordableCardsM num = affordableCards (simpleCost num)
+
+currentModifier :: GameState -> ModAttribute -> Modifier
+currentModifier state attr =
+  Map.findWithDefault NullModifier attr (modifiers (turn state))
+
 allCards :: Player -> [Card]
 allCards s = concatMap (\f -> f s) [hand, inPlay, discardPile, deck]
 
@@ -527,6 +558,10 @@ ensureCanDraw num state name
 
 -- Game action
 
+addModifier :: ModAttribute -> Modifier -> Action
+addModifier attr mod _ state =
+  toSimulation $ state { turn = (turn state) { modifiers = Map.insertWith stackMod attr mod (modifiers (turn state)) } }
+
 playEffect :: Card -> Action
 playEffect card player state = info AllPlayers (player ++ " plays " ++ cardName card) >> onPlay card player state
 
@@ -590,7 +625,7 @@ pass _ = toSimulation
 -- Macro flows
 
 newTurn :: TurnState
-newTurn = TurnState { money = 0, buys = 1, actions = 1, potions = 0 }
+newTurn = TurnState { money = 0, buys = 1, actions = 1, potions = 0, modifiers = Map.empty }
 
 nextTurn :: GameState -> SimulationT GameState
 nextTurn state = nnext
@@ -623,10 +658,10 @@ buyPhase name state
       `andThen` buyDecision
 
     buyDecision s2 = optDecision (ChooseCard (EffectBuy unknown)
-                                      affordableCards
+                                      candidates
                                       -- TODO this is not correct (see FAQ on Mint), we play treasures once and then buy without the ability
                                       -- to play more treasures
-                                      (\card -> (plusBuys (-1) &&& payCosts (cost card) &&& buy card &&& buyPhase) name s2))
+                                      (\card -> (plusBuys (-1) &&& payCosts (cost (currentModifier s2 ModCost) card) &&& buy card &&& buyPhase) name s2))
                                     name s2
       where
         payCosts cost _ state = toSimulation $
@@ -635,7 +670,7 @@ buyPhase name state
             t = turn state
         moneyToSpend = money (turn s2)
         potionToSpend = potions (turn s2)
-        affordableCards = filter ((`smallerEqCost` (fullCost moneyToSpend potionToSpend)) . cost) $ availableCards s2
+        candidates = affordableCards (fullCost moneyToSpend potionToSpend) s2
 
 
 actionPhase :: Action

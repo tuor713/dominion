@@ -19,9 +19,54 @@ maybeCard name = Map.lookup (map toLower name) cardData
 lookupCard :: String -> Card
 lookupCard name = cardData Map.! (map toLower name)
 
-
 cSmithy = cardData Map.! "smithy"
 cChancellor = cardData Map.! "chancellor"
+
+
+-- Generic action elements (potentially move to model)
+
+seqSteps :: (a -> GameState -> Simulation) -> [a] -> GameState -> Simulation
+seqSteps _ [] state = toSimulation state
+seqSteps f (x:xs) state = f x state `andThen` seqSteps f xs
+
+seqActions :: (a -> Action) -> [a] -> Action
+seqActions _ [] _ state = toSimulation state
+seqActions f (x:xs) p state = f x p state `andThen` seqActions f xs p
+
+playAttack :: Action -> Action
+playAttack attack attacker state = seqSteps checkAttack (opponentNames state attacker) state
+  where
+    moat = (cardData Map.! "moat")
+    -- TODO can we do this more elegantly, triggers again?
+    checkAttack op state
+      | moat `elem` h =
+        decision (ChooseToReact moat AttackTrigger (\b -> if b then toSimulation state else attack op state)) op state
+      | otherwise = attack op state
+      where
+        h = hand $ playerByName state op
+
+
+trashNCards :: Int -> Int -> Action
+trashNCards inmin inmax player state =
+  decision (ChooseCards (EffectTrash unknown (Hand player)) candidates (min',inmax) cont) player state
+  where
+    candidates = hand (playerByName state player)
+    min' = min (length candidates) inmin
+    cont cards = seqSteps (\c -> trash c (Hand player) player) cards state
+
+enactEffect :: Effect -> Action
+enactEffect (EffectPlusCards no) = plusCards no
+enactEffect (EffectPlusActions no) = plusActions no
+enactEffect (EffectPlusBuys no) = plusBuys no
+enactEffect (EffectPlusMoney no) = plusMoney no
+enactEffect (EffectTrashNo no) = trashNCards no no
+
+enactEffect _ = error "Effect not implemented"
+
+enactEffects :: [Effect] -> Action
+enactEffects = foldr (\e a -> enactEffect e &&& a) pass
+
+
 
 -- Base Edition
 
@@ -57,26 +102,6 @@ baseCards = map ($ Base)
    action 125 "Adventurer" 6 (adventurer [] [])
    ]
 
-seqSteps :: (a -> GameState -> Simulation) -> [a] -> GameState -> Simulation
-seqSteps _ [] state = toSimulation state
-seqSteps f (x:xs) state = f x state `andThen` seqSteps f xs
-
-seqActions :: (a -> Action) -> [a] -> Action
-seqActions _ [] _ state = toSimulation state
-seqActions f (x:xs) p state = f x p state `andThen` seqActions f xs p
-
-playAttack :: Action -> Action
-playAttack attack attacker state = seqSteps checkAttack (opponentNames state attacker) state
-  where
-    moat = (cardData Map.! "moat")
-    -- TODO can we do this more elegantly, triggers again?
-    checkAttack op state
-      | moat `elem` h =
-        decision (ChooseToReact moat AttackTrigger (\b -> if b then toSimulation state else attack op state)) op state
-      | otherwise = attack op state
-      where
-        h = hand $ playerByName state op
-
 cellar :: Action
 cellar = plusActions 1
   &&+ \p s -> chooseMany (EffectDiscard unknown (Hand p)) (hand (playerByName s p)) (0,length $ (hand (playerByName s p)))
@@ -84,9 +109,7 @@ cellar = plusActions 1
   &&& plusCards (length cards)
 
 chapel :: Action
-chapel player state = decision (ChooseCards (EffectTrash unknown (Hand player)) (hand (playerByName state player)) (0,4) cont) player state
-  where
-    cont cards = seqSteps (\c -> trash c (Hand player) player) cards state
+chapel = trashNCards 0 4
 
 chancellor :: Action
 chancellor player state = plusMoney 2 player state
@@ -97,9 +120,9 @@ chancellor player state = plusMoney 2 player state
                                        else state
 
 workshop :: Action
-workshop player state = (chooseOne (EffectGain unknown Supply (Discard player)) affordable &&= gain) player state
-  where
-    affordable = filter ((`smallerEqCost` (simpleCost 4)) . cost) (availableCards state)
+workshop player state =
+  (chooseOne (EffectGain unknown Supply (Discard player)) (affordableCardsM 4 state) &&= gain) player state
+
 
 bureaucrat :: Action
 bureaucrat player state = (gainTo silver (TopOfDeck player) &&& playAttack treasureToDeck) player state
@@ -116,9 +139,10 @@ bureaucrat player state = (gainTo silver (TopOfDeck player) &&& playAttack treas
 
 feast :: Action
 feast player state = trash (cardData Map.! "feast") InPlay player state
-  `andThen` \s2 -> decision (ChooseCard (EffectGain unknown Supply (Discard player)) (affordable s2) (\c -> gain c player s2)) player s2
-  where
-    affordable state = filter ((`smallerEqCost` (simpleCost 5)) . cost) (availableCards state)
+  `andThen` \s2 -> decision (ChooseCard (EffectGain unknown Supply (Discard player))
+                                        (affordableCardsM 5 s2)
+                                        (\c -> gain c player s2))
+                            player s2
 
 militia :: Action
 militia player state = (plusMoney 2 &&& playAttack discardTo3) player state
@@ -144,8 +168,8 @@ remodel player state
   where
     h = hand $ playerByName state player
     cont card = trash card (Hand player) player state `andThen` chooseToGain card
-    chooseToGain trashed s2 = decision (ChooseCard (EffectGain unknown Supply (Discard player)) (affordable trashed s2) (cont2 s2)) player s2
-    affordable trashed state = filter ((`smallerEqCost` (addCost (cost trashed) (simpleCost 2))) . cost) (availableCards state)
+    chooseToGain trashed s2 = decision (ChooseCard (EffectGain unknown Supply (Discard player)) (candidates trashed s2) (cont2 s2)) player s2
+    candidates trashed state = affordableCards (addCost (cost (currentModifier state ModCost) trashed) (simpleCost 2)) state
     cont2 state card = gain card player state
 
 spy :: Action
@@ -217,7 +241,8 @@ mine player state
   where
     cont card = trash card (Hand player) player state `andThen` gainDecision card
     gainDecision trashed s2 = decision (ChooseCard (EffectGain unknown Supply (Hand player)) (affordable trashed s2) (\c -> gain c player s2)) player s2
-    affordable trashed state = filter (\c -> cost c `smallerEqCost` (addCost (cost trashed) (simpleCost 3)) && isTreasure c) (availableCards state)
+    affordable trashed state =
+      filter isTreasure $ affordableCards (addCost (cost (currentModifier state ModCost) trashed) (simpleCost 3)) state
     treasures = filter isTreasure (hand (playerByName state player))
 
 witch :: Action
@@ -244,16 +269,17 @@ adventurer treasures others player state
 
 intrigueCards = map ($ Intrigue)
   [action 201 "Courtyard" 2 courtyard,
-   action 202 "Pawn" 2 pawn,
+   action 202 "Pawn" 2
+          (chooseEffects 2 [EffectPlusCards 1, EffectPlusActions 1, EffectPlusBuys 1, EffectPlusMoney 1] enactEffects),
    -- 203 secret chamber
    carddef 204 "Great Hall" (simpleCost 3) [Action, Victory] (const 1) (plusCards 1 &&& plusActions 1),
    -- 205 masquerade
    -- 206 shanty town
-   -- 207 steward
+   action 207 "Steward" 3 (chooseEffects 1 [EffectPlusCards 2, EffectPlusMoney 2, EffectTrashNo 2] enactEffects),
    -- 208 swindler
    -- 209 wishing well
    -- 210 baron
-   -- 211 bridge
+   action 211 "Bridge" 4 (plusBuys 1 &&& plusMoney 1 &&& addModifier ModCost (CappedDecModifier 1)),
    -- 212 conspirator
    -- 213 coppersmith
    -- 214 ironworks
@@ -267,7 +293,8 @@ intrigueCards = map ($ Intrigue)
    -- 222 tribute
    -- 223 upgrade
    carddef 224 "Harem" (simpleCost 6) [Treasure, Victory] (const 2) (plusMoney 2),
-   carddef 225 "Nobles" (simpleCost 6) [Action, Victory] (const 2) nobles
+   carddef 225 "Nobles" (simpleCost 6) [Action, Victory] (const 2)
+          (chooseEffects 1 [EffectPlusCards 3, EffectPlusActions 2] enactEffects)
    ]
 
 courtyard = plusCards 3 &&& putOneBack
@@ -280,19 +307,6 @@ courtyard = plusCards 3 &&& putOneBack
                 player
                 state
     cont card player state = toSimulation $ transfer card (Hand player) (TopOfDeck player) state
-
-enactEffect :: Effect -> Action
-enactEffect (EffectPlusCards no) = plusCards no
-enactEffect (EffectPlusActions no) = plusActions no
-enactEffect (EffectPlusBuys no) = plusBuys no
-enactEffect (EffectPlusMoney no) = plusMoney no
-enactEffect _ = error "Effect not implemented"
-
-enactEffects :: [Effect] -> Action
-enactEffects = foldr (\e a -> enactEffect e &&& a) pass
-
-pawn = chooseEffects 2 [EffectPlusCards 1, EffectPlusActions 1, EffectPlusBuys 1, EffectPlusMoney 1] enactEffects
-nobles = chooseEffects 1 [EffectPlusCards 3, EffectPlusActions 2] enactEffects
 
 
 -- Seaside 3xx
