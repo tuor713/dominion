@@ -49,6 +49,14 @@ $(function () {
   });
 });
 
+function startGame(cards) {
+  $.post("/game/start",
+      JSON.stringify({"players":["Alice","Bob"], "cards":cards}),
+      function (id) { window.location.href = "/game/"+id +"/decision/Alice?format=html"; },
+      'text'
+    );
+}
+
 function start() {
   var tableau = [];
 
@@ -59,10 +67,16 @@ function start() {
   if (tableau.length != 10) {
     showWarning("Please select exactly 10 cards.");
   } else {
-    $.post("/game/start",
-      JSON.stringify({"players":["Alice","Bob"], "cards":tableau}),
-      function (id) { window.location.href = "/game/"+id +"/decision/Alice?format=html"; },
-      'text'
-    );
+    startGame(tableau);
   }
+}
+
+function shuffle(o){
+    for(var j, x, i = o.length; i; j = Math.floor(Math.random() * i), x = o[--i], o[i] = o[j], o[j] = x);
+    return o;
+}
+
+function randomStart(cards) {
+  var selected = shuffle(cards).slice(0,10);
+  startGame(selected);
 }

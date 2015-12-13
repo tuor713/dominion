@@ -67,7 +67,8 @@ data Card = Card { -- Card id is purely a performance artifact to avoid string c
                    cardCost :: Cost,
                    types :: ![CardType],
                    cardPoints :: !(Player -> Int),
-                   onPlay :: !Action
+                   onPlay :: !Action,
+                   triggers :: Map.Map Trigger Action
                    }
 
 instance Show Card where
@@ -84,20 +85,28 @@ instance Ord Card where
 noPoints :: a -> Int
 noPoints = const 0
 
+noTriggers :: Map.Map Trigger Action
+noTriggers = Map.empty
+
 treasure :: Int -> String -> Int -> Int -> Edition -> Card
-treasure id name cost money edition = Card id name edition (simpleCost cost) [Treasure] noPoints (plusMoney money)
+treasure id name cost money edition = Card id name edition (simpleCost cost) [Treasure] noPoints (plusMoney money) noTriggers
 
 action :: Int -> String -> Int -> Action -> Edition -> Card
-action id name cost effect edition = Card id name edition (simpleCost cost) [Action] noPoints effect
+action id name cost effect edition = Card id name edition (simpleCost cost) [Action] noPoints effect noTriggers
 
 attack :: Int -> String -> Int -> Action -> Edition -> Card
-attack id name cost effect edition = Card id name edition (simpleCost cost) [Action, Attack] noPoints effect
+attack id name cost effect edition = Card id name edition (simpleCost cost) [Action, Attack] noPoints effect noTriggers
 
 victory :: Int -> String -> Int -> Int -> Edition -> Card
-victory id name cost points edition = Card id name edition (simpleCost cost) [Victory] (const points) pass
+victory id name cost points edition = Card id name edition (simpleCost cost) [Victory] (const points) pass noTriggers
 
-carddef :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> Action -> Edition -> Card
-carddef id name cost types points effect edition = Card id name edition cost types points effect
+carddef :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> Action -> Map.Map Trigger Action -> Edition -> Card
+carddef id name cost types points effect triggers edition = Card id name edition cost types points effect triggers
+
+withTrigger :: (Edition -> Card) -> Trigger -> Action -> Edition -> Card
+withTrigger cardgen trigger action ed = card { triggers = Map.insert trigger action (triggers card) }
+  where
+    card = cardgen ed
 
 -- Basic cards
 
@@ -107,8 +116,8 @@ gold     = treasure 2 "Gold" 6 3 Base
 estate   = victory 3 "Estate" 2 1 Base
 duchy    = victory 4 "Duchy" 5 3 Base
 province = victory 5 "Province" 8 6 Base
-curse    = carddef 6 "Curse" (simpleCost 0) [CurseType] (const (-1)) pass Base
-potion   = carddef 7 "Potion" (simpleCost 4) [Treasure] (const 0) plusPotion Alchemy
+curse    = carddef 6 "Curse" (simpleCost 0) [CurseType] (const (-1)) pass noTriggers Base
+potion   = carddef 7 "Potion" (simpleCost 4) [Treasure] (const 0) plusPotion noTriggers Alchemy
 platinum = treasure 8 "Platinum" 9 5 Prosperity
 colony   = victory 9 "Colony" 11 10 Prosperity
 
@@ -196,7 +205,10 @@ canSee _ (AllPlayers,_) = True
 canSee pid (VisibleToPlayer p,_) = pid == p
 
 -- TODO add source card
-data Trigger = AttackTrigger deriving (Eq, Show)
+data Trigger =
+  AttackTrigger |
+  BuyTrigger
+  deriving (Eq, Ord, Show)
 
 -- Numeric generic effect and placeholder effects
 -- are not the same
@@ -475,7 +487,7 @@ points s = sum $ map (`cardPoints` s) $ allCards s
 turnNo :: GameState -> Int
 turnNo g = ((ply g + 1) `div` length (players g))
 
-unknown = Card (-1) "XXX" Base (simpleCost 0) [] (\_ -> 0) pass
+unknown = Card (-1) "XXX" Base (simpleCost 0) [] (\_ -> 0) pass noTriggers
 
 -- Removes invisble information from the state such as opponents hands
 -- It assumes some intelligent information retention such as about own deck content
@@ -586,13 +598,26 @@ gainTo card target player state
 gain :: Card -> Action
 gain card player = gainTo card (Discard player) player
 
+reveal :: [Card] -> Action
+reveal cards player state = info AllPlayers (player ++ " reveals " ++ summarizeCards cards) >> return (State state)
+
 buy :: Card -> Action
 buy card player state =
-  info AllPlayers (player ++ " buys " ++ cardName card) >> return (State $ transfer card Supply (Discard player) state)
+  info AllPlayers (player ++ " buys " ++ cardName card) >>
+    maybe
+      (transferT state)
+      (\trigger -> trigger player state `andThen` transferT)
+      (Map.lookup BuyTrigger (triggers card))
+  where
+    transferT state = toSimulation $ transfer card Supply (Discard player) state
 
 trash :: Card -> Location -> Action
 trash card source player state =
   info AllPlayers (player ++ " trashes " ++ cardName card) >> return (State $ transfer card source Trash state)
+
+trashAll :: [Card] -> Location -> Action
+trashAll cards source player state =
+  info AllPlayers (player ++ " trashes " ++ summarizeCards cards) >> return (State $ foldr (\c s -> transfer c source Trash s) state cards)
 
 discard :: Card -> Location -> Action
 discard card loc player state =
@@ -644,23 +669,11 @@ cleanupPhase _ state = M.liftM State (nextTurn state)
 
 buyPhase :: Action
 buyPhase name state
-  | length treasures > 0 = playTreasureDecision
   | buys (turn state) == 0 = toSimulation state
   | otherwise = buyDecision state
   where
-    treasures = filter isTreasure (hand (activePlayer state))
-
-    playTreasureDecision = optDecision (ChooseCards (EffectPlayTreasure unknown)
-                                             treasures
-                                             (0,length treasures)
-                                             (\cards -> playAll cards name state))
-                            name state
-      `andThen` buyDecision
-
     buyDecision s2 = optDecision (ChooseCard (EffectBuy unknown)
                                       candidates
-                                      -- TODO this is not correct (see FAQ on Mint), we play treasures once and then buy without the ability
-                                      -- to play more treasures
                                       (\card -> (plusBuys (-1) &&& payCosts (cost (currentModifier s2 ModCost) card) &&& buy card &&& buyPhase) name s2))
                                     name s2
       where
@@ -671,6 +684,18 @@ buyPhase name state
         moneyToSpend = money (turn s2)
         potionToSpend = potions (turn s2)
         candidates = affordableCards (fullCost moneyToSpend potionToSpend) s2
+
+playTreasures :: Action
+playTreasures name state
+  | length treasures > 0 = playTreasureDecision
+  | otherwise = toSimulation state
+  where
+    treasures = filter isTreasure (hand (activePlayer state))
+    playTreasureDecision = optDecision (ChooseCards (EffectPlayTreasure unknown)
+                                             treasures
+                                             (0,length treasures)
+                                             (\cards -> playAll cards name state))
+                            name state
 
 
 actionPhase :: Action
@@ -684,7 +709,7 @@ actionPhase name state
 playTurn :: Action
 playTurn name state =
   info AllPlayers ("Turn " ++ show (turnNo state) ++ " - " ++ name)
-  >> (actionPhase &&& buyPhase &&& cleanupPhase) name state
+  >> (actionPhase &&& playTreasures &&& buyPhase &&& cleanupPhase) name state
 
 finished :: GameState -> Bool
 finished state =

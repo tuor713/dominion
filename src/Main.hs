@@ -23,7 +23,6 @@ import qualified Data.Maybe as Maybe
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import qualified Data.Vector as V
-import System.Log.FastLogger
 import qualified System.Environment as Env
 import System.Random (newStdGen)
 
@@ -58,7 +57,6 @@ runConsole (num:_) =
 
 runWeb :: IO ()
 runWeb = do
-  logset <- newStdoutLoggerSet 10000
   gamesRepository <- IORef.newIORef (0,Map.empty)
   quickHttpServe (site gamesRepository)
 
@@ -90,6 +88,7 @@ type GameRepository = (Int,Map.Map Int Game)
 
 externalDecision :: PlayerState -> MVar GameStep
 externalDecision (External mvar) = mvar
+externalDecision (Bot _) = error "Called externalDecision on internal bot"
 
 playerUpdateState :: PlayerState -> GameState -> IO ()
 playerUpdateState (Bot _) _ = return ()
@@ -171,6 +170,7 @@ instance J.ToJSON Card where
 
 instance J.ToJSON Trigger where
   toJSON AttackTrigger = J.String "attack"
+  toJSON BuyTrigger = J.String "buy"
 
 instance J.ToJSON Location where
   toJSON Supply = J.toJSON [J.String "supply"]

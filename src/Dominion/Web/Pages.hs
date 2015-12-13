@@ -220,7 +220,7 @@ htmlFinished state infos =
           showCards (piles state)
 
         forM_ (reverse $ L.sortOn (points . snd) $ Map.toList (players state)) $ \(pid,player) ->
-          H.div $ do
+          H.section $ do
             H.h4 $ toHtml $ "Player - " ++ pid ++ ": " ++ show (points player)
             H.h5 "Cards: "
             showCards (cardListToMap (allCards player))
@@ -241,15 +241,24 @@ htmlSetupGame =
     H.div H.! A.class_ "fourteen wide column" $ do
       H.div H.! A.id "flash" $ ""
       H.h3 "Choose tableau"
-      H.div H.! A.class_ "ui horizontal selection list" $ do
-        forM_ (L.sortOn cardName kingdomCards) $ \card ->
-          H.div H.! A.class_ "item" H.! A.onclick "$(this).toggleClass('selected');"
-                H.! A.id (fromString (cardName card)) $ do
-            H.img H.! A.style "width: 100px; height: 159px;" H.! A.src (fromString (cardImagePath card))
-            H.div H.! A.class_ "content" $ toHtml (cardName card)
+
+      forM_ [Base, Intrigue, Seaside, Alchemy, Prosperity, Cornucopia, Hinterlands, DarkAges, Guilds, Adventures, Promo] $ \ed -> do
+        let cards = filter ((==ed) . edition) kingdomCards
+        when (not (null cards)) $ do
+          H.section $ do
+            H.h3 $ toHtml $ show ed
+            H.div H.! A.class_ "ui horizontal selection list" $ do
+              forM_ (L.sortOn cardName cards) $ \card ->
+                H.div H.! A.class_ "item" H.! A.onclick "$(this).toggleClass('selected');"
+                      H.! A.id (fromString (cardName card)) $ do
+                  H.img H.! A.style "width: 100px; height: 159px;" H.! A.src (fromString (cardImagePath card))
+                  H.div H.! A.class_ "content" $ toHtml (cardName card)
+
       H.div $ do
         H.button H.! A.class_ "choice-button"
                  H.! A.onclick (fromString ("start();")) $ "Go"
+        H.button H.! A.class_ "choice-button"
+                 H.! A.onclick (fromString ("randomStart([\"" ++ L.intercalate "\",\"" (map cardName kingdomCards) ++ "\"]);")) $ "Random"
 
 
 htmlSimulation :: [Card] -> Stats -> H.Html
