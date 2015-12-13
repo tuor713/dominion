@@ -77,6 +77,17 @@ function shuffle(o){
 }
 
 function randomStart(cards) {
-  var selected = shuffle(cards).slice(0,10);
-  startGame(selected);
+  var tableau = [];
+
+  $(".item.selected").each(function () {
+    tableau.push($(this).attr('id'));
+  });
+
+  if (tableau.length > 10) {
+    showWarning("You already selected more than 10 cards.");
+  } else {
+    var remaining = cards.filter(function (card) { return tableau.indexOf(card) == -1; });
+    var selected = shuffle(remaining).slice(0,10 - tableau.length);
+    startGame(tableau.concat(selected));
+  }
 }

@@ -196,6 +196,11 @@ htmlDecision _ (state,infos,decision) =
             when (not (null (inPlay player))) $ do
               H.h5 "InPlay: "
               showCards (cardListToMap (inPlay player))
+            forM_ (Map.toList (mats player)) $ \(mat,cards) ->
+              when (not (null cards)) $ do
+                H.h5 $ toHtml (show mat)
+                showCards (cardListToMap cards)
+
 
     H.div H.! A.class_ "six wide column" $ do
       H.section H.! A.class_ "logs" $ do

@@ -17,8 +17,8 @@ data CardType = Action | Treasure | Victory | CurseType {- This is a bit of a ha
     Prize | Looter | Ruins | Knight | Reserve | Traveller
     deriving (Eq, Read, Show)
 
-data Location = Hand String | Discard String | TopOfDeck String | InPlay | Trash | Supply
-  deriving (Eq, Read, Show)
+data Location = Hand PlayerId | Discard PlayerId | TopOfDeck PlayerId | InPlay | Trash | Supply | Mat PlayerId Mat
+  deriving (Eq, Show)
 
 data Edition = Base | Intrigue | Seaside | Alchemy | Prosperity | Cornucopia | Hinterlands | DarkAges | Guilds | Adventures | Promo
   deriving (Eq, Read, Show)
@@ -68,6 +68,7 @@ data Card = Card { -- Card id is purely a performance artifact to avoid string c
                    types :: ![CardType],
                    cardPoints :: !(Player -> Int),
                    onPlay :: !Action,
+                   initialSupply :: Int -> Int,
                    triggers :: Map.Map Trigger Action
                    }
 
@@ -89,37 +90,48 @@ noTriggers :: Map.Map Trigger Action
 noTriggers = Map.empty
 
 treasure :: Int -> String -> Int -> Int -> Edition -> Card
-treasure id name cost money edition = Card id name edition (simpleCost cost) [Treasure] noPoints (plusMoney money) noTriggers
+treasure id name cost money edition = Card id name edition (simpleCost cost) [Treasure] noPoints (plusMoney money) (const 10) noTriggers
 
 action :: Int -> String -> Int -> Action -> Edition -> Card
-action id name cost effect edition = Card id name edition (simpleCost cost) [Action] noPoints effect noTriggers
+action id name cost effect edition = Card id name edition (simpleCost cost) [Action] noPoints effect (const 10) noTriggers
 
 attack :: Int -> String -> Int -> Action -> Edition -> Card
-attack id name cost effect edition = Card id name edition (simpleCost cost) [Action, Attack] noPoints effect noTriggers
+attack id name cost effect edition = Card id name edition (simpleCost cost) [Action, Attack] noPoints effect (const 10) noTriggers
 
 victory :: Int -> String -> Int -> Int -> Edition -> Card
-victory id name cost points edition = Card id name edition (simpleCost cost) [Victory] (const points) pass noTriggers
+victory id name cost points edition = Card id name edition (simpleCost cost) [Victory] (const points) pass (const 10) noTriggers
 
 carddef :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> Action -> Map.Map Trigger Action -> Edition -> Card
-carddef id name cost types points effect triggers edition = Card id name edition cost types points effect triggers
+carddef id name cost types points effect triggers edition = Card id name edition cost types points effect (const 10) triggers
 
 withTrigger :: (Edition -> Card) -> Trigger -> Action -> Edition -> Card
 withTrigger cardgen trigger action ed = card { triggers = Map.insert trigger action (triggers card) }
   where
     card = cardgen ed
 
+withInitialSupply :: (Edition -> Card) -> (Int -> Int) -> Edition -> Card
+withInitialSupply cardgen supplyf ed = card { initialSupply = supplyf }
+  where
+    card = cardgen ed
+
 -- Basic cards
 
-copper   = treasure 0 "Copper" 0 1 Base
-silver   = treasure 1 "Silver" 3 2 Base
-gold     = treasure 2 "Gold" 6 3 Base
-estate   = victory 3 "Estate" 2 1 Base
-duchy    = victory 4 "Duchy" 5 3 Base
-province = victory 5 "Province" 8 6 Base
-curse    = carddef 6 "Curse" (simpleCost 0) [CurseType] (const (-1)) pass noTriggers Base
-potion   = carddef 7 "Potion" (simpleCost 4) [Treasure] (const 0) plusPotion noTriggers Alchemy
-platinum = treasure 8 "Platinum" 9 5 Prosperity
-colony   = victory 9 "Colony" 11 10 Prosperity
+stdVictorySupply :: Int -> Int
+stdVictorySupply 2 = 8
+stdVictorySupply _ = 12
+
+copper   = withInitialSupply (treasure 0 "Copper" 0 1) (\players -> 60 - 7 * players) Base
+silver   = withInitialSupply (treasure 1 "Silver" 3 2) (const 40) Base
+gold     = withInitialSupply (treasure 2 "Gold" 6 3) (const 30) Base
+estate   = withInitialSupply (victory 3 "Estate" 2 1) stdVictorySupply Base
+duchy    = withInitialSupply (victory 4 "Duchy" 5 3) stdVictorySupply Base
+province = withInitialSupply (victory 5 "Province" 8 6) stdVictorySupply Base
+curse    = withInitialSupply (carddef 6 "Curse" (simpleCost 0) [CurseType] (const (-1)) pass noTriggers)
+            (\players -> if players == 2 then 10 else if players == 3 then 20 else 30)
+            Base
+potion   = withInitialSupply (carddef 7 "Potion" (simpleCost 4) [Treasure] (const 0) plusPotion noTriggers) (const 16) Alchemy
+platinum = withInitialSupply (treasure 8 "Platinum" 9 5) (const 12) Prosperity
+colony   = withInitialSupply (victory 9 "Colony" 11 10) stdVictorySupply Prosperity
 
 basicCards = [copper, silver, gold, estate, duchy, province, curse, potion, platinum, colony]
 
@@ -127,11 +139,14 @@ basicCards = [copper, silver, gold, estate, duchy, province, curse, potion, plat
 
 type PlayerId = String
 
+data Mat = IslandMat deriving (Eq, Ord, Show)
+
 data Player = Player { name :: PlayerId,
                        hand :: [Card],
                        inPlay :: [Card],
                        deck :: [Card],
-                       discardPile :: [Card]
+                       discardPile :: [Card],
+                       mats :: Map.Map Mat [Card]
                        }
                        deriving (Eq, Show)
 
@@ -168,7 +183,8 @@ data GameState = GameState { players :: Map.Map PlayerId Player,
                              trashPile :: [Card],
                              turn :: TurnState,
                              piles :: Map.Map Card Int,
-                             ply :: Int
+                             ply :: Int,
+                             finished :: Bool
                              }
 
 data Result = Tie [PlayerId] | Win PlayerId deriving (Eq, Read, Show)
@@ -296,17 +312,10 @@ instance Show Effect where
 -- Game creation
 
 mkPlayer :: String -> SimulationT Player
-mkPlayer name = draw Player { name = name, hand = [], discardPile = initialDeck, deck = [], inPlay = [] } 5
+mkPlayer name = draw Player { name = name, hand = [], discardPile = initialDeck, deck = [], inPlay = [], mats = Map.empty } 5
 
 initialDeck :: [Card]
 initialDeck = replicate 7 copper ++ replicate 3 estate
-
-isStandardVictory c
-  | c == estate = True
-  | c == duchy = True
-  | c == province = True
-  | c == colony = True
-  | otherwise = False
 
 mkGame :: GameType -> [String] -> [Card] -> SimulationT GameState
 mkGame typ names kingdomCards =
@@ -314,27 +323,17 @@ mkGame typ names kingdomCards =
     return $
     GameState { players = Map.fromList $ zip names players,
                 turnOrder = names,
-                piles = Map.fromList $ map (\c -> (c, noInPile c)) (standardCards ++ kingdomCards),
+                piles = Map.fromList $ map (\c -> (c, initialSupply c playerNo)) (standardCards ++ kingdomCards),
                 trashPile = [],
                 turn = newTurn,
-                ply = 1
+                ply = 1,
+                finished = False
                 }
   where
     standardCards = colonyCards ++ potionCards ++ [estate,duchy,province,copper,silver,gold,curse]
     colonyCards = if typ == ColonyGame then [platinum, colony] else []
     potionCards = if any ((0<) . potionCost . cost NullModifier) kingdomCards then [potion] else []
     playerNo = length names
-    noInPile card
-      | isStandardVictory card && playerNo == 2 = 8
-      | isStandardVictory card = 12
-      | card == curse && playerNo == 2 = 10
-      | card == curse && playerNo == 3 = 20
-      | card == curse = 30
-      | card == gold = 30
-      | card == silver = 40
-      | card == copper = 60 - 7 * playerNo
-      | otherwise = 10
-
 
 
 -- Combinators
@@ -399,6 +398,7 @@ moveTo c (TopOfDeck player) state = updatePlayer state player (\p -> p { deck = 
 moveTo c InPlay state             = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = c : inPlay p })
 moveTo c Trash state              = state { trashPile = c : trashPile state }
 moveTo c Supply state             = state { piles = Map.adjust (+1) c (piles state) }
+moveTo c (Mat player mat) state   = updatePlayer state player (\p -> p { mats = Map.insertWith (++) mat [c] (mats p) })
 
 moveFrom :: Card -> Location -> GameState -> GameState
 moveFrom c (Hand player) state      = updatePlayer state player (\p -> p { hand = L.delete c $ hand p })
@@ -407,6 +407,7 @@ moveFrom c (TopOfDeck player) state = updatePlayer state player (\p -> p { deck 
 moveFrom c InPlay state             = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = L.delete c $ inPlay p })
 moveFrom c Trash state              = state { trashPile = L.delete c $ trashPile state }
 moveFrom c Supply state             = state { piles = Map.adjust (+(-1)) c (piles state) }
+moveFrom c (Mat player mat) state   = updatePlayer state player (\p -> p { mats = Map.adjust (L.delete c) mat (mats p) })
 
 transfer :: Card -> Location -> Location -> GameState -> GameState
 transfer c from to state = moveTo c to (moveFrom c from state)
@@ -487,7 +488,7 @@ points s = sum $ map (`cardPoints` s) $ allCards s
 turnNo :: GameState -> Int
 turnNo g = ((ply g + 1) `div` length (players g))
 
-unknown = Card (-1) "XXX" Base (simpleCost 0) [] (\_ -> 0) pass noTriggers
+unknown = Card (-1) "XXX" Base (simpleCost 0) [] (\_ -> 0) pass (const 0) noTriggers
 
 -- Removes invisble information from the state such as opponents hands
 -- It assumes some intelligent information retention such as about own deck content
@@ -588,7 +589,6 @@ gainFrom :: Card -> Location -> Action
 gainFrom card source player state =
   info AllPlayers (player ++ " gains " ++ cardName card) >> return (State $ transfer card source (Discard player) state)
 
-
 gainTo :: Card -> Location -> Action
 gainTo card target player state
   | inSupply state card =
@@ -614,6 +614,9 @@ buy card player state =
 trash :: Card -> Location -> Action
 trash card source player state =
   info AllPlayers (player ++ " trashes " ++ cardName card) >> return (State $ transfer card source Trash state)
+
+put :: Card -> Location -> Location -> Action
+put card source target _ state = toSimulation $ transfer card source target state
 
 trashAll :: [Card] -> Location -> Action
 trashAll cards source player state =
@@ -663,9 +666,23 @@ nextTurn state = nnext
     -- TODO can cleanup trigger anything like discard ?
     nnext = updatePlayerR next current (\p -> draw p { hand = [], inPlay = [], discardPile = hand p ++ inPlay p ++ discardPile p } 5)
 
+checkFinished :: GameState -> Bool
+checkFinished state =
+  numInSupply state province == 0
+  || Map.size (Map.filter (==0) (piles state)) >= 3
+
+-- TODO island mat should be handled by and end game trigger of sorts
+endGame :: GameState -> GameState
+endGame state = state { finished = True, players = Map.map clearIslandMat (players state) }
+  where
+    clearIslandMat player = player { deck = deck player ++ Map.findWithDefault [] IslandMat (mats player),
+                                     mats = Map.delete IslandMat (mats player)
+                                     }
 
 cleanupPhase :: Action
-cleanupPhase _ state = M.liftM State (nextTurn state)
+cleanupPhase _ state = M.liftM State (nextTurn (if done then endGame state else state))
+  where
+    done = checkFinished state
 
 buyPhase :: Action
 buyPhase name state
@@ -710,11 +727,6 @@ playTurn :: Action
 playTurn name state =
   info AllPlayers ("Turn " ++ show (turnNo state) ++ " - " ++ name)
   >> (actionPhase &&& playTreasures &&& buyPhase &&& cleanupPhase) name state
-
-finished :: GameState -> Bool
-finished state =
-  numInSupply state province == 0
-  || Map.size (Map.filter (==0) (piles state)) >= 3
 
 winner :: GameState -> Result
 winner state

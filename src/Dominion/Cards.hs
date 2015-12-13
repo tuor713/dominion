@@ -24,7 +24,7 @@ lookupCard name = cardData Map.! (map toLower name)
 
 cSmithy = cardData Map.! "smithy"
 cChancellor = cardData Map.! "chancellor"
-
+cIsland = cardData Map.! "island"
 
 -- Generic action elements (potentially move to model)
 
@@ -112,7 +112,8 @@ baseCards = map ($ Base)
 
    attack 108 "Bureaucrat" 4 bureaucrat,
    action 109 "Feast" 4 feast,
-   carddef 110 "Gardens" (simpleCost 4) [Victory] (\p -> length (allCards p) `quot` 10) pass noTriggers,
+   withInitialSupply (carddef 110 "Gardens" (simpleCost 4) [Victory] (\p -> length (allCards p) `quot` 10) pass noTriggers)
+    stdVictorySupply,
    attack 111 "Militia" 4 militia,
    action 112 "Moneylender" 4 moneylender,
    action 113 "Remodel" 4 (remodelX 2),
@@ -291,7 +292,8 @@ intrigueCards = map ($ Intrigue)
    action 202 "Pawn" 2
           (chooseEffects 2 [EffectPlusCards 1, EffectPlusActions 1, EffectPlusBuys 1, EffectPlusMoney 1] enactEffects),
    -- 203 secret chamber
-   carddef 204 "Great Hall" (simpleCost 3) [Action, Victory] (const 1) (plusCards 1 &&& plusActions 1) noTriggers,
+   withInitialSupply (carddef 204 "Great Hall" (simpleCost 3) [Action, Victory] (const 1) (plusCards 1 &&& plusActions 1) noTriggers)
+    stdVictorySupply,
    -- 205 masquerade
    action 206 "Shanty Town" 3 (plusActions 2 &&& shantyDraw),
    action 207 "Steward" 3 (chooseEffects 1 [EffectPlusCards 2, EffectPlusMoney 2, EffectTrashNo 2] enactEffects),
@@ -311,10 +313,12 @@ intrigueCards = map ($ Intrigue)
    -- 221 trading post
    -- 222 tribute
    -- 223 upgrade
-   carddef 224 "Harem" (simpleCost 6) [Treasure, Victory] (const 2) (plusMoney 2) noTriggers,
-   carddef 225 "Nobles" (simpleCost 6) [Action, Victory] (const 2)
-          (chooseEffects 1 [EffectPlusCards 3, EffectPlusActions 2] enactEffects)
-          noTriggers
+   withInitialSupply (carddef 224 "Harem" (simpleCost 6) [Treasure, Victory] (const 2) (plusMoney 2) noTriggers)
+    stdVictorySupply,
+   withInitialSupply (carddef 225 "Nobles" (simpleCost 6) [Action, Victory] (const 2)
+                      (chooseEffects 1 [EffectPlusCards 3, EffectPlusActions 2] enactEffects)
+                      noTriggers)
+                     stdVictorySupply
    ]
 
 courtyard = plusCards 3 &&& putOneBack
@@ -345,10 +349,10 @@ seasideCards = map ($ Seaside)
    -- 307 Fishing Village
    -- 308 Lookout
    -- 309 Smugglers
-   action 310 "Warehouse" 3 (plusCards 3 &&& plusActions 1 &&& discardNCards 3)
+   action 310 "Warehouse" 3 (plusCards 3 &&& plusActions 1 &&& discardNCards 3),
    -- 311 Caravan
    -- 312 Cutpurse
-   -- 313 Island
+   withInitialSupply (carddef 313 "Island" (simpleCost 4) [Action, Victory] (const 2) island noTriggers) stdVictorySupply
    -- 314 Navigator
    -- 315 Pirate Ship
    -- 316 Salvager
@@ -362,8 +366,14 @@ seasideCards = map ($ Seaside)
    -- 324 Tactician
    -- 325 Treasury
    -- 326 Wharf
-
   ]
+
+island player state
+  | null h = put cIsland InPlay (Mat player IslandMat) player state
+  | otherwise = chooseOne (EffectPut unknown (Hand player) (Mat player IslandMat)) h cont player state
+  where
+    h = hand $ playerByName state player
+    cont card = put cIsland InPlay (Mat player IslandMat) &&& put card (Hand player) (Mat player IslandMat)
 
 -- Alchemy 4xx
 
@@ -371,7 +381,8 @@ alchemyCards = map ($ Alchemy)
   [-- 401 Herbalist
    -- 402 Apprentice
    -- 403 Transmute
-   carddef 404 "Vineyard" (fullCost 0 1) [Victory] (\p -> length (filter isAction (allCards p)) `quot` 3) pass noTriggers,
+   withInitialSupply (carddef 404 "Vineyard" (fullCost 0 1) [Victory] (\p -> length (filter isAction (allCards p)) `quot` 3) pass noTriggers)
+    stdVictorySupply,
    -- 405 Apothecary -> needs ordering of cards
    -- 406 Scrying Pool
    -- 407 University

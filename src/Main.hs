@@ -179,6 +179,7 @@ instance J.ToJSON Location where
   toJSON Trash = J.toJSON [J.String "trash"]
   toJSON (TopOfDeck p) = J.toJSON [J.String "topOfDeck", jString p]
   toJSON InPlay = J.toJSON [J.String "inPlay"]
+  toJSON (Mat p mat) = J.toJSON [J.String "mat", jString p, jString (show mat)]
 
 instance J.ToJSON Effect where
   toJSON (EffectPlusCards no) = J.toJSON [J.String "plusCards", J.toJSON no]
