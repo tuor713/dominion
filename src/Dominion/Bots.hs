@@ -32,7 +32,7 @@ aiBot bot state int = return $ bot state int
 -- Default AI
 
 -- Default predicate to rate a card, not context sensitive
-cardScore :: Card -> Int
+cardScore :: CardDef -> Int
 cardScore card
   | card == curse = 0
   | card == estate = 5
@@ -46,9 +46,9 @@ defaultBot :: SimpleBot
 defaultBot _ _ (ChooseCards (EffectPlayTreasure _) choices _ f) _ = f choices
 defaultBot _ _ (ChooseCard (EffectPlayAction _) actions f) _ = f (head actions)
 defaultBot _ state (ChooseCard (EffectTrash _ _) cards f) alt
-  | curse `elem` cards = f curse
-  | estate `elem` cards && gainsToEndGame state > 2 = f estate
-  | copper `elem` cards = f copper
+  | curse `elem` (map typ cards) = f $ head (filter ((==curse) . typ) cards)
+  | estate `elem` (map typ cards) && gainsToEndGame state > 2 = f $ head (filter ((==estate) . typ) cards)
+  | copper `elem` (map typ cards) = f $ head (filter ((==copper) . typ) cards)
   | otherwise = case alt of
                   Just next -> next
                   Nothing -> f (head cards)
@@ -57,12 +57,13 @@ defaultBot ownId _ (ChooseToUse (EffectDiscard card (TopOfDeck p)) f) _
   | ownId == p = f (not desirable)
   | otherwise = f desirable
   where
-    desirable = card /= copper && card /= curse && card /= estate && card /= duchy && card /= province
+    ctyp = typ card
+    desirable = ctyp /= copper && ctyp /= curse && ctyp /= estate && ctyp /= duchy && ctyp /= province
 
 defaultBot _ _ (ChooseCards (EffectTrash _ _) cards (lo,hi) f) _ = f choices
   where
-    wantsToTrash = filter (\c -> c == curse || c == copper || c == estate) cards
-    trashOrder = L.sortOn cardScore cards
+    wantsToTrash = filter (\c -> typ c == curse || typ c == copper || typ c == estate) cards
+    trashOrder = L.sortOn (cardScore . typ) cards
     choices = take (min (max lo (length wantsToTrash)) hi) trashOrder
 
 -- Default choice take the alternative
@@ -70,8 +71,8 @@ defaultBot _ _ _ (Just next) = next
 
 -- Bad or blind choices
 defaultBot pid _ (ChooseCards (EffectDiscard _ (Hand p)) choices (lo,hi) f) _
-  | pid == p = f $ take lo $ L.sortOn cardScore choices
-  | otherwise = f $ take hi $ L.sortOn (negate . cardScore) choices
+  | pid == p = f $ take lo $ L.sortOn (cardScore . typ) choices
+  | otherwise = f $ take hi $ L.sortOn (negate . cardScore . typ) choices
 
 
 defaultBot _ _ (ChooseToReact _ _ f) _ = f False
@@ -91,10 +92,12 @@ partialBot bot id = simpleBot (\id state decision option -> Maybe.fromMaybe (def
 alt :: PartialBot -> PartialBot -> PartialBot
 alt bot1 bot2 id state decision opt = bot1 id state decision opt `M.mplus` bot2 id state decision opt
 
-buysC :: Card -> (GameState -> Bool) -> PartialBot
+buysC :: CardDef -> (GameState -> Bool) -> PartialBot
 buysC card pred _ state (ChooseCard (EffectBuy _) choices f) _
-  | card `elem` choices && pred state = Just $ f card
-  | otherwise = Nothing
+  | null cs || not (pred state) = Nothing
+  | otherwise = Just $ f (head cs)
+  where
+    cs = filter ((==card) . typ) choices
 buysC _ _ _ _ _ _ = Nothing
 
 buys :: String -> PartialBot
@@ -109,7 +112,7 @@ buysIf cardName pred = buysC (lookupCard cardName) pred
 colonyGame :: GameState -> Bool
 colonyGame state = Map.member colony (piles state)
 
-moneyValue :: Card -> Int
+moneyValue :: CardDef -> Int
 moneyValue card
   | card == gold = 3
   | card == silver = 2
@@ -117,14 +120,14 @@ moneyValue card
   | otherwise = 0
 
 totalMoney :: GameState -> Int
-totalMoney state = state |> activePlayer |> allCards |> map moneyValue |> sum
+totalMoney state = state |> activePlayer |> allCards |> map (moneyValue . typ) |> sum
 
 gainsToEndGame :: GameState -> Int
 gainsToEndGame state = min cardsToThreePile (min provinceLeft colonyLeft)
   where
     provinceLeft = numInSupply state province
     colonyLeft = if colonyGame state then numInSupply state colony else 100
-    cardsToThreePile = min3 100 100 100 $ Map.elems $ piles state
+    cardsToThreePile = min3 100 100 100 $ map length $ Map.elems $ piles state
     min3 a b c [] = a+b+c
     min3 a b c (x:xs)
       | x >= c = min3 a b c xs
@@ -137,7 +140,7 @@ deckSize state = length $ allCards $ activePlayer state
 
 numInDeck :: String -> GameState -> Int
 -- Leads to better caching, card is lookuped only once ...
-numInDeck name = \state -> length $ filter (==card) $ allCards $ activePlayer state
+numInDeck name = \state -> length $ filter ((==card) . typ) $ allCards $ activePlayer state
   where
     card = lookupCard name
 

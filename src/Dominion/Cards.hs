@@ -6,25 +6,26 @@ import Data.Char (toLower)
 import qualified Data.List as L
 import qualified Data.Map.Strict as Map
 
-kingdomCards :: [Card]
+kingdomCards :: [CardDef]
 kingdomCards = concat [baseCards, intrigueCards, seasideCards, alchemyCards,
                        prosperityCards, cornucopiaCards, hinterlandCards,
                        darkAgesCards, guildsCards, adventuresCards,
                        promoCards]
 
-cardData :: Map.Map String Card
+cardData :: Map.Map String CardDef
 cardData = Map.fromList $ map (\c -> (map toLower $ cardName c, c))
   (concat [basicCards, kingdomCards])
 
-maybeCard :: String -> Maybe Card
+maybeCard :: String -> Maybe CardDef
 maybeCard name = Map.lookup (map toLower name) cardData
 
-lookupCard :: String -> Card
+lookupCard :: String -> CardDef
 lookupCard name = cardData Map.! (map toLower name)
 
 cSmithy = cardData Map.! "smithy"
 cChancellor = cardData Map.! "chancellor"
 cIsland = cardData Map.! "island"
+cMoat = cardData Map.! "moat"
 
 -- Generic action elements (potentially move to model)
 
@@ -39,14 +40,11 @@ seqActions f (x:xs) p state = f x p state `andThen` seqActions f xs p
 playAttack :: Action -> Action
 playAttack attack attacker state = seqSteps checkAttack (opponentNames state attacker) state
   where
-    moat = (cardData Map.! "moat")
-    -- TODO can we do this more elegantly, triggers again?
     checkAttack op state
-      | moat `elem` h =
-        decision (ChooseToReact moat AttackTrigger (\b -> if b then toSimulation state else attack op state)) op state
-      | otherwise = attack op state
+      | null moats = attack op state
+      | otherwise = decision (ChooseToReact (head moats) AttackTrigger (\b -> if b then toSimulation state else attack op state)) op state
       where
-        h = hand $ playerByName state op
+        moats = filter ((==cMoat) . typ) $ hand $ playerByName state op
 
 
 trashNCards :: Int -> Int -> Action
@@ -75,13 +73,14 @@ trashForGain gain player state
 remodelX :: Int -> Action
 remodelX x = trashForGain chooseToGain
   where
+    chooseToGain :: Card -> Action
     chooseToGain trashed player s2 =
       decision
         (ChooseCard (EffectGain unknown Supply (Discard player))
-                    (candidates trashed s2)
-                    (\c -> gain c player s2))
+                    (map (`topOfSupply` s2) (candidates trashed s2))
+                    (\c -> gain (typ c) player s2))
         player s2
-    candidates trashed state = affordableCards (addCost (cost (currentModifier state ModCost) trashed) (simpleCost x)) state
+    candidates trashed state = affordableCards (addCost (cost (currentModifier state ModCost) (typ trashed)) (simpleCost x)) state
 
 
 enactEffect :: Effect -> Action
@@ -111,7 +110,7 @@ baseCards = map ($ Base)
    action 107 "Workshop" 3 workshop,
 
    attack 108 "Bureaucrat" 4 bureaucrat,
-   action 109 "Feast" 4 feast,
+   actionA 109 "Feast" 4 feast,
    withInitialSupply (carddef 110 "Gardens" (simpleCost 4) [Victory] (\p -> length (allCards p) `quot` 10) pass noTriggers)
     stdVictorySupply,
    attack 111 "Militia" 4 militia,
@@ -152,7 +151,9 @@ chancellor player state = plusMoney 2 player state
 
 workshop :: Action
 workshop player state =
-  (chooseOne (EffectGain unknown Supply (Discard player)) (affordableCardsM 4 state) &&= gain) player state
+  (chooseOne (EffectGain unknown Supply (Discard player)) (map (`topOfSupply` state) (affordableCardsM 4 state))
+   &&= \c -> gain (typ c))
+  player state
 
 
 bureaucrat :: Action
@@ -165,14 +166,17 @@ bureaucrat player state = (gainTo silver (TopOfDeck player) &&& playAttack treas
       where
         h = hand $ playerByName state op
         treasures = filter isTreasure h
-        cont card = info AllPlayers (op ++ " reveals " ++ cardName card)
+        cont card = info AllPlayers (op ++ " reveals " ++ cardName (typ card))
           >> toSimulation (transfer card (Hand op) (TopOfDeck op) state)
 
-feast :: Action
-feast player state = trash (cardData Map.! "feast") InPlay player state
+feast :: Maybe Card -> Action
+feast mCard player state =
+  (case mCard of
+    Just card -> trash card InPlay player state
+    Nothing -> toSimulation state)
   `andThen` \s2 -> decision (ChooseCard (EffectGain unknown Supply (Discard player))
-                                        (affordableCardsM 5 s2)
-                                        (\c -> gain c player s2))
+                                        (map (`topOfSupply` s2) (affordableCardsM 5 s2))
+                                        (\c -> gain (typ c) player s2))
                             player s2
 
 militia :: Action
@@ -187,10 +191,10 @@ militia player state = (plusMoney 2 &&& playAttack discardTo3) player state
 
 moneylender :: Action
 moneylender player state
-  | copper `elem` h = (trash copper (Hand player) &&& plusMoney 3) player state
-  | otherwise = toSimulation state
+  | null coppers = toSimulation state
+  | otherwise = (trash (head coppers) (Hand player) &&& plusMoney 3) player state
   where
-    h = hand $ playerByName state player
+    coppers = filter ((==copper) . typ) $ hand $ playerByName state player
 
 spy :: Action
 spy player state = (plusCards 1 &&& plusActions 1 &&& spyAction &&& playAttack spyAction) player state
@@ -200,7 +204,7 @@ spy player state = (plusCards 1 &&& plusActions 1 &&& spyAction &&& playAttack s
         maybeS2 <- ensureCanDraw 1 state attackee
         maybe (toSimulation state) (doSpy attackee) maybeS2
     doSpy attackee state =
-      info AllPlayers (attackee ++ " reveals " ++ cardName top)
+      info AllPlayers (attackee ++ " reveals " ++ cardName (typ top))
       >> decision (ChooseToUse (EffectDiscard top (TopOfDeck player)) cont) player state
       where
         cont b = if b then discard top (TopOfDeck attackee) attackee state else toSimulation state
@@ -228,11 +232,11 @@ thief player state = playAttack doThief player state
 
 throneRoom :: Action
 throneRoom player state
-  | actions == [] = toSimulation state
+  | null actions = toSimulation state
   | otherwise = decision (ChooseCard (EffectPlayCopy unknown) actions cont) player state
   where
     actions = filter isAction (hand (playerByName state player))
-    cont card = (play card &&& playEffect card) player state
+    cont card = (play card &&& playEffect (typ card) Nothing) player state
 
 councilRoom :: Action
 councilRoom player state = (plusCards 4 &&& plusBuys 1) player state `andThen` seqSteps (plusCards 1) (opponentNames state player)
@@ -260,9 +264,13 @@ mine player state
   | otherwise = decision (ChooseCard (EffectTrash unknown (Hand player)) treasures cont) player state
   where
     cont card = trash card (Hand player) player state `andThen` gainDecision card
-    gainDecision trashed s2 = decision (ChooseCard (EffectGain unknown Supply (Hand player)) (affordable trashed s2) (\c -> gain c player s2)) player s2
+    gainDecision trashed s2 = decision (ChooseCard (EffectGain unknown Supply (Hand player)) (affordable trashed s2)
+                                          (\c -> gain (typ c) player s2))
+                                       player s2
     affordable trashed state =
-      filter isTreasure $ affordableCards (addCost (cost (currentModifier state ModCost) trashed) (simpleCost 3)) state
+        filter isTreasure
+        $ map (`topOfSupply` state)
+        $ affordableCards (addCost (cost (currentModifier state ModCost) (typ trashed)) (simpleCost 3)) state
     treasures = filter isTreasure (hand (playerByName state player))
 
 witch :: Action
@@ -306,7 +314,7 @@ intrigueCards = map ($ Intrigue)
    -- 214 ironworks
    -- 215 mining village
    -- 216 scout
-   carddef 217 "Duke" (simpleCost 5) [Victory] (\p -> length $ filter (==duchy) (allCards p)) pass noTriggers,
+   carddef 217 "Duke" (simpleCost 5) [Victory] (\p -> length $ filter ((==duchy) . typ) (allCards p)) pass noTriggers,
    -- 218 minion
    -- 219 saboteur
    -- 220 torturer
@@ -352,7 +360,7 @@ seasideCards = map ($ Seaside)
    action 310 "Warehouse" 3 (plusCards 3 &&& plusActions 1 &&& discardNCards 3),
    -- 311 Caravan
    -- 312 Cutpurse
-   withInitialSupply (carddef 313 "Island" (simpleCost 4) [Action, Victory] (const 2) island noTriggers) stdVictorySupply
+   withInitialSupply (carddefA 313 "Island" (simpleCost 4) [Action, Victory] (const 2) island noTriggers) stdVictorySupply
    -- 314 Navigator
    -- 315 Pirate Ship
    -- 316 Salvager
@@ -368,12 +376,15 @@ seasideCards = map ($ Seaside)
    -- 326 Wharf
   ]
 
-island player state
-  | null h = put cIsland InPlay (Mat player IslandMat) player state
+island mCard player state
+  | null h = islandPut player state
   | otherwise = chooseOne (EffectPut unknown (Hand player) (Mat player IslandMat)) h cont player state
   where
     h = hand $ playerByName state player
-    cont card = put cIsland InPlay (Mat player IslandMat) &&& put card (Hand player) (Mat player IslandMat)
+    cont card = islandPut &&& put card (Hand player) (Mat player IslandMat)
+    islandPut = case mCard of
+      Just card -> put card InPlay (Mat player IslandMat)
+      Nothing -> pass
 
 -- Alchemy 4xx
 
@@ -441,7 +452,7 @@ city = plusCards 1
 mintAction :: Action
 mintAction player state
   | null treasures = toSimulation state
-  | otherwise = optDecision (ChooseCard (EffectGain unknown Supply (Discard player)) treasures (\card -> gain card player state)) player state
+  | otherwise = optDecision (ChooseCard (EffectGain unknown Supply (Discard player)) treasures (\card -> gain (typ card) player state)) player state
   where
     treasures = filter isTreasure $ hand (playerByName state player)
 
@@ -456,7 +467,7 @@ kingsCourt player state
   | otherwise = decision (ChooseCard (EffectPlayCopy unknown) actions cont) player state
   where
     actions = filter isAction (hand (playerByName state player))
-    cont card = (play card &&& playEffect card &&& playEffect card) player state
+    cont card = (play card &&& playEffect (typ card) Nothing &&& playEffect (typ card) Nothing) player state
 
 
 -- Cornucopia 6xx
@@ -499,7 +510,7 @@ jackOfAllTrades = gain silver &&& spyTop &&& drawTo5 &&& optTrash
   where
     spyTop player state = ensureCanDraw 1 state player >>= \maybeS2 -> maybe (toSimulation state) (chooseKeepDiscard player) maybeS2
     chooseKeepDiscard player state =
-      info (VisibleToPlayer player) ("Top of deck is " ++ cardName top)
+      info (VisibleToPlayer player) ("Top of deck is " ++ cardName (typ top))
       >> decision (ChooseToUse (EffectDiscard top (TopOfDeck player)) cont) player state
       where
         top = head $ deck $ playerByName state player

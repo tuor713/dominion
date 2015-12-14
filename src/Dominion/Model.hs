@@ -54,32 +54,38 @@ addCost (Cost (m1,p1)) (Cost (m2,p2)) = Cost (m1+m2,p1+p2)
 subtractCost :: Cost -> Cost -> Cost
 subtractCost (Cost (m1,p1)) (Cost (m2,p2)) = Cost (m1-m2,p1-p2)
 
-
--- TODO this is really a card type, rather than a concrete card sitting somewhere ...
--- there is design potential to include the concept of a concrete card in the model
--- it would have an identity, and a location (and could be traced throughout the game)
--- > it allows cards to be transferred without keeping location as a separate concept
--- > it allows precise implementation of concepts like, 'if X then do Y to this card'
-data Card = Card { -- Card id is purely a performance artifact to avoid string comparisons
-                   cardId :: !Int,
+data CardDef = CardDef { -- Card id is purely a performance artifact to avoid string comparisons
+                   cardTypeId :: !Int,
                    cardName :: !String,
                    edition :: !Edition,
                    cardCost :: Cost,
                    types :: ![CardType],
                    cardPoints :: !(Player -> Int),
-                   onPlay :: !Action,
+                   onPlay :: !(Maybe Card -> Action),
                    initialSupply :: Int -> Int,
                    triggers :: Map.Map Trigger Action
                    }
 
-instance Show Card where
+data Card = Card { cardId :: !Int, typ :: !CardDef }
+
+instance Show CardDef where
   show = cardName
 
+instance Eq CardDef where
+  c1 == c2 = cardTypeId c1 == cardTypeId c2
+
+instance Ord CardDef where
+  c1 <= c2 = cardTypeId c1 <= cardTypeId c2
+
+instance Show Card where
+  show card = show (typ card) ++ " (" ++ show (cardId card) ++ ")"
+
 instance Eq Card where
-  (==) c1 c2 = cardId c1 == cardId c2
+  c1 == c2 = cardId c1 == cardId c2
 
 instance Ord Card where
   c1 <= c2 = cardId c1 <= cardId c2
+
 
 -- Card definition helpers
 
@@ -89,27 +95,34 @@ noPoints = const 0
 noTriggers :: Map.Map Trigger Action
 noTriggers = Map.empty
 
-treasure :: Int -> String -> Int -> Int -> Edition -> Card
-treasure id name cost money edition = Card id name edition (simpleCost cost) [Treasure] noPoints (plusMoney money) (const 10) noTriggers
+treasure :: Int -> String -> Int -> Int -> Edition -> CardDef
+treasure id name cost money edition = CardDef id name edition (simpleCost cost) [Treasure] noPoints (\_ -> plusMoney money) (const 10) noTriggers
 
-action :: Int -> String -> Int -> Action -> Edition -> Card
-action id name cost effect edition = Card id name edition (simpleCost cost) [Action] noPoints effect (const 10) noTriggers
+action :: Int -> String -> Int -> Action -> Edition -> CardDef
+action id name cost effect edition = CardDef id name edition (simpleCost cost) [Action] noPoints (\_ -> effect) (const 10) noTriggers
 
-attack :: Int -> String -> Int -> Action -> Edition -> Card
-attack id name cost effect edition = Card id name edition (simpleCost cost) [Action, Attack] noPoints effect (const 10) noTriggers
+actionA :: Int -> String -> Int -> (Maybe Card -> Action) -> Edition -> CardDef
+actionA id name cost effect edition = CardDef id name edition (simpleCost cost) [Action] noPoints effect (const 10) noTriggers
 
-victory :: Int -> String -> Int -> Int -> Edition -> Card
-victory id name cost points edition = Card id name edition (simpleCost cost) [Victory] (const points) pass (const 10) noTriggers
+attack :: Int -> String -> Int -> Action -> Edition -> CardDef
+attack id name cost effect edition = CardDef id name edition (simpleCost cost) [Action, Attack] noPoints (\_ -> effect) (const 10) noTriggers
 
-carddef :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> Action -> Map.Map Trigger Action -> Edition -> Card
-carddef id name cost types points effect triggers edition = Card id name edition cost types points effect (const 10) triggers
+victory :: Int -> String -> Int -> Int -> Edition -> CardDef
+victory id name cost points edition = CardDef id name edition (simpleCost cost) [Victory] (const points) (\_ -> pass) (const 10) noTriggers
 
-withTrigger :: (Edition -> Card) -> Trigger -> Action -> Edition -> Card
+carddef :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> Action -> Map.Map Trigger Action -> Edition -> CardDef
+carddef id name cost types points effect triggers edition = CardDef id name edition cost types points (\_ -> effect) (const 10) triggers
+
+carddefA :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> (Maybe Card -> Action) -> Map.Map Trigger Action -> Edition -> CardDef
+carddefA id name cost types points effect triggers edition = CardDef id name edition cost types points effect (const 10) triggers
+
+
+withTrigger :: (Edition -> CardDef) -> Trigger -> Action -> Edition -> CardDef
 withTrigger cardgen trigger action ed = card { triggers = Map.insert trigger action (triggers card) }
   where
     card = cardgen ed
 
-withInitialSupply :: (Edition -> Card) -> (Int -> Int) -> Edition -> Card
+withInitialSupply :: (Edition -> CardDef) -> (Int -> Int) -> Edition -> CardDef
 withInitialSupply cardgen supplyf ed = card { initialSupply = supplyf }
   where
     card = cardgen ed
@@ -182,7 +195,7 @@ data GameState = GameState { players :: Map.Map PlayerId Player,
                              turnOrder :: [PlayerId],
                              trashPile :: [Card],
                              turn :: TurnState,
-                             piles :: Map.Map Card Int,
+                             piles :: Map.Map CardDef [Card],
                              ply :: Int,
                              finished :: Bool
                              }
@@ -247,7 +260,7 @@ data Effect =
   EffectPlayAction Card |
   EffectPlayCopy Card |
   EffectPlayTreasure Card |
-  SpecialEffect Card
+  SpecialEffect CardDef
 
 data Decision =
   Optional Decision Simulation |
@@ -281,7 +294,7 @@ instance Show GameState where
       (players g) ++
     "  }\n" ++
     "  supply: [ " ++
-    (summarizeCards $ concatMap (\(c,n) -> replicate n c) (Map.toList (piles g))) ++
+    (summarizeCards $ concatMap snd (Map.toList (piles g))) ++
     " ]\n" ++
     "  turn: { " ++
     "actions: " ++ show (actions (turn g)) ++ ", buys: " ++ show (buys (turn g)) ++ ", money: " ++ show (money (turn g)) ++
@@ -311,25 +324,38 @@ instance Show Effect where
 
 -- Game creation
 
-mkPlayer :: String -> SimulationT Player
-mkPlayer name = draw Player { name = name, hand = [], discardPile = initialDeck, deck = [], inPlay = [], mats = Map.empty } 5
+mkPlayer :: [Card] -> String -> SimulationT Player
+mkPlayer deck name = draw Player { name = name, hand = [], discardPile = deck, deck = [], inPlay = [], mats = Map.empty } 5
 
-initialDeck :: [Card]
+initialDeck :: [CardDef]
 initialDeck = replicate 7 copper ++ replicate 3 estate
 
-mkGame :: GameType -> [String] -> [Card] -> SimulationT GameState
+labelCards :: [CardDef] -> Int -> ([Card],Int)
+labelCards cards initialId = (zipWith Card [initialId..(initialId + length cards)] cards, initialId + length cards)
+
+mkGame :: GameType -> [String] -> [CardDef] -> SimulationT GameState
 mkGame typ names kingdomCards =
-  (sequence $ map mkPlayer names) >>= \players ->
+  (sequence $ zipWith mkPlayer decks names) >>= \players ->
     return $
     GameState { players = Map.fromList $ zip names players,
                 turnOrder = names,
-                piles = Map.fromList $ map (\c -> (c, initialSupply c playerNo)) (standardCards ++ kingdomCards),
+                piles = pileMap,
                 trashPile = [],
                 turn = newTurn,
                 ply = 1,
                 finished = False
                 }
   where
+    -- Map.fromList $ map (\c -> (c, initialSupply c playerNo)) (standardCards ++ kingdomCards),
+    (pileMap,outId) = foldr
+                        (\c (m,id) -> let (cs,id2) = labelCards (replicate (initialSupply c playerNo) c) id
+                                      in (Map.insert c cs m, id2))
+                        (Map.empty,0)
+                        (standardCards ++ kingdomCards)
+    (decks,_) = foldr (\d (ds,id) -> let (d',id') = labelCards d id
+                                     in (d':ds,id'))
+                  ([],outId)
+                  (replicate playerNo initialDeck)
     standardCards = colonyCards ++ potionCards ++ [estate,duchy,province,copper,silver,gold,curse]
     colonyCards = if typ == ColonyGame then [platinum, colony] else []
     potionCards = if any ((0<) . potionCost . cost NullModifier) kingdomCards then [potion] else []
@@ -397,7 +423,7 @@ moveTo c (Discard player) state   = updatePlayer state player (\p -> p { discard
 moveTo c (TopOfDeck player) state = updatePlayer state player (\p -> p { deck = c : deck p })
 moveTo c InPlay state             = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = c : inPlay p })
 moveTo c Trash state              = state { trashPile = c : trashPile state }
-moveTo c Supply state             = state { piles = Map.adjust (+1) c (piles state) }
+moveTo c Supply state             = state { piles = Map.adjust (c:) (typ c) (piles state) }
 moveTo c (Mat player mat) state   = updatePlayer state player (\p -> p { mats = Map.insertWith (++) mat [c] (mats p) })
 
 moveFrom :: Card -> Location -> GameState -> GameState
@@ -406,7 +432,7 @@ moveFrom c (Discard player) state   = updatePlayer state player (\p -> p { disca
 moveFrom c (TopOfDeck player) state = updatePlayer state player (\p -> p { deck = L.delete c $ deck p })
 moveFrom c InPlay state             = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = L.delete c $ inPlay p })
 moveFrom c Trash state              = state { trashPile = L.delete c $ trashPile state }
-moveFrom c Supply state             = state { piles = Map.adjust (+(-1)) c (piles state) }
+moveFrom c Supply state             = state { piles = Map.adjust tail (typ c) (piles state) }
 moveFrom c (Mat player mat) state   = updatePlayer state player (\p -> p { mats = Map.adjust (L.delete c) mat (mats p) })
 
 transfer :: Card -> Location -> Location -> GameState -> GameState
@@ -442,37 +468,36 @@ opponents :: GameState -> String -> [Player]
 opponents state player = filter ((/= player) . name) $ Map.elems $ players state
 
 
-availableCards :: GameState -> [Card]
-availableCards g = Map.keys $ Map.filter (>0) (piles g)
+availableCards :: GameState -> [CardDef]
+availableCards g = Map.keys $ Map.filter (not . null) (piles g)
 
-supply :: GameState -> [(Card, Int)]
-supply state = Map.toList $ piles state
+supply :: GameState -> [(CardDef, Int)]
+supply state = Map.toList $ Map.map length $ piles state
 
-inSupply :: GameState -> Card -> Bool
-inSupply state card = maybe False (>0) (Map.lookup card (piles state))
+inSupply :: GameState -> CardDef -> Bool
+inSupply state card = maybe False (not . null) (Map.lookup card (piles state))
 
-numInSupply :: GameState -> Card -> Int
-numInSupply state card = maybe 0 id (Map.lookup card (piles state))
+numInSupply :: GameState -> CardDef -> Int
+numInSupply state card = maybe 0 length (Map.lookup card (piles state))
 
 hasCardType :: Card -> CardType -> Bool
-hasCardType card typ = typ `elem` types card
+hasCardType card intyp = intyp `elem` types (typ card)
 
 isAction card = hasCardType card Action
 isReaction card = hasCardType card Reaction
 isTreasure card = hasCardType card Treasure
 isAttack card = hasCardType card Attack
 
-
-cost :: Modifier -> Card -> Cost
+cost :: Modifier -> CardDef -> Cost
 cost mod card = Cost ((applyMod mod m),p)
   where
     (Cost (m,p)) = cardCost card
 
-affordableCards :: Cost -> GameState -> [Card]
+affordableCards :: Cost -> GameState -> [CardDef]
 affordableCards bound state =
   filter ((`smallerEqCost` bound) . cost (currentModifier state ModCost)) (availableCards state)
 
-affordableCardsM :: Int -> GameState -> [Card]
+affordableCardsM :: Int -> GameState -> [CardDef]
 affordableCardsM num = affordableCards (simpleCost num)
 
 currentModifier :: GameState -> ModAttribute -> Modifier
@@ -483,12 +508,13 @@ allCards :: Player -> [Card]
 allCards s = concatMap (\f -> f s) [hand, inPlay, discardPile, deck]
 
 points :: Player -> Int
-points s = sum $ map (`cardPoints` s) $ allCards s
+points s = sum $ map ((`cardPoints` s) . typ) $ allCards s
 
 turnNo :: GameState -> Int
 turnNo g = ((ply g + 1) `div` length (players g))
 
-unknown = Card (-1) "XXX" Base (simpleCost 0) [] (\_ -> 0) pass (const 0) noTriggers
+unknownDef = CardDef (-1) "XXX" Base (simpleCost 0) [] (\_ -> 0) (\_ -> pass) (const 0) noTriggers
+unknown = Card (-1) unknownDef
 
 -- Removes invisble information from the state such as opponents hands
 -- It assumes some intelligent information retention such as about own deck content
@@ -575,33 +601,39 @@ addModifier :: ModAttribute -> Modifier -> Action
 addModifier attr mod _ state =
   toSimulation $ state { turn = (turn state) { modifiers = Map.insertWith stackMod attr mod (modifiers (turn state)) } }
 
-playEffect :: Card -> Action
-playEffect card player state = info AllPlayers (player ++ " plays " ++ cardName card) >> onPlay card player state
+playEffect :: CardDef -> Maybe Card -> Action
+playEffect card source player state = info AllPlayers (player ++ " plays " ++ cardName card) >> onPlay card source player state
 
 play :: Card -> Action
-play card player state = playEffect card player (transfer card (Hand player) InPlay state)
+play card player state = playEffect (typ card) (Just card) player (transfer card (Hand player) InPlay state)
 
 playAll :: [Card] -> Action
 playAll [] _ state = toSimulation state
 playAll (c:cs) player state = play c player state `andThen` playAll cs player
 
+-- partial function, check supply first!
+topOfSupply :: CardDef -> GameState -> Card
+topOfSupply card state = head $ (piles state) Map.! card
+
 gainFrom :: Card -> Location -> Action
 gainFrom card source player state =
-  info AllPlayers (player ++ " gains " ++ cardName card) >> return (State $ transfer card source (Discard player) state)
+  info AllPlayers (player ++ " gains " ++ cardName (typ card)) >> return (State $ transfer card source (Discard player) state)
 
-gainTo :: Card -> Location -> Action
+gainTo :: CardDef -> Location -> Action
 gainTo card target player state
   | inSupply state card =
-    info AllPlayers (player ++ " gains " ++ cardName card) >> return (State $ transfer card Supply target state)
+    info AllPlayers (player ++ " gains " ++ cardName card) >> return (State $ transfer c Supply target state)
   | otherwise = toSimulation state
+  where
+    c = topOfSupply card state
 
-gain :: Card -> Action
+gain :: CardDef -> Action
 gain card player = gainTo card (Discard player) player
 
 reveal :: [Card] -> Action
 reveal cards player state = info AllPlayers (player ++ " reveals " ++ summarizeCards cards) >> return (State state)
 
-buy :: Card -> Action
+buy :: CardDef -> Action
 buy card player state =
   info AllPlayers (player ++ " buys " ++ cardName card) >>
     maybe
@@ -609,11 +641,11 @@ buy card player state =
       (\trigger -> trigger player state `andThen` transferT)
       (Map.lookup BuyTrigger (triggers card))
   where
-    transferT state = toSimulation $ transfer card Supply (Discard player) state
+    transferT state = toSimulation $ transfer (topOfSupply card state) Supply (Discard player) state
 
 trash :: Card -> Location -> Action
 trash card source player state =
-  info AllPlayers (player ++ " trashes " ++ cardName card) >> return (State $ transfer card source Trash state)
+  info AllPlayers (player ++ " trashes " ++ cardName (typ card)) >> return (State $ transfer card source Trash state)
 
 put :: Card -> Location -> Location -> Action
 put card source target _ state = toSimulation $ transfer card source target state
@@ -624,7 +656,7 @@ trashAll cards source player state =
 
 discard :: Card -> Location -> Action
 discard card loc player state =
-  info AllPlayers (player ++ " discards " ++ cardName card) >> return (State $ transfer card loc (Discard player) state)
+  info AllPlayers (player ++ " discards " ++ cardName (typ card)) >> return (State $ transfer card loc (Discard player) state)
 
 plusMoney :: Int -> Action
 plusMoney num _ state = toSimulation $ state { turn = (turn state) { money = num + money (turn state) } }
@@ -669,7 +701,7 @@ nextTurn state = nnext
 checkFinished :: GameState -> Bool
 checkFinished state =
   numInSupply state province == 0
-  || Map.size (Map.filter (==0) (piles state)) >= 3
+  || Map.size (Map.filter null (piles state)) >= 3
 
 -- TODO island mat should be handled by and end game trigger of sorts
 endGame :: GameState -> GameState
@@ -691,7 +723,7 @@ buyPhase name state
   where
     buyDecision s2 = optDecision (ChooseCard (EffectBuy unknown)
                                       candidates
-                                      (\card -> (plusBuys (-1) &&& payCosts (cost (currentModifier s2 ModCost) card) &&& buy card &&& buyPhase) name s2))
+                                      (\card -> (plusBuys (-1) &&& payCosts (cost (currentModifier s2 ModCost) (typ card)) &&& buy (typ card) &&& buyPhase) name s2))
                                     name s2
       where
         payCosts cost _ state = toSimulation $
@@ -700,7 +732,7 @@ buyPhase name state
             t = turn state
         moneyToSpend = money (turn s2)
         potionToSpend = potions (turn s2)
-        candidates = affordableCards (fullCost moneyToSpend potionToSpend) s2
+        candidates = map (`topOfSupply` s2) $ affordableCards (fullCost moneyToSpend potionToSpend) s2
 
 playTreasures :: Action
 playTreasures name state

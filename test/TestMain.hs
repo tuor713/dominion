@@ -35,7 +35,7 @@ initialStateTest = testGroup "Game creation"
     [10] @=? L.nub (map (length . allCards) $ Map.elems $ players sut),
 
     testCase "[Copper] and [Estate] make up the starting deck" $
-    [[copper, estate]] @=? L.nub (map (L.nub . allCards) $ Map.elems $ players sut),
+    [[copper, estate]] @=? L.nub (map (L.nub . map typ . allCards) $ Map.elems $ players sut),
 
     testCase "A game has 17 piles (10 kingdom cards + 7 basic supply" $
     17 @=? Map.size (piles sut),
@@ -72,9 +72,15 @@ gameEndTest = testGroup "Game End"
 
 -- Cards
 
+fakeCard :: CardDef -> Card
+fakeCard typ = Card 0 typ
+
 cardTests = testGroup "Cards"
   [ testCase "[Duke]'s victory points are equal to the number of [Duchies]" $
-      4 @=? cardPoints (lookupCard "duke") Player { deck = [duchy,estate,copper], hand = [duchy,duchy], discardPile = [gold,duchy], inPlay = []}]
+      4 @=? cardPoints (lookupCard "duke") Player { deck = map fakeCard [duchy,estate,copper],
+                                                    hand = map fakeCard [duchy,duchy],
+                                                    discardPile = map fakeCard [gold,duchy],
+                                                    inPlay = []}]
 
 
 -- Bots
@@ -82,21 +88,23 @@ cardTests = testGroup "Cards"
 botTests = testGroup "Bots"
   [ gainsToEndGameTest ]
 
+mkPiles :: [(CardDef,Int)] -> Map.Map CardDef [Card]
+mkPiles cs = Map.fromList $ map (\(def,no) -> (def, map fakeCard $ replicate no def)) cs
+
 gainsToEndGameTest = testGroup "gainsToEndGame"
   [ testCase "number of provinces" $
     3 @=?
-      gainsToEndGame GameState { piles = Map.fromList $
-                                      ([(estate,10),(duchy,10),(province,3),(copper,10),(silver,10),(gold,10)]
-                                       ++ zip starterTableau (repeat 10)) }
+      gainsToEndGame GameState { piles = mkPiles ([(estate,10),(duchy,10),(province,3),(copper,10),(silver,10),(gold,10)]
+                                                  ++ zip starterTableau (repeat 10)) }
   , testCase "number of colonies" $
     2 @=?
-      gainsToEndGame GameState { piles = Map.fromList $
+      gainsToEndGame GameState { piles = mkPiles
                                       ([(estate,10),(duchy,10),(province,3),(colony,2),(copper,10),(silver,10),(gold,10)]
                                        ++ zip starterTableau (repeat 10)) }
 
   , testCase "three pile" $
     3 @=?
-      gainsToEndGame GameState { piles = Map.fromList $
+      gainsToEndGame GameState { piles = mkPiles
                                       ([(estate,10),(duchy,1),(province,5),(colony,4),(copper,10),(silver,10),(gold,2),(curse,0)]
                                        ++ zip starterTableau (repeat 10)) }
   ]

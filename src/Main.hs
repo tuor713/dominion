@@ -166,6 +166,9 @@ jString :: String -> J.Value
 jString = J.String . T.pack
 
 instance J.ToJSON Card where
+  toJSON card = J.toJSON (typ card)
+
+instance J.ToJSON CardDef where
   toJSON card = J.String $ T.pack (cardName card)
 
 instance J.ToJSON Trigger where
@@ -205,7 +208,7 @@ instance J.ToJSON Decision where
                                             "effect" J..= T.pack (show effect)]
 
   toJSON (ChooseCard effect choices _) = J.object ["type"   J..= J.String "chooseCard",
-                                                   "cards"  J..= J.Array (V.fromList (map (J.toJSON . cardName) choices)),
+                                                   "cards"  J..= J.Array (V.fromList (map J.toJSON choices)),
                                                    "effect" J..= T.pack (show effect)]
 
   toJSON (ChooseCards effect choices (lo,hi) _) = J.object ["type"   J..= J.String "chooseCards",
@@ -231,7 +234,7 @@ instance J.ToJSON Player where
   toJSON player = J.object $ zip ["hand","deck","inPlay","discard"] $ map (jMap . cardMap . ($ player)) [hand, deck, inPlay, discardPile]
     where
       cardMap :: [Card] -> Map.Map String Int
-      cardMap cards = Map.mapKeys cardName $ Map.fromListWith (+) (map (,1) cards)
+      cardMap cards = Map.mapKeys (cardName . typ) $ Map.fromListWith (+) (map (,1) cards)
 
 instance J.ToJSON GameState where
   toJSON state = J.object ["turnOrder" J..= J.Array (V.fromList $ map (J.String . T.pack) $ turnOrder state),
@@ -278,12 +281,11 @@ decisionHandler gamesRepository = do
 
   nextDecision gamesRepository gameId playerId
 
-
 parseDecision :: Decision -> String -> Simulation
 parseDecision (ChooseToUse _ f) input           = f (input == "true")
 parseDecision (ChooseToReact _ _ f) input       = f (input == "true")
-parseDecision (ChooseCard _ _ f) input          = f (lookupCard input)
-parseDecision (ChooseCards _ _ _ f) input       = f (map lookupCard (wordsBy (==',') input))
+parseDecision (ChooseCard _ choices f) input    = f $ head (filter ((==(lookupCard input)) . typ) choices)
+parseDecision (ChooseCards _ choices _ f) input = f $ Maybe.fromJust $ findCards choices (map lookupCard (wordsBy (==',') input))
 parseDecision (ChooseEffects _ effects f) input = f (map ((effects!!) . read) (wordsBy (==',') input))
 parseDecision (Optional inner other) input      = if input == "" then other else parseDecision inner input
 

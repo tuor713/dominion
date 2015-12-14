@@ -37,19 +37,33 @@ parseBool "y" = Just True
 parseBool "n" = Just False
 parseBool _ = Nothing
 
+findCard :: [Card] -> CardDef -> Maybe Card
+findCard cards def
+  | null cs = Nothing
+  | otherwise = Just (head cs)
+  where
+    cs = filter ((==def) . typ) cards
+
+findCards :: [Card] -> [CardDef] -> Maybe [Card]
+findCards _ [] = Just []
+findCards [] _ = Nothing
+findCards cs (d:ds) = headCard >>= \c -> fmap (c:) (findCards (L.delete c cs) ds)
+  where
+    headCard = L.find ((==d) . typ) cs
+
 decision2prompt :: PlayerId -> Decision -> (String, String -> Maybe Simulation)
-decision2prompt player (ChooseToUse effect f) = (message player (show effect ++ " [yn]"), (fmap f) . parseBool)
+decision2prompt player (ChooseToUse effect f) = (message player (show effect ++ " [yn]"), fmap f . parseBool)
 
 decision2prompt player (ChooseCard effect choices f) =
-  (message player (show effect ++ " " ++ summarizeCards choices), (fmap f) . parse)
-  where
-    parse s = maybeCard s >>= \x -> if x `elem` choices then Just x else Nothing
+  (message player (show effect ++ " " ++ summarizeCards choices),
+   \s -> maybeCard s >>= findCard choices >>= (return . f))
 
 decision2prompt player (ChooseCards effect choices (lo,hi) f) =
-  (message player (show effect ++ " " ++ summarizeCards choices), (fmap f) . parse)
+  (message player (show effect ++ " " ++ summarizeCards choices),
+   \s -> parse s >>= (\xs -> findCards choices xs) >>= (return . f))
   where
-    parse s = if s == "all" then Just choices else (sequence $ map maybeCard (wordsBy (==',') s))
-              >>= \xs -> if contains (list2MultiSet choices) (list2MultiSet xs) then Just xs else Nothing
+    parse s = if s == "all" then Just (map typ choices) else (sequence $ map maybeCard (wordsBy (==',') s))
+              >>= \xs -> if contains (list2MultiSet (map typ choices)) (list2MultiSet xs) then Just xs else Nothing
               >>= \xs -> if lo <= length xs && length xs <= hi then Just xs else Nothing
 
 decision2prompt player (ChooseToReact card trigger f) =
@@ -101,7 +115,7 @@ runSimulation bots accu (Decision player state decision) =
 
 -- Sample run:
 -- runSimulations [("Alice",bigSmithy), ("Bob",betterBigMoney)] (map lookupCard ["market", "library", "smithy", "cellar", "chapel", "witch", "village", "laboratory", "festival", "festival"]) 100 >>= stats
-runSimulations :: [(PlayerId,AIBot)] -> [Card] -> Stats -> Int -> SimulationT Stats
+runSimulations :: [(PlayerId,AIBot)] -> [CardDef] -> Stats -> Int -> SimulationT Stats
 runSimulations _ _ stats 0 = return stats
 runSimulations bots tableau stats num =
   do

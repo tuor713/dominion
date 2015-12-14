@@ -24,7 +24,7 @@ import Text.Blaze.Internal (MarkupM(Parent))
 
 -- Utilities
 
-cardImagePath :: Card -> String
+cardImagePath :: CardDef -> String
 cardImagePath card = "/static/images/cards/"
   ++ filter (not . (=='\'')) (map (\c -> if c == ' ' then '_' else toLower c) (cardName card))
   ++ ".jpeg"
@@ -105,9 +105,9 @@ decisionHtml (ChooseCard effect choices _) =
     H.div H.! A.id "choices" $ do
       forM_ choices $ \card -> do
         H.input H.! A.type_ "image"
-                H.! A.onclick (fromString ("choose(\""++ cardName card ++ "\",1,1);"))
+                H.! A.onclick (fromString ("choose(\""++ cardName (typ card) ++ "\",1,1);"))
                 H.! A.style "margin: 5px; width: 100px; height: 159px"
-                H.! A.src (fromString (cardImagePath card))
+                H.! A.src (fromString (cardImagePath (typ card)))
 
 decisionHtml (ChooseCards effect choices (lo,hi) _) =
   H.div $ do
@@ -115,13 +115,13 @@ decisionHtml (ChooseCards effect choices (lo,hi) _) =
     H.div H.! A.id "choices" $ do
       forM_ choices $ \card -> do
         H.input H.! A.type_ "image"
-                H.! A.name (fromString (cardName card))
+                H.! A.name (fromString (cardName (typ card)))
                 H.! A.class_ "checkbox"
                 H.! A.style "margin: 5px; width: 100px; height: 159px"
-                H.! A.src (fromString (cardImagePath card))
+                H.! A.src (fromString (cardImagePath (typ card)))
     if length choices <= hi
       then H.button H.! A.class_ "choice-button"
-                    H.! A.onclick (fromString ("choose(\""++ L.intercalate "," (map cardName choices) ++ "\");"))
+                    H.! A.onclick (fromString ("choose(\""++ L.intercalate "," (map (cardName . typ) choices) ++ "\");"))
                     $ "All"
       else return ()
     H.button H.! A.class_ "choice-button"
@@ -139,13 +139,13 @@ decisionHtml (ChooseEffects no effects _) =
              H.! A.onclick (fromString ("choices('choices'," ++ show no ++ "," ++ show no ++ ");")) $ "Go"
 
 
-compareCard :: Card -> Card -> Ordering
+compareCard :: CardDef -> CardDef -> Ordering
 compareCard c1 c2 =
   compare (moneyCost (cost NullModifier c1)) (moneyCost (cost NullModifier c2))
   `mappend` compare (potionCost (cost NullModifier c1)) (potionCost (cost NullModifier c2))
   `mappend` compare (cardName c1) (cardName c2)
 
-
+showCards :: Map.Map CardDef Int -> H.Html
 showCards cards =
   forM_ (L.sortBy (\(c1,_) (c2,_) -> compareCard c1 c2) (Map.toList cards))
     $ \(card,num) ->
@@ -154,9 +154,9 @@ showCards cards =
               H.! A.src (fromString (cardImagePath card))
         H.h3 H.! A.class_ "overlay" $ toHtml (show num)
 
-cardListToMap :: [Card] -> Map.Map Card Int
+cardListToMap :: [Card] -> Map.Map CardDef Int
 cardListToMap cards =
-  Map.fromListWith (+) $ map (,1) cards
+  Map.fromListWith (+) $ map ((,1) . typ) cards
 
 
 htmlDecision :: PlayerId -> (GameState,[Info],Decision) -> H.Html
@@ -179,7 +179,7 @@ htmlDecision _ (state,infos,decision) =
 
         H.div $ do
           H.h4 "Tableau:"
-          showCards (piles state)
+          showCards $ Map.map length (piles state)
 
         forM_ (Map.toAscList (players state)) $ \(pid,player) ->
           H.div $ do
@@ -222,7 +222,7 @@ htmlFinished state infos =
       H.section H.! A.class_ "state" $ do
         H.div $ do
           H.h4 "Tableau:"
-          showCards (piles state)
+          showCards $ Map.map length (piles state)
 
         forM_ (reverse $ L.sortOn (points . snd) $ Map.toList (players state)) $ \(pid,player) ->
           H.section $ do
@@ -266,7 +266,7 @@ htmlSetupGame =
                  H.! A.onclick (fromString ("randomStart([\"" ++ L.intercalate "\",\"" (map cardName kingdomCards) ++ "\"]);")) $ "Random"
 
 
-htmlSimulation :: [Card] -> Stats -> H.Html
+htmlSimulation :: [CardDef] -> Stats -> H.Html
 htmlSimulation tableau stats =
   template "/simulation" $ do
     H.div H.! A.class_ "one wide column" $ ""
