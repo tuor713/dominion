@@ -236,7 +236,8 @@ canSee pid (VisibleToPlayer p,_) = pid == p
 -- TODO add source card
 data Trigger =
   AttackTrigger |
-  BuyTrigger
+  BuyTrigger |
+  TrashTrigger
   deriving (Eq, Ord, Show)
 
 -- Numeric generic effect and placeholder effects
@@ -252,7 +253,8 @@ data Effect =
 
   EffectDiscard Card Location |
   EffectBuy Card |
-  EffectGain Card Location Location |
+  EffectGain CardDef Location |
+  EffectGainFrom Card Location Location |
   EffectPass Card Location Location |
   EffectPut Card Location Location |
   EffectTrash Card Location |
@@ -310,7 +312,8 @@ instance Show Effect where
   show (EffectTrashNo no) = "trash " ++ show no ++ " card(s)"
   show (EffectDiscard card from) = "discard " ++ show card ++ " from " ++ show from
   show (EffectBuy card) = "buy " ++ show card
-  show (EffectGain card from to) = "gain " ++ show card ++ " from " ++ show from ++ " to " ++ show to
+  show (EffectGain card to) = "gain " ++ show card ++ " to " ++ show to
+  show (EffectGainFrom card from to) = "gain " ++ show card ++ " from " ++ show from ++ " to " ++ show to
   show (EffectPass card from to) = "pass " ++ show card ++ " from " ++ show from ++ " to " ++ show to
   show (EffectPut card from to) = "put " ++ show card ++ " from " ++ show from ++ " to " ++ show to
   show (EffectTrash card from) = "trash " ++ show card ++ " from " ++ show from
@@ -486,6 +489,7 @@ hasCardType card intyp = intyp `elem` types (typ card)
 isAction card = hasCardType card Action
 isReaction card = hasCardType card Reaction
 isTreasure card = hasCardType card Treasure
+isVictory card = hasCardType card Victory
 isAttack card = hasCardType card Attack
 
 cost :: Modifier -> CardDef -> Cost
@@ -645,14 +649,27 @@ buy card player state =
 
 trash :: Card -> Location -> Action
 trash card source player state =
-  info AllPlayers (player ++ " trashes " ++ cardName (typ card)) >> return (State $ transfer card source Trash state)
+  info AllPlayers (player ++ " trashes " ++ cardName (typ card)) >>
+    maybe
+      (transferT state)
+      (\trigger -> trigger player state `andThen` transferT)
+      (Map.lookup TrashTrigger (triggers (typ card)))
+  where
+    transferT state = toSimulation $ transfer card source Trash state
 
 put :: Card -> Location -> Location -> Action
 put card source target _ state = toSimulation $ transfer card source target state
 
 trashAll :: [Card] -> Location -> Action
 trashAll cards source player state =
-  info AllPlayers (player ++ " trashes " ++ summarizeCards cards) >> return (State $ foldr (\c s -> transfer c source Trash s) state cards)
+  info AllPlayers (player ++ " trashes " ++ summarizeCards cards) >>
+    maybe
+      (transferT player state)
+      (\actions -> (foldr (&&&) transferT actions) player state)
+      ts
+  where
+    transferT _ state = toSimulation $ foldr (\c s -> transfer c source Trash s) state cards
+    ts = sequence $ map ((Map.lookup TrashTrigger) . triggers . typ) cards
 
 discard :: Card -> Location -> Action
 discard card loc player state =

@@ -174,6 +174,7 @@ instance J.ToJSON CardDef where
 instance J.ToJSON Trigger where
   toJSON AttackTrigger = J.String "attack"
   toJSON BuyTrigger = J.String "buy"
+  toJSON TrashTrigger = J.String "trash"
 
 instance J.ToJSON Location where
   toJSON Supply = J.toJSON [J.String "supply"]
@@ -193,7 +194,8 @@ instance J.ToJSON Effect where
   toJSON (EffectTrashNo no) = J.toJSON [J.String "trashNo", J.toJSON no]
   toJSON (EffectDiscard card from) = J.toJSON [J.String "discard", J.toJSON card, J.toJSON from]
   toJSON (EffectBuy card) = J.toJSON [J.String "buy", J.toJSON card]
-  toJSON (EffectGain card from to) = J.toJSON [J.String "gain", J.toJSON card, J.toJSON from, J.toJSON to]
+  toJSON (EffectGain card to) = J.toJSON [J.String "gain", J.toJSON card, J.toJSON to]
+  toJSON (EffectGainFrom card from to) = J.toJSON [J.String "gainFrom", J.toJSON card, J.toJSON from, J.toJSON to]
   toJSON (EffectPass card from to) = J.toJSON [J.String "pass", J.toJSON card, J.toJSON from, J.toJSON to]
   toJSON (EffectPut card from to) = J.toJSON [J.String "put", J.toJSON card, J.toJSON from, J.toJSON to]
   toJSON (EffectTrash card from) = J.toJSON [J.String "trash", J.toJSON card, J.toJSON from]
