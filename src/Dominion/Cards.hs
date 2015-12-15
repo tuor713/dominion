@@ -455,7 +455,7 @@ prosperityCards = map ($ Prosperity)
    -- 502 trade route
    -- 503 watchtower
    -- 504 bishop
-   -- 505 monument
+   action 505 "Monument" 4 (plusMoney 2 &&& plusTokens 1 VictoryToken),
    -- 506 quarry
    -- 507 talisman
    action 508 "Worker's Village" 4 (plusCards 1 &&& plusActions 2 &&& plusBuys 1),

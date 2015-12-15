@@ -162,6 +162,7 @@ basicCards = [copper, silver, gold, estate, duchy, province, curse, potion, plat
 type PlayerId = String
 
 data Mat = IslandMat deriving (Eq, Ord, Show)
+data Token = VictoryToken deriving (Eq, Ord, Show)
 
 data Player = Player { name :: PlayerId,
                        hand :: [Card],
@@ -169,7 +170,8 @@ data Player = Player { name :: PlayerId,
                        inPlayDuration :: [CardLike],
                        deck :: [Card],
                        discardPile :: [Card],
-                       mats :: Map.Map Mat [Card]
+                       mats :: Map.Map Mat [Card],
+                       tokens :: Map.Map Token Int
                        }
                        deriving (Eq, Show)
 
@@ -341,7 +343,8 @@ instance Show Effect where
 mkPlayer :: [Card] -> String -> SimulationT Player
 mkPlayer deck name = draw Player { name = name, hand = [],
                                    discardPile = deck, deck = [], inPlay = [],
-                                   mats = Map.empty, inPlayDuration = [] }
+                                   mats = Map.empty, inPlayDuration = [],
+                                   tokens = Map.empty }
                           5
 
 initialDeck :: [CardDef]
@@ -536,7 +539,10 @@ allCards :: Player -> [Card]
 allCards s = concatMap (\f -> f s) [hand, inPlay, discardPile, deck]
 
 points :: Player -> Int
-points s = sum $ map ((`cardPoints` s) . typ) $ allCards s
+points p = pcards + ptokens
+  where
+    pcards = sum $ map ((`cardPoints` p) . typ) $ allCards p
+    ptokens = Map.findWithDefault 0 VictoryToken (tokens p)
 
 turnNo :: GameState -> Int
 turnNo g = ((ply g + 1) `div` length (players g))
@@ -727,6 +733,9 @@ plusBuys num _ state = toSimulation $ state { turn = (turn state) { buys = num +
 
 plusActions :: Int -> Action
 plusActions num _ state = toSimulation $ state { turn = (turn state) { actions = num + actions (turn state) } }
+
+plusTokens :: Int -> Token -> Action
+plusTokens num token player state = toSimulation $ updatePlayer state player $ \p -> p { tokens = Map.insertWith (+) token num (tokens p)}
 
 pass :: Action
 pass _ = toSimulation
