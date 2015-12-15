@@ -3,8 +3,10 @@ module Dominion.Model where
 
 import qualified Control.Monad as M
 import qualified Control.Monad.Trans.State.Lazy as St
+import qualified Data.Either as Either
 import qualified Data.List as L
 import qualified Data.Map.Strict as Map
+import qualified Data.Maybe as Maybe
 import System.Random (StdGen, randomR)
 
 import Data.Array.ST
@@ -17,7 +19,8 @@ data CardType = Action | Treasure | Victory | CurseType {- This is a bit of a ha
     Prize | Looter | Ruins | Knight | Reserve | Traveller
     deriving (Eq, Read, Show)
 
-data Location = Hand PlayerId | Discard PlayerId | TopOfDeck PlayerId | InPlay | Trash | Supply | Mat PlayerId Mat
+data Location = Hand PlayerId | Discard PlayerId | TopOfDeck PlayerId |
+  InPlay | InPlayDuration | Trash | Supply | Mat PlayerId Mat
   deriving (Eq, Show)
 
 data Edition = Base | Intrigue | Seaside | Alchemy | Prosperity | Cornucopia | Hinterlands | DarkAges | Guilds | Adventures | Promo
@@ -68,6 +71,8 @@ data CardDef = CardDef { -- Card id is purely a performance artifact to avoid st
 
 data Card = Card { cardId :: !Int, typ :: !CardDef }
 
+type CardLike = Either Card CardDef
+
 instance Show CardDef where
   show = cardName
 
@@ -103,6 +108,10 @@ action id name cost effect edition = CardDef id name edition (simpleCost cost) [
 
 actionA :: Int -> String -> Int -> (Maybe Card -> Action) -> Edition -> CardDef
 actionA id name cost effect edition = CardDef id name edition (simpleCost cost) [Action] noPoints effect (const 10) noTriggers
+
+duration :: Int -> String -> Int -> Action -> Action -> Edition -> CardDef
+duration id name cost effect startOfTurn edition =
+  CardDef id name edition (simpleCost cost) [Action, Duration] noPoints  (\_ -> effect) (const 10) (Map.singleton StartOfTurnTrigger startOfTurn)
 
 attack :: Int -> String -> Int -> Action -> Edition -> CardDef
 attack id name cost effect edition = CardDef id name edition (simpleCost cost) [Action, Attack] noPoints (\_ -> effect) (const 10) noTriggers
@@ -157,6 +166,7 @@ data Mat = IslandMat deriving (Eq, Ord, Show)
 data Player = Player { name :: PlayerId,
                        hand :: [Card],
                        inPlay :: [Card],
+                       inPlayDuration :: [CardLike],
                        deck :: [Card],
                        discardPile :: [Card],
                        mats :: Map.Map Mat [Card]
@@ -237,7 +247,8 @@ canSee pid (VisibleToPlayer p,_) = pid == p
 data Trigger =
   AttackTrigger |
   BuyTrigger |
-  TrashTrigger
+  TrashTrigger |
+  StartOfTurnTrigger
   deriving (Eq, Ord, Show)
 
 -- Numeric generic effect and placeholder effects
@@ -328,7 +339,10 @@ instance Show Effect where
 -- Game creation
 
 mkPlayer :: [Card] -> String -> SimulationT Player
-mkPlayer deck name = draw Player { name = name, hand = [], discardPile = deck, deck = [], inPlay = [], mats = Map.empty } 5
+mkPlayer deck name = draw Player { name = name, hand = [],
+                                   discardPile = deck, deck = [], inPlay = [],
+                                   mats = Map.empty, inPlayDuration = [] }
+                          5
 
 initialDeck :: [CardDef]
 initialDeck = replicate 7 copper ++ replicate 3 estate
@@ -425,6 +439,7 @@ moveTo c (Hand player) state      = updatePlayer state player (\p -> p { hand = 
 moveTo c (Discard player) state   = updatePlayer state player (\p -> p { discardPile = c : discardPile p })
 moveTo c (TopOfDeck player) state = updatePlayer state player (\p -> p { deck = c : deck p })
 moveTo c InPlay state             = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = c : inPlay p })
+moveTo c InPlayDuration state     = updatePlayer state (name (activePlayer state)) (\p -> p { inPlayDuration = (Left c) : inPlayDuration p })
 moveTo c Trash state              = state { trashPile = c : trashPile state }
 moveTo c Supply state             = state { piles = Map.adjust (c:) (typ c) (piles state) }
 moveTo c (Mat player mat) state   = updatePlayer state player (\p -> p { mats = Map.insertWith (++) mat [c] (mats p) })
@@ -434,9 +449,14 @@ moveFrom c (Hand player) state      = updatePlayer state player (\p -> p { hand 
 moveFrom c (Discard player) state   = updatePlayer state player (\p -> p { discardPile = L.delete c $ discardPile p })
 moveFrom c (TopOfDeck player) state = updatePlayer state player (\p -> p { deck = L.delete c $ deck p })
 moveFrom c InPlay state             = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = L.delete c $ inPlay p })
+moveFrom c InPlayDuration state     = updatePlayer state (name (activePlayer state)) (\p -> p { inPlayDuration = L.delete (Left c) $ inPlayDuration p })
 moveFrom c Trash state              = state { trashPile = L.delete c $ trashPile state }
 moveFrom c Supply state             = state { piles = Map.adjust tail (typ c) (piles state) }
 moveFrom c (Mat player mat) state   = updatePlayer state player (\p -> p { mats = Map.adjust (L.delete c) mat (mats p) })
+
+addDurationEffect :: CardDef -> GameState -> GameState
+addDurationEffect def state =
+  updatePlayer state (name (activePlayer state)) (\p -> p { inPlayDuration = (Right def) : inPlayDuration p })
 
 transfer :: Card -> Location -> Location -> GameState -> GameState
 transfer c from to state = moveTo c to (moveFrom c from state)
@@ -483,12 +503,16 @@ inSupply state card = maybe False (not . null) (Map.lookup card (piles state))
 numInSupply :: GameState -> CardDef -> Int
 numInSupply state card = maybe 0 length (Map.lookup card (piles state))
 
+hasType :: CardDef -> CardType -> Bool
+hasType card typ = typ `elem` types card
+
 hasCardType :: Card -> CardType -> Bool
 hasCardType card intyp = intyp `elem` types (typ card)
 
 isAction card = hasCardType card Action
 isReaction card = hasCardType card Reaction
 isTreasure card = hasCardType card Treasure
+isDuration card = hasCardType card Duration
 isVictory card = hasCardType card Victory
 isAttack card = hasCardType card Attack
 
@@ -606,10 +630,18 @@ addModifier attr mod _ state =
   toSimulation $ state { turn = (turn state) { modifiers = Map.insertWith stackMod attr mod (modifiers (turn state)) } }
 
 playEffect :: CardDef -> Maybe Card -> Action
-playEffect card source player state = info AllPlayers (player ++ " plays " ++ cardName card) >> onPlay card source player state
+playEffect card source player state =
+  info AllPlayers (player ++ " plays " ++ cardName card)
+  >> onPlay card source player (if Maybe.isNothing source && hasType card Duration
+                                then addDurationEffect card state
+                                else state)
 
 play :: Card -> Action
-play card player state = playEffect (typ card) (Just card) player (transfer card (Hand player) InPlay state)
+play card player state =
+  playEffect (typ card)
+             (Just card)
+             player
+             (transfer card (Hand player) (if isDuration card then InPlayDuration else InPlay) state)
 
 playAll :: [Card] -> Action
 playAll [] _ state = toSimulation state
@@ -772,10 +804,23 @@ actionPhase name state
   where
     actionsInHand = filter isAction (hand (activePlayer state))
 
+startOfTurn :: Action
+startOfTurn player state
+  | null durations = toSimulation state
+  | otherwise = allTriggers player (updatePlayer state player (const p { inPlayDuration = [], inPlay = durationCards ++ inPlay p }))
+  where
+    trigger (Left card) = Map.findWithDefault pass StartOfTurnTrigger (triggers (typ card))
+    trigger (Right def) = Map.findWithDefault pass StartOfTurnTrigger (triggers def)
+    allTriggers :: Action
+    allTriggers = foldr (&&&) pass (map trigger durations)
+    p = playerByName state player
+    durations = inPlayDuration p
+    durationCards = Either.lefts durations
+
 playTurn :: Action
 playTurn name state =
   info AllPlayers ("Turn " ++ show (turnNo state) ++ " - " ++ name)
-  >> (actionPhase &&& playTreasures &&& buyPhase &&& cleanupPhase) name state
+  >> (startOfTurn &&& actionPhase &&& playTreasures &&& buyPhase &&& cleanupPhase) name state
 
 winner :: GameState -> Result
 winner state

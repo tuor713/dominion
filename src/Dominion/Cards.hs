@@ -399,14 +399,14 @@ seasideCards = map ($ Seaside)
    -- 316 Salvager
    -- 317 Sea Hag
    -- 318 Treasure Map
-   action 319 "Bazaar" 5 (plusCards 1 &&& plusActions 2 &&& plusMoney 1)
+   action 319 "Bazaar" 5 (plusCards 1 &&& plusActions 2 &&& plusMoney 1),
    -- 320 Explorer
    -- 321 Ghosh Ship
    -- 322 Merchant Ship
    -- 323 Outpost
    -- 324 Tactician
    -- 325 Treasury
-   -- 326 Wharf
+   duration 326 "Wharf" 5 (plusCards 2 &&& plusBuys 1) (plusCards 2 &&& plusBuys 1)
   ]
 
 island mCard player state

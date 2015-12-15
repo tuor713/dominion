@@ -175,35 +175,37 @@ instance J.ToJSON Trigger where
   toJSON AttackTrigger = J.String "attack"
   toJSON BuyTrigger = J.String "buy"
   toJSON TrashTrigger = J.String "trash"
+  toJSON StartOfTurnTrigger = J.String "startOfTurn"
 
 instance J.ToJSON Location where
-  toJSON Supply = J.toJSON [J.String "supply"]
-  toJSON (Hand p) = J.toJSON [J.String "hand" , jString p]
-  toJSON (Discard p) = J.toJSON [J.String "discardPile", jString p]
-  toJSON Trash = J.toJSON [J.String "trash"]
-  toJSON (TopOfDeck p) = J.toJSON [J.String "topOfDeck", jString p]
-  toJSON InPlay = J.toJSON [J.String "inPlay"]
-  toJSON (Mat p mat) = J.toJSON [J.String "mat", jString p, jString (show mat)]
+  toJSON Supply         = J.toJSON [J.String "supply"]
+  toJSON (Hand p)       = J.toJSON [J.String "hand" , jString p]
+  toJSON (Discard p)    = J.toJSON [J.String "discardPile", jString p]
+  toJSON Trash          = J.toJSON [J.String "trash"]
+  toJSON (TopOfDeck p)  = J.toJSON [J.String "topOfDeck", jString p]
+  toJSON InPlay         = J.toJSON [J.String "inPlay"]
+  toJSON InPlayDuration = J.toJSON [J.String "inPlayDuration"]
+  toJSON (Mat p mat)    = J.toJSON [J.String "mat", jString p, jString (show mat)]
 
 instance J.ToJSON Effect where
-  toJSON (EffectPlusCards no) = J.toJSON [J.String "plusCards", J.toJSON no]
-  toJSON (EffectPlusActions no) = J.toJSON [J.String "plusActions", J.toJSON no]
-  toJSON (EffectPlusBuys no) = J.toJSON [J.String "plusBuys", J.toJSON no]
-  toJSON (EffectPlusMoney no) = J.toJSON [J.String "plusMoney", J.toJSON no]
-  toJSON (EffectDiscardNo no) = J.toJSON [J.String "discardNo", J.toJSON no]
-  toJSON (EffectTrashNo no) = J.toJSON [J.String "trashNo", J.toJSON no]
-  toJSON (EffectDiscard card from) = J.toJSON [J.String "discard", J.toJSON card, J.toJSON from]
-  toJSON (EffectBuy card) = J.toJSON [J.String "buy", J.toJSON card]
-  toJSON (EffectGain card to) = J.toJSON [J.String "gain", J.toJSON card, J.toJSON to]
+  toJSON (EffectPlusCards no)          = J.toJSON [J.String "plusCards", J.toJSON no]
+  toJSON (EffectPlusActions no)        = J.toJSON [J.String "plusActions", J.toJSON no]
+  toJSON (EffectPlusBuys no)           = J.toJSON [J.String "plusBuys", J.toJSON no]
+  toJSON (EffectPlusMoney no)          = J.toJSON [J.String "plusMoney", J.toJSON no]
+  toJSON (EffectDiscardNo no)          = J.toJSON [J.String "discardNo", J.toJSON no]
+  toJSON (EffectTrashNo no)            = J.toJSON [J.String "trashNo", J.toJSON no]
+  toJSON (EffectDiscard card from)     = J.toJSON [J.String "discard", J.toJSON card, J.toJSON from]
+  toJSON (EffectBuy card)              = J.toJSON [J.String "buy", J.toJSON card]
+  toJSON (EffectGain card to)          = J.toJSON [J.String "gain", J.toJSON card, J.toJSON to]
   toJSON (EffectGainFrom card from to) = J.toJSON [J.String "gainFrom", J.toJSON card, J.toJSON from, J.toJSON to]
-  toJSON (EffectPass card from to) = J.toJSON [J.String "pass", J.toJSON card, J.toJSON from, J.toJSON to]
-  toJSON (EffectPut card from to) = J.toJSON [J.String "put", J.toJSON card, J.toJSON from, J.toJSON to]
-  toJSON (EffectTrash card from) = J.toJSON [J.String "trash", J.toJSON card, J.toJSON from]
-  toJSON (EffectReveal card) = J.toJSON [J.String "reveal", J.toJSON card]
-  toJSON (EffectPlayAction card) = J.toJSON [J.String "playAction", J.toJSON card]
-  toJSON (EffectPlayCopy card) = J.toJSON [J.String "playCopy", J.toJSON card]
-  toJSON (EffectPlayTreasure card) = J.toJSON [J.String "playTreasure", J.toJSON card]
-  toJSON (SpecialEffect card) = J.toJSON [J.String "useAbility", J.toJSON card]
+  toJSON (EffectPass card from to)     = J.toJSON [J.String "pass", J.toJSON card, J.toJSON from, J.toJSON to]
+  toJSON (EffectPut card from to)      = J.toJSON [J.String "put", J.toJSON card, J.toJSON from, J.toJSON to]
+  toJSON (EffectTrash card from)       = J.toJSON [J.String "trash", J.toJSON card, J.toJSON from]
+  toJSON (EffectReveal card)           = J.toJSON [J.String "reveal", J.toJSON card]
+  toJSON (EffectPlayAction card)       = J.toJSON [J.String "playAction", J.toJSON card]
+  toJSON (EffectPlayCopy card)         = J.toJSON [J.String "playCopy", J.toJSON card]
+  toJSON (EffectPlayTreasure card)     = J.toJSON [J.String "playTreasure", J.toJSON card]
+  toJSON (SpecialEffect card)          = J.toJSON [J.String "useAbility", J.toJSON card]
 
 instance J.ToJSON Decision where
   toJSON (ChooseToUse effect _) = J.object ["type"   J..= J.String "use",
