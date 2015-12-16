@@ -387,11 +387,11 @@ seasideCards = map ($ Seaside)
    -- 304 Native Village
    -- 305 Pearl Diver
    -- 306 Ambassador
-   -- 307 Fishing Village
+   duration 307 "Fishing Village" 3 (plusActions 2 &&& plusMoney 1) (plusActions 1 &&& plusMoney 1),
    -- 308 Lookout
    -- 309 Smugglers
    action 310 "Warehouse" 3 (plusCards 3 &&& plusActions 1 &&& discardNCards 3),
-   -- 311 Caravan
+   duration 311 "Caravan" 4 (plusCards 1 &&& plusActions 1) (plusCards 1),
    -- 312 Cutpurse
    withInitialSupply (carddefA 313 "Island" (simpleCost 4) [Action, Victory] (const 2) island noTriggers) stdVictorySupply,
    -- 314 Navigator
@@ -402,7 +402,7 @@ seasideCards = map ($ Seaside)
    action 319 "Bazaar" 5 (plusCards 1 &&& plusActions 2 &&& plusMoney 1),
    -- 320 Explorer
    -- 321 Ghosh Ship
-   -- 322 Merchant Ship
+   duration 322 "Merchant Ship" 5 (plusMoney 2) (plusMoney 2),
    -- 323 Outpost
    -- 324 Tactician
    -- 325 Treasury

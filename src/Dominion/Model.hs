@@ -536,7 +536,7 @@ currentModifier state attr =
   Map.findWithDefault NullModifier attr (modifiers (turn state))
 
 allCards :: Player -> [Card]
-allCards s = concatMap (\f -> f s) [hand, inPlay, discardPile, deck]
+allCards s = concatMap (\f -> f s) [hand, inPlay, Either.lefts . inPlayDuration, discardPile, deck]
 
 points :: Player -> Int
 points p = pcards + ptokens
