@@ -266,7 +266,7 @@ mine player state
   where
     cont card = trash card (Hand player) player state `andThen` gainDecision card
     gainDecision trashed s2 = decision (ChooseCard (EffectGain unknownDef (Hand player)) (affordable trashed s2)
-                                          (\c -> gain (typ c) player s2))
+                                          (\c -> gainTo (typ c) (Hand player) player s2))
                                        player s2
     affordable trashed state =
         filter isTreasure
@@ -308,7 +308,7 @@ intrigueCards = map ($ Intrigue)
    action 207 "Steward" 3 (chooseEffects 1 [EffectPlusCards 2, EffectPlusMoney 2, EffectTrashNo 2] enactEffects),
    -- 208 swindler
    -- 209 wishing well
-   -- 210 baron
+   action 210 "Baron" 4 (plusBuys 1 &&& baron),
    action 211 "Bridge" 4 (plusBuys 1 &&& plusMoney 1 &&& addModifier ModCost (CappedDecModifier 1)),
    -- 212 conspirator
    -- 213 coppersmith
@@ -319,7 +319,7 @@ intrigueCards = map ($ Intrigue)
    -- 218 minion
    -- 219 saboteur
    action 220 "Torturer" 5 (plusCards 3 &&& playAttack torturerAttack),
-   -- 221 trading post
+   action 221 "Trading Post" 5 tradingPost,
    -- 222 tribute
    action 223 "Upgrade" 5 (plusCards 1 &&& plusActions 1 &&& trashForGain upgradeBenefit),
    withInitialSupply (carddef 224 "Harem" (simpleCost 6) [Treasure, Victory] (const 2) (plusMoney 2) noTriggers)
@@ -329,6 +329,19 @@ intrigueCards = map ($ Intrigue)
                       noTriggers)
                      stdVictorySupply
    ]
+
+baron :: Action
+baron player state
+  | null estates =
+    decision (ChooseToUse (EffectDiscard (head estates) (Hand player))
+                             (\b -> if b
+                                    then (discard (head estates) (Hand player) &&& plusMoney 4) player state
+                                    else gain estate player state))
+                player state
+  | otherwise = gain estate player state
+  where
+    h = hand $ playerByName state player
+    estates = filter ((==estate) . typ) h
 
 courtyard = plusCards 3 &&& putOneBack
   where
@@ -367,6 +380,13 @@ shantyDraw player state = (reveal h &&& if noActions then plusCards 2 else pass)
     noActions = not $ any isAction h
 
 torturerAttack op state = chooseEffects 1 [EffectDiscardNo 2, EffectGain curse (Hand op)] enactEffects op state
+
+-- TODO what if a trigger replaces the trashing?
+tradingPost player state
+  | length h >= 2 = (trashNCards 2 2 &&& gainTo silver (Hand player)) player state
+  | otherwise = trashNCards 2 2 player state
+  where
+    h = hand (playerByName state player)
 
 upgradeBenefit trashed player state
   | null candidates = toSimulation state
@@ -429,7 +449,7 @@ alchemyCards = map ($ Alchemy)
     stdVictorySupply,
    -- 405 Apothecary -> needs ordering of cards
    -- 406 Scrying Pool
-   -- 407 University
+   carddef 407 "University" (fullCost 2 1) [Action] (const 0) (plusActions 2 &&& universityGain) noTriggers,
    -- 408 Alchemist
    carddef 409 "Familiar" (fullCost 3 1) [Action, Attack] (const 0) familiar noTriggers,
    carddef 410 "Philosopher's Stone" (fullCost 3 1) [Treasure] (const 0) philosophersStone noTriggers
@@ -447,6 +467,11 @@ philosophersStone player state = plusMoney num player state
   where
     p = playerByName state player
     num = (length (discardPile p) + length (deck p)) `quot` 5
+
+universityGain player state =
+  optDecision (ChooseCard (EffectGain unknownDef (Discard player)) candidates (\c -> gain (typ c) player state)) player state
+  where
+    candidates = map (`topOfSupply` state) $ filter (`hasType` Action) $ affordableCardsM 5 state
 
 -- Prosperity 5xx
 
@@ -469,7 +494,9 @@ prosperityCards = map ($ Prosperity)
    -- 516 vault
    -- 517 venture
    -- 518 goons
-   -- 519 grand market
+   withBuyRestriction
+    (action 519 "Grand Market" 6 (plusCards 1 &&& plusActions 1 &&& plusBuys 1 &&& plusMoney 2))
+    (\state -> not $ copper `elem` (map typ (inPlay (activePlayer state)))),
    -- 520 hoard
    -- 521 bank
    action 522 "Expand" 7 (remodelX 3),
@@ -532,7 +559,8 @@ fairgroundsPoints p = 2 * ((length $ L.nub $ map typ $ allCards p) `quot` 5)
 menagerie player state = (reveal h &&& (if unique then plusCards 3 else plusCards 1)) player state
   where
     h = hand $ playerByName state player
-    unique = length h == length (L.nub h)
+    cardTypes = map typ h
+    unique = length cardTypes == length (L.nub cardTypes)
 
 -- Hinterlands 7xx
 
@@ -603,13 +631,13 @@ darkAgesCards = map ($ DarkAges)
    -- 808 Sage
    -- 809 Storeroom
    -- 810 Urchin
-   -- 811 Armory
+   action 811 "Armory" 4 armoryGain,
    -- 812 Death Cart
    withInitialSupply
      (carddef 813 "Feodum" (simpleCost 4) [Victory] (\p -> length (filter ((==silver) . typ) (allCards p)) `quot` 3)
         pass
         (Map.singleton TrashTrigger (gain silver &&& gain silver &&& gain silver)))
-     stdVictorySupply
+     stdVictorySupply,
    -- 814 Fortress
    -- 815 Ironmonger
    -- 816 Marauder
@@ -624,7 +652,7 @@ darkAgesCards = map ($ DarkAges)
    -- 825 Counterfeit
    -- 826 Cultist
    -- 827 Graverobber
-   -- 828 Junk Dealer
+   action 828 "Junk Dealer" 5 (plusCards 1 &&& plusActions 1 &&& plusMoney 1 &&& trashNCards 1 1)
    -- 829 Knights
    -- 830 Mystic
    -- 831 Pillage
@@ -633,6 +661,14 @@ darkAgesCards = map ($ DarkAges)
    -- 834 Altar
    -- 835 Hunting Grounds
   ]
+
+armoryGain player state = decision
+        (ChooseCard (EffectGain unknownDef (TopOfDeck player))
+                    (map (`topOfSupply` state) candidates)
+                    (\c -> gainTo (typ c) (TopOfDeck player) player state))
+        player state
+  where
+    candidates = affordableCards (simpleCost 4) state
 
 -- Guilds 9xx
 

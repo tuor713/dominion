@@ -66,7 +66,8 @@ data CardDef = CardDef { -- Card id is purely a performance artifact to avoid st
                    cardPoints :: !(Player -> Int),
                    onPlay :: !(Maybe Card -> Action),
                    initialSupply :: Int -> Int,
-                   triggers :: Map.Map Trigger Action
+                   triggers :: Map.Map Trigger Action,
+                   canBuy :: GameState -> Bool
                    }
 
 data Card = Card { cardId :: !Int, typ :: !CardDef }
@@ -100,30 +101,31 @@ noPoints = const 0
 noTriggers :: Map.Map Trigger Action
 noTriggers = Map.empty
 
+-- TODO refactor these to use carddef* instead
 treasure :: Int -> String -> Int -> Int -> Edition -> CardDef
-treasure id name cost money edition = CardDef id name edition (simpleCost cost) [Treasure] noPoints (\_ -> plusMoney money) (const 10) noTriggers
+treasure id name cost money edition = CardDef id name edition (simpleCost cost) [Treasure] noPoints (\_ -> plusMoney money) (const 10) noTriggers (const True)
 
 action :: Int -> String -> Int -> Action -> Edition -> CardDef
-action id name cost effect edition = CardDef id name edition (simpleCost cost) [Action] noPoints (\_ -> effect) (const 10) noTriggers
+action id name cost effect edition = CardDef id name edition (simpleCost cost) [Action] noPoints (\_ -> effect) (const 10) noTriggers (const True)
 
 actionA :: Int -> String -> Int -> (Maybe Card -> Action) -> Edition -> CardDef
-actionA id name cost effect edition = CardDef id name edition (simpleCost cost) [Action] noPoints effect (const 10) noTriggers
+actionA id name cost effect edition = CardDef id name edition (simpleCost cost) [Action] noPoints effect (const 10) noTriggers (const True)
 
 duration :: Int -> String -> Int -> Action -> Action -> Edition -> CardDef
 duration id name cost effect startOfTurn edition =
-  CardDef id name edition (simpleCost cost) [Action, Duration] noPoints  (\_ -> effect) (const 10) (Map.singleton StartOfTurnTrigger startOfTurn)
+  CardDef id name edition (simpleCost cost) [Action, Duration] noPoints  (\_ -> effect) (const 10) (Map.singleton StartOfTurnTrigger startOfTurn) (const True)
 
 attack :: Int -> String -> Int -> Action -> Edition -> CardDef
-attack id name cost effect edition = CardDef id name edition (simpleCost cost) [Action, Attack] noPoints (\_ -> effect) (const 10) noTriggers
+attack id name cost effect edition = CardDef id name edition (simpleCost cost) [Action, Attack] noPoints (\_ -> effect) (const 10) noTriggers (const True)
 
 victory :: Int -> String -> Int -> Int -> Edition -> CardDef
-victory id name cost points edition = CardDef id name edition (simpleCost cost) [Victory] (const points) (\_ -> pass) (const 10) noTriggers
+victory id name cost points edition = CardDef id name edition (simpleCost cost) [Victory] (const points) (\_ -> pass) (const 10) noTriggers (const True)
 
 carddef :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> Action -> Map.Map Trigger Action -> Edition -> CardDef
-carddef id name cost types points effect triggers edition = CardDef id name edition cost types points (\_ -> effect) (const 10) triggers
+carddef id name cost types points effect triggers edition = CardDef id name edition cost types points (\_ -> effect) (const 10) triggers (const True)
 
 carddefA :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> (Maybe Card -> Action) -> Map.Map Trigger Action -> Edition -> CardDef
-carddefA id name cost types points effect triggers edition = CardDef id name edition cost types points effect (const 10) triggers
+carddefA id name cost types points effect triggers edition = CardDef id name edition cost types points effect (const 10) triggers (const True)
 
 
 withTrigger :: (Edition -> CardDef) -> Trigger -> Action -> Edition -> CardDef
@@ -132,9 +134,10 @@ withTrigger cardgen trigger action ed = card { triggers = Map.insert trigger act
     card = cardgen ed
 
 withInitialSupply :: (Edition -> CardDef) -> (Int -> Int) -> Edition -> CardDef
-withInitialSupply cardgen supplyf ed = card { initialSupply = supplyf }
-  where
-    card = cardgen ed
+withInitialSupply cardgen supplyf ed = (cardgen ed) { initialSupply = supplyf }
+
+withBuyRestriction :: (Edition -> CardDef) -> (GameState -> Bool) -> Edition -> CardDef
+withBuyRestriction cardgen pred ed = (cardgen ed) { canBuy = pred }
 
 -- Basic cards
 
@@ -547,7 +550,7 @@ points p = pcards + ptokens
 turnNo :: GameState -> Int
 turnNo g = ((ply g + 1) `div` length (players g))
 
-unknownDef = CardDef (-1) "XXX" Base (simpleCost 0) [] (\_ -> 0) (\_ -> pass) (const 0) noTriggers
+unknownDef = CardDef (-1) "XXX" Base (simpleCost 0) [] (\_ -> 0) (\_ -> pass) (const 0) noTriggers (const False)
 unknown = Card (-1) unknownDef
 
 -- Removes invisble information from the state such as opponents hands
@@ -790,7 +793,7 @@ buyPhase name state
             t = turn state
         moneyToSpend = money (turn s2)
         potionToSpend = potions (turn s2)
-        candidates = map (`topOfSupply` s2) $ affordableCards (fullCost moneyToSpend potionToSpend) s2
+        candidates = map (`topOfSupply` s2) $ filter (`canBuy` s2) $ affordableCards (fullCost moneyToSpend potionToSpend) s2
 
 playTreasures :: Action
 playTreasures name state
