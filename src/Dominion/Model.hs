@@ -17,7 +17,7 @@ import Data.STRef
 data CardType = Action | Treasure | Victory | CurseType {- This is a bit of a hack -} |
     Reaction | Attack | Duration |
     Prize | Looter | Ruins | Knight | Reserve | Traveller
-    deriving (Eq, Read, Show)
+    deriving (Eq, Ord, Read, Show)
 
 data Location = Hand PlayerId | Discard PlayerId | TopOfDeck PlayerId |
   InPlay | InPlayDuration | Trash | Supply | Mat PlayerId Mat
@@ -178,14 +178,21 @@ data Player = Player { name :: PlayerId,
                        }
                        deriving (Eq, Show)
 
-data ModAttribute = ModCost deriving (Eq, Ord, Show)
-data Modifier = NullModifier | CappedDecModifier Int | StackedModifier [Modifier]
-  deriving (Eq, Show)
+data ModAttribute = ModCost (Maybe CardType) deriving (Eq, Ord, Show)
+data Modifier = NullModifier | CappedDecModifier Int | StackedModifier [Modifier] |
+  ConditionalModifier (GameState -> Bool) Modifier
 
-applyMod :: Modifier -> Int -> Int
-applyMod NullModifier x = x
-applyMod (CappedDecModifier num) x = max 0 (x - num)
-applyMod (StackedModifier mods) x = foldr applyMod x mods
+instance Show Modifier where
+  show NullModifier = "NullModifier"
+  show (CappedDecModifier num) = "CappedDecModifier(" ++ show num ++ ")"
+  show (ConditionalModifier _ mod) = "ConditionalModifier(" ++ show mod ++ ")"
+  show (StackedModifier mods) = "Modifiers(" ++ (L.intercalate ", " $ map show mods) ++ ")"
+
+applyMod :: Modifier -> GameState -> Int -> Int
+applyMod NullModifier _ x = x
+applyMod (CappedDecModifier num) _ x = max 0 (x - num)
+applyMod (StackedModifier mods) state x = foldr (\m res -> applyMod m state res) x mods
+applyMod (ConditionalModifier pred mod) state x = if pred state then applyMod mod state x else x
 
 stackMod :: Modifier -> Modifier -> Modifier
 stackMod mod NullModifier = mod
@@ -356,6 +363,20 @@ initialDeck = replicate 7 copper ++ replicate 3 estate
 labelCards :: [CardDef] -> Int -> ([Card],Int)
 labelCards cards initialId = (zipWith Card [initialId..(initialId + length cards)] cards, initialId + length cards)
 
+nullPlayer :: Player
+nullPlayer = Player { name = "Alice", hand = [], discardPile = [], deck = [], inPlay = [],
+                      mats = Map.empty, inPlayDuration = [], tokens = Map.empty }
+
+nullState :: GameState
+nullState =
+  GameState { players = Map.singleton "Alice" nullPlayer,
+              turnOrder = ["Alice"],
+              piles = Map.empty,
+              trashPile = [],
+              turn = newTurn,
+              ply = 1,
+              finished = False }
+
 mkGame :: GameType -> [String] -> [CardDef] -> SimulationT GameState
 mkGame typ names kingdomCards =
   (sequence $ zipWith mkPlayer decks names) >>= \players ->
@@ -381,7 +402,7 @@ mkGame typ names kingdomCards =
                   (replicate playerNo initialDeck)
     standardCards = colonyCards ++ potionCards ++ [estate,duchy,province,copper,silver,gold,curse]
     colonyCards = if typ == ColonyGame then [platinum, colony] else []
-    potionCards = if any ((0<) . potionCost . cost NullModifier) kingdomCards then [potion] else []
+    potionCards = if any ((0<) . potionCost . cost nullState) kingdomCards then [potion] else []
     playerNo = length names
 
 
@@ -522,14 +543,16 @@ isDuration card = hasCardType card Duration
 isVictory card = hasCardType card Victory
 isAttack card = hasCardType card Attack
 
-cost :: Modifier -> CardDef -> Cost
-cost mod card = Cost ((applyMod mod m),p)
+cost :: GameState -> CardDef -> Cost
+cost state card = Cost ((applyMod mod state m),p)
   where
+    mod = foldr stackMod (currentModifier state (ModCost Nothing))
+            (map (\t -> currentModifier state (ModCost (Just t))) (types card))
     (Cost (m,p)) = cardCost card
 
 affordableCards :: Cost -> GameState -> [CardDef]
 affordableCards bound state =
-  filter ((`smallerEqCost` bound) . cost (currentModifier state ModCost)) (availableCards state)
+  filter ((`smallerEqCost` bound) . cost state) (availableCards state)
 
 affordableCardsM :: Int -> GameState -> [CardDef]
 affordableCardsM num = affordableCards (simpleCost num)
@@ -784,7 +807,7 @@ buyPhase name state
   where
     buyDecision s2 = optDecision (ChooseCard (EffectBuy unknown)
                                       candidates
-                                      (\card -> (plusBuys (-1) &&& payCosts (cost (currentModifier s2 ModCost) (typ card)) &&& buy (typ card) &&& buyPhase) name s2))
+                                      (\card -> (plusBuys (-1) &&& payCosts (cost s2 (typ card)) &&& buy (typ card) &&& buyPhase) name s2))
                                     name s2
       where
         payCosts cost _ state = toSimulation $

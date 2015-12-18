@@ -80,7 +80,7 @@ remodelX x = trashForGain chooseToGain
                     (map (`topOfSupply` s2) (candidates trashed s2))
                     (\c -> gain (typ c) player s2))
         player s2
-    candidates trashed state = affordableCards (addCost (cost (currentModifier state ModCost) (typ trashed)) (simpleCost x)) state
+    candidates trashed state = affordableCards (addCost (cost state (typ trashed)) (simpleCost x)) state
 
 
 enactEffect :: Effect -> Action
@@ -271,7 +271,7 @@ mine player state
     affordable trashed state =
         filter isTreasure
         $ map (`topOfSupply` state)
-        $ affordableCards (addCost (cost (currentModifier state ModCost) (typ trashed)) (simpleCost 3)) state
+        $ affordableCards (addCost (cost state (typ trashed)) (simpleCost 3)) state
     treasures = filter isTreasure (hand (playerByName state player))
 
 witch :: Action
@@ -309,7 +309,7 @@ intrigueCards = map ($ Intrigue)
    -- 208 swindler
    -- 209 wishing well
    action 210 "Baron" 4 (plusBuys 1 &&& baron),
-   action 211 "Bridge" 4 (plusBuys 1 &&& plusMoney 1 &&& addModifier ModCost (CappedDecModifier 1)),
+   action 211 "Bridge" 4 (plusBuys 1 &&& plusMoney 1 &&& addModifier (ModCost Nothing) (CappedDecModifier 1)),
    -- 212 conspirator
    -- 213 coppersmith
    action 214 "Ironworks" 4 ironworks,
@@ -392,10 +392,9 @@ upgradeBenefit trashed player state
   | null candidates = toSimulation state
   | otherwise = chooseOne (EffectGain unknownDef (Discard player)) candidates (gain . typ) player state
   where
-    mod = currentModifier state ModCost
-    exactCost = addCost (cost mod (typ trashed)) (simpleCost 1)
+    exactCost = addCost (cost state (typ trashed)) (simpleCost 1)
     candidates = map (`topOfSupply` state)
-      $ filter ((==exactCost) . cost mod)
+      $ filter ((==exactCost) . cost state)
       $ availableCards state
 
 -- Seaside 3xx
@@ -460,7 +459,7 @@ alchemyCards = map ($ Alchemy)
 apprenticeBenefit card player state = (if drawNo == 0 then pass else plusCards drawNo) player state
   where
     drawNo = moneyCost c + 2 * potionCost c
-    c = cost (currentModifier state ModCost) (typ card)
+    c = cost state (typ card)
 
 familiar = plusCards 1 &&& plusActions 1 &&& playAttack (gain curse)
 philosophersStone player state = plusMoney num player state
@@ -481,7 +480,7 @@ prosperityCards = map ($ Prosperity)
    -- 503 watchtower
    -- 504 bishop
    action 505 "Monument" 4 (plusMoney 2 &&& plusTokens 1 VictoryToken),
-   -- 506 quarry
+   carddefA 506 "Quarry" (simpleCost 4) [Treasure] (const 0) quarryEffect noTriggers,
    -- 507 talisman
    action 508 "Worker's Village" 4 (plusCards 1 &&& plusActions 2 &&& plusBuys 1),
    action 509 "City" 5 city,
@@ -504,6 +503,11 @@ prosperityCards = map ($ Prosperity)
    action 524 "King's Court" 7 kingsCourt
    -- 525 peddler
    ]
+
+quarryEffect Nothing = plusMoney 1
+quarryEffect (Just card) =
+  plusMoney 1 &&&
+  addModifier (ModCost (Just Action)) (ConditionalModifier (\state -> card `elem` (inPlay $ activePlayer state)) (CappedDecModifier 2))
 
 city :: Action
 city = plusCards 1
