@@ -174,6 +174,7 @@ instance J.ToJSON CardDef where
 instance J.ToJSON Trigger where
   toJSON AttackTrigger = J.String "attack"
   toJSON BuyTrigger = J.String "buy"
+  toJSON GainTrigger = J.String "gain"
   toJSON TrashTrigger = J.String "trash"
   toJSON StartOfTurnTrigger = J.String "startOfTurn"
 

@@ -264,6 +264,7 @@ canSee pid (VisibleToPlayer p,_) = pid == p
 data Trigger =
   AttackTrigger |
   BuyTrigger |
+  GainTrigger |
   TrashTrigger |
   StartOfTurnTrigger
   deriving (Eq, Ord, Show)
@@ -693,17 +694,28 @@ playAll (c:cs) player state = play c player state `andThen` playAll cs player
 topOfSupply :: CardDef -> GameState -> Card
 topOfSupply card state = head $ (piles state) Map.! card
 
+handleTriggers :: Trigger -> CardDef -> Action
+handleTriggers trigger card = Map.findWithDefault pass trigger (triggers card)
+
+handleAllTriggers :: Trigger -> [CardDef] -> Action
+handleAllTriggers trigger cards =
+  foldr (&&&) pass $ map (Map.findWithDefault pass trigger) $ map triggers cards
+
 gainFrom :: Card -> Location -> Action
 gainFrom card source player state =
-  info AllPlayers (player ++ " gains " ++ cardName (typ card)) >> return (State $ transfer card source (Discard player) state)
+  info AllPlayers (player ++ " gains " ++ cardName (typ card)) >>
+  (handleTriggers GainTrigger (typ card) &&& transferT) player state
+  where
+    transferT player state = toSimulation $ transfer card source (Discard player) state
 
 gainTo :: CardDef -> Location -> Action
 gainTo card target player state
   | inSupply state card =
-    info AllPlayers (player ++ " gains " ++ cardName card) >> return (State $ transfer c Supply target state)
+    info AllPlayers (player ++ " gains " ++ cardName card) >>
+    (handleTriggers GainTrigger card &&& transferT) player state
   | otherwise = toSimulation state
   where
-    c = topOfSupply card state
+    transferT _ state = toSimulation $ transfer (topOfSupply card state) Supply target state
 
 gain :: CardDef -> Action
 gain card player = gainTo card (Discard player) player
@@ -714,22 +726,14 @@ reveal cards player state = info AllPlayers (player ++ " reveals " ++ summarizeC
 buy :: CardDef -> Action
 buy card player state =
   info AllPlayers (player ++ " buys " ++ cardName card) >>
-    maybe
-      (transferT state)
-      (\trigger -> trigger player state `andThen` transferT)
-      (Map.lookup BuyTrigger (triggers card))
-  where
-    transferT state = toSimulation $ transfer (topOfSupply card state) Supply (Discard player) state
+  (handleTriggers BuyTrigger card &&& gain card) player state
 
 trash :: Card -> Location -> Action
 trash card source player state =
   info AllPlayers (player ++ " trashes " ++ cardName (typ card)) >>
-    maybe
-      (transferT state)
-      (\trigger -> trigger player state `andThen` transferT)
-      (Map.lookup TrashTrigger (triggers (typ card)))
+  (handleTriggers TrashTrigger (typ card) &&& transferT) player state
   where
-    transferT state = toSimulation $ transfer card source Trash state
+    transferT _ state = toSimulation $ transfer card source Trash state
 
 put :: Card -> Location -> Location -> Action
 put card source target _ state = toSimulation $ transfer card source target state

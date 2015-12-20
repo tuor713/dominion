@@ -415,7 +415,7 @@ seasideCards = map ($ Seaside)
    withInitialSupply (carddefA 313 "Island" (simpleCost 4) [Action, Victory] (const 2) island noTriggers) stdVictorySupply,
    notImplemented "Navigator", -- 314 Navigator
    notImplemented "Pirate Ship", -- 315 Pirate Ship
-   notImplemented "Salvager", -- 316 Salvager
+   action 316 "Salvager" 4 (trashForGain salvager),
    notImplemented "Sea Hag", -- 317 Sea Hag
    notImplemented "Treasure Map", -- 318 Treasure Map
    action 319 "Bazaar" 5 (plusCards 1 &&& plusActions 2 &&& plusMoney 1),
@@ -437,6 +437,8 @@ island mCard player state
     islandPut = case mCard of
       Just card -> put card InPlay (Mat player IslandMat)
       Nothing -> pass
+
+salvager card player state = plusMoney (moneyCost (cost state (typ card))) player state
 
 -- Alchemy 4xx
 
@@ -573,7 +575,7 @@ hinterlandCards = map ($ Hinterlands)
    notImplemented "Duchess", -- 702 duchess
    notImplemented "Fool's Gold", -- 703 fool's gold
    notImplemented "Develop", -- 704 develop
-   notImplemented "Oasis", -- 705 oasis
+   action 705 "Oasis" 3 (plusCards 1 &&& plusActions 1 &&& plusMoney 1 &&& discardNCards 1), -- 705 oasis
    notImplemented "Oracle", -- 706 oracle
    notImplemented "Scheme", -- 707 scheme
    notImplemented "Tunnel", -- 708 tunnel
@@ -585,11 +587,11 @@ hinterlandCards = map ($ Hinterlands)
     stdVictorySupply,
    notImplemented "Spice Merchant", -- 713 spice merchant
    notImplemented "Trader", -- 714 trader
-   notImplemented "Cache", -- 715 cache
+   carddef 715 "Cache" (simpleCost 5) [Treasure] (const 0) (plusMoney 3) (Map.singleton GainTrigger (gain copper &&& gain copper)),
    notImplemented "Cartographer", -- 716 cartographer
    notImplemented "Embassy", -- 717 embassy
    notImplemented "Haggler", -- 718 haggler
-   notImplemented "Highway",-- 719 highway
+   actionA 719 "Highway" 5 highway,
    notImplemented "Ill-gotten Gains", -- 720 ill-gotten gains
    notImplemented "Inn", -- 721 inn
    notImplemented "Mandarin", -- 722 mandarin
@@ -620,6 +622,12 @@ jackOfAllTrades = gain silver &&& spyTop &&& drawTo5 &&& optTrash
       where
         candidates = filter (not . isTreasure) $ hand $ playerByName state player
         cont card = trash card (Hand player) player state
+
+highway Nothing = plusCards 1 &&& plusActions 1
+highway (Just card) =
+  plusCards 1 &&& plusActions 1 &&&
+  addModifier (ModCost (Just Action))
+              (ConditionalModifier (\state -> card `elem` (inPlay $ activePlayer state)) (CappedDecModifier 2))
 
 
 -- Dark Ages 8xx
