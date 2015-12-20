@@ -677,7 +677,7 @@ armoryGain player state = decision
 -- Guilds 9xx
 
 guildsCards = map ($ Guilds) [
-  notImplemented "Candlestick Maker",
+  action 901 "Candlestick Maker" 2 (plusActions 1 &&& plusBuys 1 &&& plusTokens 1 CoinToken),
   notImplemented "Stonemason",
   notImplemented "Doctor",
   notImplemented "Masterpiece",

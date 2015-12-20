@@ -87,6 +87,12 @@ decisionHtml (Optional inner _) =
     decisionHtml inner
     H.button H.! A.class_ "choice-button" H.! A.onclick "pass();" $ "Pass"
 
+decisionHtml (ChooseNumber effect (lo,hi) _) =
+  H.div $ do
+    toHtml $ "Choose how many to use for " ++ show effect
+    forM_ [lo..hi] $ \n ->
+      H.button H.! A.class_ "choice-button" H.! A.onclick (fromString ("choose('" ++ show n ++ "');")) $ fromString (show n)
+
 decisionHtml (ChooseToUse effect _) =
   H.div $ do
     toHtml $ "Use " ++ show effect
@@ -184,6 +190,12 @@ htmlDecision _ (state,infos,decision) =
         forM_ (Map.toAscList (players state)) $ \(pid,player) ->
           H.div $ do
             H.h4 $ toHtml $ "Player - " ++ pid
+            when (not (Map.null (tokens player))) $ do
+              H.h5 "Tokens: "
+              H.p $
+                forM_ (Map.toList (tokens player)) $ \(token,num) -> do
+                  toHtml $ show token ++ ": " ++ show num
+                  H.br
             when (not (null (deck player))) $ do
               H.h5 "Deck: "
               showCards (cardListToMap (deck player))
@@ -269,7 +281,7 @@ htmlSetupGame =
         H.button H.! A.class_ "choice-button"
                  H.! A.onclick (fromString ("start();")) $ "Go"
         H.button H.! A.class_ "choice-button"
-                 H.! A.onclick (fromString ("randomStart([\"" ++ L.intercalate "\",\"" (map cardName kingdomCards) ++ "\"]);")) $ "Random"
+                 H.! A.onclick (fromString ("randomStart([\"" ++ L.intercalate "\",\"" (map cardName $ filter implemented kingdomCards) ++ "\"]);")) $ "Random"
 
 
 htmlSimulation :: [CardDef] -> Stats -> H.Html

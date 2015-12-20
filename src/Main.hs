@@ -190,6 +190,7 @@ instance J.ToJSON Location where
 instance J.ToJSON Effect where
   toJSON (EffectPlusCards no)          = J.toJSON [J.String "plusCards", J.toJSON no]
   toJSON (EffectPlusActions no)        = J.toJSON [J.String "plusActions", J.toJSON no]
+  toJSON (EffectUseTokens token)       = J.toJSON [J.String "useTokens", jString (show token)]
   toJSON (EffectPlusBuys no)           = J.toJSON [J.String "plusBuys", J.toJSON no]
   toJSON (EffectPlusMoney no)          = J.toJSON [J.String "plusMoney", J.toJSON no]
   toJSON (EffectDiscardNo no)          = J.toJSON [J.String "discardNo", J.toJSON no]
@@ -210,6 +211,12 @@ instance J.ToJSON Effect where
 instance J.ToJSON Decision where
   toJSON (ChooseToUse effect _) = J.object ["type"   J..= J.String "use",
                                             "effect" J..= T.pack (show effect)]
+
+  toJSON (ChooseNumber effect (lo,hi) _ ) = J.object ["type" J..= J.String "chooseNumber",
+                                                      "effect" J..= T.pack (show effect),
+                                                      "min"    J..= J.toJSON lo,
+                                                      "max"    J..= J.toJSON hi
+                                                      ]
 
   toJSON (ChooseCard effect choices _) = J.object ["type"   J..= J.String "chooseCard",
                                                    "cards"  J..= J.Array (V.fromList (map J.toJSON choices)),
@@ -287,6 +294,7 @@ decisionHandler gamesRepository = do
 
 parseDecision :: Decision -> String -> Simulation
 parseDecision (ChooseToUse _ f) input           = f (input == "true")
+parseDecision (ChooseNumber _ _ f) input        = f $ fst $ Maybe.fromJust $ C8.readInt $ C8.pack input
 parseDecision (ChooseToReact _ _ f) input       = f (input == "true")
 parseDecision (ChooseCard _ choices f) input    = f $ head (filter ((==(lookupCard input)) . typ) choices)
 parseDecision (ChooseCards _ choices _ f) input = f $ Maybe.fromJust $ findCards choices (map lookupCard (wordsBy (==',') input))

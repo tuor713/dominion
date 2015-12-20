@@ -54,6 +54,10 @@ findCards cs (d:ds) = headCard >>= \c -> fmap (c:) (findCards (L.delete c cs) ds
 decision2prompt :: PlayerId -> Decision -> (String, String -> Maybe Simulation)
 decision2prompt player (ChooseToUse effect f) = (message player (show effect ++ " [yn]"), fmap f . parseBool)
 
+decision2prompt player (ChooseNumber effect (lo,hi) f) =
+  (message player (show effect ++ " " ++ show lo ++ " up to " ++ show hi),
+   \s -> fmap (f . fst) (C8.readInt (C8.pack s)))
+
 decision2prompt player (ChooseCard effect choices f) =
   (message player (show effect ++ " " ++ summarizeCards choices),
    \s -> maybeCard s >>= findCard choices >>= (return . f))

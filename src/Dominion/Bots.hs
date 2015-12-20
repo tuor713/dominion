@@ -74,7 +74,7 @@ defaultBot pid _ (ChooseCards (EffectDiscard _ (Hand p)) choices (lo,hi) f) _
   | pid == p = f $ take lo $ L.sortOn (cardScore . typ) choices
   | otherwise = f $ take hi $ L.sortOn (negate . cardScore . typ) choices
 
-
+defaultBot _ _ (ChooseNumber _ (lo,_) f) _ = f lo
 defaultBot _ _ (ChooseToReact _ _ f) _ = f False
 defaultBot _ _ (ChooseToUse _ f) _ = f False
 defaultBot _ _ (ChooseCards _ choices (lo,_) f) _ = f (take lo choices)

@@ -170,7 +170,7 @@ basicCards = [copper, silver, gold, estate, duchy, province, curse, potion, plat
 type PlayerId = String
 
 data Mat = IslandMat deriving (Eq, Ord, Show)
-data Token = VictoryToken deriving (Eq, Ord, Show)
+data Token = VictoryToken | CoinToken deriving (Eq, Ord, Show)
 
 data Player = Player { name :: PlayerId,
                        hand :: [Card],
@@ -290,7 +290,9 @@ data Effect =
   EffectPlayAction Card |
   EffectPlayCopy Card |
   EffectPlayTreasure Card |
+  EffectUseTokens Token |
   SpecialEffect CardDef
+
 
 data Decision =
   Optional Decision Simulation |
@@ -298,7 +300,8 @@ data Decision =
   ChooseCards Effect [Card] (Int,Int) ([Card] -> Simulation) |
   ChooseToUse Effect (Bool -> Simulation) |
   ChooseToReact Card Trigger (Bool -> Simulation) | -- Or actually, ChooseToReact Trigger Effect, but the original is more descriptive of the decision
-  ChooseEffects Int [Effect] ([Effect] -> Simulation)
+  ChooseEffects Int [Effect] ([Effect] -> Simulation) |
+  ChooseNumber Effect (Int,Int) (Int -> Simulation)
 
 data DecisionSource = GameMechanics | CardDecision Card
 
@@ -349,6 +352,7 @@ instance Show Effect where
   show (EffectPlayAction card) = "play " ++ show card
   show (EffectPlayCopy card) = "play copy of " ++ show card
   show (EffectPlayTreasure card) = "play treasure " ++ show card
+  show (EffectUseTokens token) = "use token(s) " ++ show token
   show (SpecialEffect card) = "use ability of " ++ show card
 
 
@@ -425,6 +429,7 @@ andThenI (ChooseToUse effect cont) f = ChooseToUse effect (\b -> cont b `andThen
 andThenI (ChooseCard caption cards cont) f = ChooseCard caption cards (\c -> cont c `andThen` f)
 andThenI (ChooseCards caption cards lohi cont) f = ChooseCards caption cards lohi (\cs -> cont cs `andThen` f)
 andThenI (ChooseEffects num effects cont) f = ChooseEffects num effects (\cs -> cont cs `andThen` f)
+andThenI (ChooseNumber effect lohi cont) f = ChooseNumber effect lohi (\cs -> cont cs `andThen` f)
 andThenI (Optional inner fallback) f = Optional (inner `andThenI` f) (fallback `andThen` f)
 
 andThen :: Simulation -> (GameState -> Simulation) -> Simulation
@@ -835,6 +840,13 @@ playTreasures name state
                                              (\cards -> playAll cards name state))
                             name state
 
+useCoinTokens :: Action
+useCoinTokens player state
+  | numCoins == 0 = toSimulation state
+  | otherwise = optDecision (ChooseNumber (EffectUseTokens CoinToken) (0,numCoins) cont) player state
+  where
+    numCoins = Map.findWithDefault 0 CoinToken (tokens $ playerByName state player)
+    cont num = ((plusMoney num &&& plusTokens (- num) CoinToken)) player state
 
 actionPhase :: Action
 actionPhase name state
@@ -860,7 +872,7 @@ startOfTurn player state
 playTurn :: Action
 playTurn name state =
   info AllPlayers ("Turn " ++ show (turnNo state) ++ " - " ++ name)
-  >> (startOfTurn &&& actionPhase &&& playTreasures &&& buyPhase &&& cleanupPhase) name state
+  >> (startOfTurn &&& actionPhase &&& useCoinTokens &&& playTreasures &&& buyPhase &&& cleanupPhase) name state
 
 winner :: GameState -> Result
 winner state
