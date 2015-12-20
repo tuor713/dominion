@@ -51,3 +51,7 @@ section {
   opacity: 0.6;
   filter: alpha(opacity=60);
 }
+
+.notimplemented {
+  opacity: 0.3;
+}

@@ -300,27 +300,27 @@ intrigueCards = map ($ Intrigue)
   [action 201 "Courtyard" 2 courtyard,
    action 202 "Pawn" 2
           (chooseEffects 2 [EffectPlusCards 1, EffectPlusActions 1, EffectPlusBuys 1, EffectPlusMoney 1] enactEffects),
-   -- 203 secret chamber
+   notImplemented "Secret Chamber",
    withInitialSupply (carddef 204 "Great Hall" (simpleCost 3) [Action, Victory] (const 1) (plusCards 1 &&& plusActions 1) noTriggers)
     stdVictorySupply,
-   -- 205 masquerade
+   notImplemented "Masquerade",
    action 206 "Shanty Town" 3 (plusActions 2 &&& shantyDraw),
    action 207 "Steward" 3 (chooseEffects 1 [EffectPlusCards 2, EffectPlusMoney 2, EffectTrashNo 2] enactEffects),
-   -- 208 swindler
-   -- 209 wishing well
+   notImplemented "Swindler", -- 208
+   notImplemented "Wishing Well", -- 209
    action 210 "Baron" 4 (plusBuys 1 &&& baron),
    action 211 "Bridge" 4 (plusBuys 1 &&& plusMoney 1 &&& addModifier (ModCost Nothing) (CappedDecModifier 1)),
-   -- 212 conspirator
-   -- 213 coppersmith
+   notImplemented "Conspirator",-- 212
+   notImplemented "Coppersmith", -- 213
    action 214 "Ironworks" 4 ironworks,
    actionA 215 "Mining Village" 4 miningVillage,
-   -- 216 scout
+   notImplemented "Scout", -- 216
    carddef 217 "Duke" (simpleCost 5) [Victory] (\p -> length $ filter ((==duchy) . typ) (allCards p)) pass noTriggers,
-   -- 218 minion
-   -- 219 saboteur
+   notImplemented "Minion", -- 218 minion
+   notImplemented "Saboteur", -- 219 saboteur
    action 220 "Torturer" 5 (plusCards 3 &&& playAttack torturerAttack),
    action 221 "Trading Post" 5 tradingPost,
-   -- 222 tribute
+   notImplemented "Tribute", -- 222 tribute
    action 223 "Upgrade" 5 (plusCards 1 &&& plusActions 1 &&& trashForGain upgradeBenefit),
    withInitialSupply (carddef 224 "Harem" (simpleCost 6) [Treasure, Victory] (const 2) (plusMoney 2) noTriggers)
     stdVictorySupply,
@@ -400,31 +400,31 @@ upgradeBenefit trashed player state
 -- Seaside 3xx
 
 seasideCards = map ($ Seaside)
-  [-- 301 Embargo
-   -- 302 Haven
-   -- 303 Lighthouse
-   -- 304 Native Village
-   -- 305 Pearl Diver
-   -- 306 Ambassador
+  [notImplemented "Embargo", -- 301 Embargo
+   notImplemented "Haven", -- 302 Haven
+   notImplemented "Lighthouse", -- 303 Lighthouse
+   notImplemented "Native Village", -- 304 Native Village
+   notImplemented "Pearl Diver", -- 305 Pearl Diver
+   notImplemented "Ambassador", -- 306 Ambassador
    duration 307 "Fishing Village" 3 (plusActions 2 &&& plusMoney 1) (plusActions 1 &&& plusMoney 1),
-   -- 308 Lookout
-   -- 309 Smugglers
+   notImplemented "Lookout", -- 308 Lookout
+   notImplemented "Smugglers", -- 309 Smugglers
    action 310 "Warehouse" 3 (plusCards 3 &&& plusActions 1 &&& discardNCards 3),
    duration 311 "Caravan" 4 (plusCards 1 &&& plusActions 1) (plusCards 1),
-   -- 312 Cutpurse
+   notImplemented "Cutpurse", -- 312 Cutpurse
    withInitialSupply (carddefA 313 "Island" (simpleCost 4) [Action, Victory] (const 2) island noTriggers) stdVictorySupply,
-   -- 314 Navigator
-   -- 315 Pirate Ship
-   -- 316 Salvager
-   -- 317 Sea Hag
-   -- 318 Treasure Map
+   notImplemented "Navigator", -- 314 Navigator
+   notImplemented "Pirate Ship", -- 315 Pirate Ship
+   notImplemented "Salvager", -- 316 Salvager
+   notImplemented "Sea Hag", -- 317 Sea Hag
+   notImplemented "Treasure Map", -- 318 Treasure Map
    action 319 "Bazaar" 5 (plusCards 1 &&& plusActions 2 &&& plusMoney 1),
-   -- 320 Explorer
-   -- 321 Ghosh Ship
+   notImplemented "Explorer", -- 320 Explorer
+   notImplemented "Ghost Ship", -- 321 Ghosh Ship
    duration 322 "Merchant Ship" 5 (plusMoney 2) (plusMoney 2),
-   -- 323 Outpost
-   -- 324 Tactician
-   -- 325 Treasury
+   notImplemented "Outpost", -- 323 Outpost
+   notImplemented "Tactician", -- 324 Tactician
+   notImplemented "Treasury", -- 325 Treasury
    duration 326 "Wharf" 5 (plusCards 2 &&& plusBuys 1) (plusCards 2 &&& plusBuys 1)
   ]
 
@@ -441,19 +441,19 @@ island mCard player state
 -- Alchemy 4xx
 
 alchemyCards = map ($ Alchemy)
-  [-- 401 Herbalist
+  [notImplemented "Herbalist", -- 401 Herbalist
    action 402 "Apprentice" 5 (plusActions 1 &&& trashForGain apprenticeBenefit),
-   -- 403 Transmute
+   notImplemented "Transmute", -- 403 Transmute
    withInitialSupply (carddef 404 "Vineyard" (fullCost 0 1) [Victory] (\p -> length (filter isAction (allCards p)) `quot` 3) pass noTriggers)
     stdVictorySupply,
-   -- 405 Apothecary -> needs ordering of cards
-   -- 406 Scrying Pool
+   notImplemented "Apothecary", -- 405 Apothecary -> needs ordering of cards
+   notImplemented "Scrying Pool", -- 406 Scrying Pool
    carddef 407 "University" (fullCost 2 1) [Action] (const 0) (plusActions 2 &&& universityGain) noTriggers,
-   -- 408 Alchemist
+   notImplemented "Alchemist", -- 408 Alchemist
    carddef 409 "Familiar" (fullCost 3 1) [Action, Attack] (const 0) familiar noTriggers,
-   carddef 410 "Philosopher's Stone" (fullCost 3 1) [Treasure] (const 0) philosophersStone noTriggers
-   -- 411 Golem -> needs ordering of cards (can be simulated through repeated selection)
-   -- 412 Possession
+   carddef 410 "Philosopher's Stone" (fullCost 3 1) [Treasure] (const 0) philosophersStone noTriggers,
+   notImplemented "Golem", -- 411 Golem -> needs ordering of cards (can be simulated through repeated selection)
+   notImplemented "Possession" -- 412 Possession
   ]
 
 apprenticeBenefit card player state = (if drawNo == 0 then pass else plusCards drawNo) player state
@@ -475,33 +475,33 @@ universityGain player state =
 -- Prosperity 5xx
 
 prosperityCards = map ($ Prosperity)
-  [-- 501 loan
-   -- 502 trade route
-   -- 503 watchtower
-   -- 504 bishop
+  [notImplemented "Loan", -- 501 loan
+   notImplemented "Trade Route", -- 502 trade route
+   notImplemented "Watchtower", -- 503 watchtower
+   notImplemented "Bishop", -- 504 bishop
    action 505 "Monument" 4 (plusMoney 2 &&& plusTokens 1 VictoryToken),
    carddefA 506 "Quarry" (simpleCost 4) [Treasure] (const 0) quarryEffect noTriggers,
-   -- 507 talisman
+   notImplemented "Talisman", -- 507 talisman
    action 508 "Worker's Village" 4 (plusCards 1 &&& plusActions 2 &&& plusBuys 1),
    action 509 "City" 5 city,
-   -- 510 contraband
-   -- 511 counting house
+   notImplemented "Contraband", -- 510 contraband
+   notImplemented "Counting House", -- 511 counting house
    withTrigger (action 512 "Mint"5 mintAction) BuyTrigger mintTrigger,
-   -- 513 mountebank
-   -- 514 rabble
-   -- 515 royal seal
-   -- 516 vault
-   -- 517 venture
-   -- 518 goons
+   notImplemented "Mountebank", -- 513 mountebank
+   notImplemented "Rabble", -- 514 rabble
+   notImplemented "Royal Seal", -- 515 royal seal
+   notImplemented "Vault", -- 516 vault
+   notImplemented "Venture", -- 517 venture
+   notImplemented "Goons", -- 518 goons
    withBuyRestriction
     (action 519 "Grand Market" 6 (plusCards 1 &&& plusActions 1 &&& plusBuys 1 &&& plusMoney 2))
     (\state -> not $ copper `elem` (map typ (inPlay (activePlayer state)))),
-   -- 520 hoard
-   -- 521 bank
+   notImplemented "Hoard", -- 520 hoard
+   notImplemented "Bank", -- 521 bank
    action 522 "Expand" 7 (remodelX 3),
-   -- 523 forge
-   action 524 "King's Court" 7 kingsCourt
-   -- 525 peddler
+   notImplemented "Forge", -- 523 forge
+   action 524 "King's Court" 7 kingsCourt,
+   notImplemented "Peddler" -- 525 peddler
    ]
 
 quarryEffect Nothing = plusMoney 1
@@ -542,18 +542,18 @@ kingsCourt player state
 -- Cornucopia 6xx
 
 cornucopiaCards = map ($ Cornucopia)
-  [-- 601 hamlet
-   -- 602 fortune teller
+  [notImplemented "Hamlet", -- 601 hamlet
+   notImplemented "Fortune Teller", -- 602 fortune teller
    action 603 "Menagerie" 3 (plusActions 1 &&& menagerie),
-   -- 604 farming village
-   -- 605 horse traders
-   -- 606 remake
-   -- 607 tournament
-   -- 608 young witch
-   -- 609 harvest
-   -- 610 horn of plenty
-   -- 611 hunting party
-   -- 612 jester
+   notImplemented "Farming Village", -- 604 farming village
+   notImplemented "Horse Traders", -- 605 horse traders
+   notImplemented "Remake", -- 606 remake
+   notImplemented "Tournament", -- 607 tournament
+   notImplemented "Young Witch", -- 608 young witch
+   notImplemented "Harvest", -- 609 harvest
+   notImplemented "Horn of Plenty", -- 610 horn of plenty
+   notImplemented "Hunting Party", -- 611 hunting party
+   notImplemented "Jester", -- 612 jester
    withInitialSupply (carddef 613 "Fairgrounds" (simpleCost 6) [Victory] fairgroundsPoints pass noTriggers)
     stdVictorySupply
   ]
@@ -569,34 +569,34 @@ menagerie player state = (reveal h &&& (if unique then plusCards 3 else plusCard
 -- Hinterlands 7xx
 
 hinterlandCards = map ($ Hinterlands)
-  [-- 701 crossroads
-   -- 702 duchess
-   -- 703 fool's gold
-   -- 704 develop
-   -- 705 oasis
-   -- 706 oracle
-   -- 707 scheme
-   -- 708 tunnel
+  [notImplemented "Crossroads", -- 701 crossroads
+   notImplemented "Duchess", -- 702 duchess
+   notImplemented "Fool's Gold", -- 703 fool's gold
+   notImplemented "Develop", -- 704 develop
+   notImplemented "Oasis", -- 705 oasis
+   notImplemented "Oracle", -- 706 oracle
+   notImplemented "Scheme", -- 707 scheme
+   notImplemented "Tunnel", -- 708 tunnel
    action 709 "Jack of All Trades" 4 jackOfAllTrades,
-   -- 710 noble brigand
-   -- 711 nomad camp
+   notImplemented "Noble Brigand", -- 710 noble brigand
+   notImplemented "Nomad Camp", -- 711 nomad camp
    withInitialSupply
     (carddef 712 "Silk Road" (simpleCost 4) [Victory] (\p -> length (filter isVictory (allCards p)) `quot` 4) pass noTriggers)
-    stdVictorySupply
-   -- 713 spice merchant
-   -- 714 trader
-   -- 715 cache
-   -- 716 cartographer
-   -- 717 embassy
-   -- 718 haggler
-   -- 719 highway
-   -- 720 ill-gotten gains
-   -- 721 inn
-   -- 722 mandarin
-   -- 723 margrave
-   -- 724 stables
-   -- 725 border village
-   -- 726 farmland
+    stdVictorySupply,
+   notImplemented "Spice Merchant", -- 713 spice merchant
+   notImplemented "Trader", -- 714 trader
+   notImplemented "Cache", -- 715 cache
+   notImplemented "Cartographer", -- 716 cartographer
+   notImplemented "Embassy", -- 717 embassy
+   notImplemented "Haggler", -- 718 haggler
+   notImplemented "Highway",-- 719 highway
+   notImplemented "Ill-gotten Gains", -- 720 ill-gotten gains
+   notImplemented "Inn", -- 721 inn
+   notImplemented "Mandarin", -- 722 mandarin
+   notImplemented "Margrave", -- 723 margrave
+   notImplemented "Stables", -- 724 stables
+   notImplemented "Border Village", -- 725 border village
+   notImplemented "Farmland" -- 726 farmland
    ]
 
 jackOfAllTrades :: Action
@@ -625,45 +625,45 @@ jackOfAllTrades = gain silver &&& spyTop &&& drawTo5 &&& optTrash
 -- Dark Ages 8xx
 
 darkAgesCards = map ($ DarkAges)
-  [-- 801 Poor House
-   -- 802 Beggar
-   -- 803 Squire
-   -- 804 Vagrant
-   -- 805 Forager
-   -- 806 Hermit
-   -- 807 Market Square
-   -- 808 Sage
-   -- 809 Storeroom
-   -- 810 Urchin
+  [notImplemented "Poor House", -- 801 Poor House
+   notImplemented "Beggar", -- 802 Beggar
+   notImplemented "Squire", -- 803 Squire
+   notImplemented "Vagrant", -- 804 Vagrant
+   notImplemented "Forager", -- 805 Forager
+   notImplemented "Hermit", -- 806 Hermit
+   notImplemented "Market Square", -- 807 Market Square
+   notImplemented "Sage", -- 808 Sage
+   notImplemented "Storeroom", -- 809 Storeroom
+   notImplemented "Urchin", -- 810 Urchin
    action 811 "Armory" 4 armoryGain,
-   -- 812 Death Cart
+   notImplemented "Death Cart", -- 812 Death Cart
    withInitialSupply
      (carddef 813 "Feodum" (simpleCost 4) [Victory] (\p -> length (filter ((==silver) . typ) (allCards p)) `quot` 3)
         pass
         (Map.singleton TrashTrigger (gain silver &&& gain silver &&& gain silver)))
      stdVictorySupply,
-   -- 814 Fortress
-   -- 815 Ironmonger
-   -- 816 Marauder
-   -- 817 Procession
-   -- 818 Rats
-   -- 819 Scavenger
-   -- 820 Wandering Minstrel
-   -- 821 Band of Misfits
-   -- 822 Bandit Camp
-   -- 823 Catacombs
-   -- 824 Count
-   -- 825 Counterfeit
-   -- 826 Cultist
-   -- 827 Graverobber
-   action 828 "Junk Dealer" 5 (plusCards 1 &&& plusActions 1 &&& plusMoney 1 &&& trashNCards 1 1)
-   -- 829 Knights
-   -- 830 Mystic
-   -- 831 Pillage
-   -- 832 Rebuild
-   -- 833 Rogue
-   -- 834 Altar
-   -- 835 Hunting Grounds
+   notImplemented "Fortress", -- 814 Fortress
+   notImplemented "Ironmonger", -- 815 Ironmonger
+   notImplemented "Marauder", -- 816 Marauder
+   notImplemented "Procession", -- 817 Procession
+   notImplemented "Rats", -- 818 Rats
+   notImplemented "Scavenger", -- 819 Scavenger
+   notImplemented "Wandering Minstrel", -- 820 Wandering Minstrel
+   notImplemented "Band of Misfits", -- 821 Band of Misfits
+   notImplemented "Bandit Camp", -- 822 Bandit Camp
+   notImplemented "Catacombs", -- 823 Catacombs
+   notImplemented "Count", -- 824 Count
+   notImplemented "Counterfeit", -- 825 Counterfeit
+   notImplemented "Cultist", -- 826 Cultist
+   notImplemented "Graverobber", -- 827 Graverobber
+   action 828 "Junk Dealer" 5 (plusCards 1 &&& plusActions 1 &&& plusMoney 1 &&& trashNCards 1 1),
+   notImplemented "Knights", -- 829 Knights
+   notImplemented "Mystic", -- 830 Mystic
+   notImplemented "Pillage", -- 831 Pillage
+   notImplemented "Rebuild", -- 832 Rebuild
+   notImplemented "Rogue", -- 833 Rogue
+   notImplemented "Altar", -- 834 Altar
+   notImplemented "Hunting Grounds" -- 835 Hunting Grounds
   ]
 
 armoryGain player state = decision
@@ -676,12 +676,57 @@ armoryGain player state = decision
 
 -- Guilds 9xx
 
-guildsCards = []
+guildsCards = map ($ Guilds) [
+  notImplemented "Candlestick Maker",
+  notImplemented "Stonemason",
+  notImplemented "Doctor",
+  notImplemented "Masterpiece",
+  notImplemented "Advisor",
+  notImplemented "Plaza",
+  notImplemented "Taxman",
+  notImplemented "Herald",
+  notImplemented "Baker",
+  notImplemented "Butcher",
+  notImplemented "Journeyman",
+  notImplemented "Merchant Guild",
+  notImplemented "Soothsayer"
+  ]
 
 -- Adventures 10xx
 
-adventuresCards = []
+adventuresCards = map ($ Adventures) [
+  notImplemented "Coin of the Realm",
+  notImplemented "Page",
+  notImplemented "Peasant",
+  notImplemented "Ratcatcher",
+  notImplemented "Raze",
+  notImplemented "Amulet",
+  notImplemented "Caravan Guard",
+  notImplemented "Dungeon",
+  notImplemented "Gear",
+  notImplemented "Guide",
+  notImplemented "Duplicate",
+  notImplemented "Magpie",
+  notImplemented "Messenger",
+  notImplemented "Miser",
+  notImplemented "Port",
+  notImplemented "Ranger",
+  notImplemented "Transmogrify",
+  notImplemented "Artificer",
+  notImplemented "Bridge Troll",
+  notImplemented "Distant Lands",
+  notImplemented "Giant",
+  notImplemented "Haunted Woods",
+  notImplemented "Lost City",
+  notImplemented "Relic",
+  notImplemented "Royal Carriage",
+  notImplemented "Storyteller",
+  notImplemented "Swamp Hag",
+  notImplemented "Treasure Trove",
+  notImplemented "Wine Merchant",
+  notImplemented "Hireling"
+  ]
 
 -- Promo 20xx
 
-promoCards = []
+promoCards = map ($ Promo) []

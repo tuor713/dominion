@@ -26,7 +26,7 @@ import Text.Blaze.Internal (MarkupM(Parent))
 
 cardImagePath :: CardDef -> String
 cardImagePath card = "/static/images/cards/"
-  ++ filter (not . (=='\'')) (map (\c -> if c == ' ' then '_' else toLower c) (cardName card))
+  ++ filter (not . (=='\'')) (map (\c -> if c == ' ' || c == '-' then '_' else toLower c) (cardName card))
   ++ ".jpeg"
 
 dataToJavaScriptArray :: (Show a, Show b) => [(a,b)] -> String
@@ -254,10 +254,16 @@ htmlSetupGame =
             H.h3 $ toHtml $ show ed
             H.div H.! A.class_ "ui horizontal selection list" $ do
               forM_ (L.sortOn cardName cards) $ \card ->
-                H.div H.! A.class_ "item" H.! A.onclick "$(this).toggleClass('selected');"
-                      H.! A.id (fromString (cardName card)) $ do
-                  H.img H.! A.style "width: 100px; height: 159px;" H.! A.src (fromString (cardImagePath card))
-                  H.div H.! A.class_ "content" $ toHtml (cardName card)
+                if not (implemented card)
+                then
+                  H.div H.! A.class_ "item notimplemented" $ do
+                    H.img H.! A.style "width: 100px; height: 159px;" H.! A.src (fromString (cardImagePath card))
+                    H.div H.! A.class_ "content" $ toHtml (cardName card)
+                else
+                  H.div H.! A.class_ "item" H.! A.onclick "$(this).toggleClass('selected');"
+                        H.! A.id (fromString (cardName card)) $ do
+                    H.img H.! A.style "width: 100px; height: 159px;" H.! A.src (fromString (cardImagePath card))
+                    H.div H.! A.class_ "content" $ toHtml (cardName card)
 
       H.div $ do
         H.button H.! A.class_ "choice-button"

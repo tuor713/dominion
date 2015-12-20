@@ -70,6 +70,9 @@ data CardDef = CardDef { -- Card id is purely a performance artifact to avoid st
                    canBuy :: GameState -> Bool
                    }
 
+implemented :: CardDef -> Bool
+implemented = (>=0) . cardTypeId
+
 data Card = Card { cardId :: !Int, typ :: !CardDef }
 
 type CardLike = Either Card CardDef
@@ -126,6 +129,8 @@ carddef id name cost types points effect triggers edition = CardDef id name edit
 
 carddefA :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> (Maybe Card -> Action) -> Map.Map Trigger Action -> Edition -> CardDef
 carddefA id name cost types points effect triggers edition = CardDef id name edition cost types points effect (const 10) triggers (const True)
+
+notImplemented name edition = CardDef (-1) name edition (simpleCost 0) [] (\_ -> 0) (\_ -> pass) (const 0) noTriggers (const False)
 
 
 withTrigger :: (Edition -> CardDef) -> Trigger -> Action -> Edition -> CardDef
