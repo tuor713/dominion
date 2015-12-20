@@ -123,26 +123,34 @@ nextStep game (Decision p state dec) = do
 setupGameHandler :: Snap ()
 setupGameHandler = writeHtml htmlSetupGame
 
-data StartGameReq = StartGameReq { gamePlayers :: [String], gameCards :: [String] }
+
+data StartGameReq = StartGameReq { gamePlayers :: [String], gameCards :: [String], gameType :: GameType }
   deriving (Eq,Show)
+
+instance J.FromJSON GameType where
+  parseJSON (J.String s)
+    | s == "colony" = return ColonyGame
+    | otherwise = return StandardGame
+  parseJSON _ = return StandardGame
 
 instance J.FromJSON StartGameReq where
   parseJSON (J.Object v) = StartGameReq <$>
     v J..: "players" <*>
-    v J..: "cards"
+    v J..: "cards" <*>
+    v J..: "type"
   parseJSON _ = empty
 
 startGameHandler :: IORef.IORef GameRepository -> Snap ()
 startGameHandler gamesRepository = do
   body <- readRequestBody 10000
   let req = J.decode body :: Maybe StartGameReq
-  let (players,cards) = maybe (["Alice","Bob"],defaultTableau) (\req -> (gamePlayers req, gameCards req)) req
+  let (players,cards,gameTyp) = maybe (["Alice","Bob"],defaultTableau,StandardGame) (\req -> (gamePlayers req, gameCards req, gameType req)) req
   let tableau = map lookupCard cards
 
   id <- liftIO $ do
     (nextId,games) <- IORef.readIORef gamesRepository
     gen <- newStdGen
-    let (newGame,simState) = runSim (mkGame StandardGame players tableau) gen
+    let (newGame,simState) = runSim (mkGame gameTyp players tableau) gen
 
     aliceVar <- newEmptyMVar
     let mvars = Map.fromList
@@ -177,6 +185,7 @@ instance J.ToJSON Trigger where
   toJSON GainTrigger = J.String "gain"
   toJSON TrashTrigger = J.String "trash"
   toJSON StartOfTurnTrigger = J.String "startOfTurn"
+  toJSON StartOfGameTrigger = J.String "startOfGame"
 
 instance J.ToJSON Location where
   toJSON Supply         = J.toJSON [J.String "supply"]

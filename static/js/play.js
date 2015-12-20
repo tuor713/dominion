@@ -44,14 +44,14 @@ function choices(id,low,high) {
 }
 
 $(function () {
-  $(".checkbox").click(function(){
+  $(".cardbox").click(function(){
     $(this).toggleClass('checked');
   });
 });
 
-function startGame(cards) {
+function startGame(type, cards) {
   $.post("/game/start",
-      JSON.stringify({"players":["Alice","Bob"], "cards":cards}),
+      JSON.stringify({ "players":["Alice","Bob"], "cards":cards, "type":type }),
       function (id) { window.location.href = "/game/"+id +"/decision/Alice?format=html"; },
       'text'
     );
@@ -67,7 +67,7 @@ function start() {
   if (tableau.length != 10) {
     showWarning("Please select exactly 10 cards.");
   } else {
-    startGame(tableau);
+    startGame($("input[name='gametype']:checked").val(), tableau);
   }
 }
 
@@ -88,6 +88,7 @@ function randomStart(cards) {
   } else {
     var remaining = cards.filter(function (card) { return tableau.indexOf(card) == -1; });
     var selected = shuffle(remaining).slice(0,10 - tableau.length);
-    startGame(tableau.concat(selected));
+
+    startGame($("input[name='gametype']:checked").val(), tableau.concat(selected));
   }
 }

@@ -42,7 +42,7 @@ section {
   color: steelblue;
 }
 
-.checkbox.checked {
+.cardbox.checked {
   opacity: 0.4;
   filter: alpha(opacity=40);
 }

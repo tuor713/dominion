@@ -266,7 +266,8 @@ data Trigger =
   BuyTrigger |
   GainTrigger |
   TrashTrigger |
-  StartOfTurnTrigger
+  StartOfTurnTrigger |
+  StartOfGameTrigger
   deriving (Eq, Ord, Show)
 
 -- Numeric generic effect and placeholder effects
@@ -387,20 +388,15 @@ nullState =
               ply = 1,
               finished = False }
 
+toGameState :: GameStep -> Maybe GameState
+toGameState (State state) = Just state
+toGameState _ = Nothing
+
 mkGame :: GameType -> [String] -> [CardDef] -> SimulationT GameState
 mkGame typ names kingdomCards =
   (sequence $ zipWith mkPlayer decks names) >>= \players ->
-    return $
-    GameState { players = Map.fromList $ zip names players,
-                turnOrder = names,
-                piles = pileMap,
-                trashPile = [],
-                turn = newTurn,
-                ply = 1,
-                finished = False
-                }
+    fmap (Maybe.fromJust . toGameState) $ handleAllTriggers StartOfGameTrigger kingdomCards (head names) (protoState players)
   where
-    -- Map.fromList $ map (\c -> (c, initialSupply c playerNo)) (standardCards ++ kingdomCards),
     (pileMap,outId) = foldr
                         (\c (m,id) -> let (cs,id2) = labelCards (replicate (initialSupply c playerNo) c) id
                                       in (Map.insert c cs m, id2))
@@ -414,6 +410,14 @@ mkGame typ names kingdomCards =
     colonyCards = if typ == ColonyGame then [platinum, colony] else []
     potionCards = if any ((0<) . potionCost . cost nullState) kingdomCards then [potion] else []
     playerNo = length names
+    protoState players = GameState { players = Map.fromList $ zip names players,
+                                     turnOrder = names,
+                                     piles = pileMap,
+                                     trashPile = [],
+                                     turn = newTurn,
+                                     ply = 1,
+                                     finished = False
+                                     }
 
 
 -- Combinators

@@ -26,6 +26,7 @@ cSmithy = cardData Map.! "smithy"
 cChancellor = cardData Map.! "chancellor"
 cIsland = cardData Map.! "island"
 cMoat = cardData Map.! "moat"
+cPort = cardData Map.! "port"
 
 -- Generic action elements (potentially move to model)
 
@@ -37,6 +38,9 @@ seqActions :: (a -> Action) -> [a] -> Action
 seqActions _ [] _ state = toSimulation state
 seqActions f (x:xs) p state = f x p state `andThen` seqActions f xs p
 
+eachOtherPlayer :: Action -> Action
+eachOtherPlayer action player state = seqSteps action (opponentNames state player) state
+
 playAttack :: Action -> Action
 playAttack attack attacker state = seqSteps checkAttack (opponentNames state attacker) state
   where
@@ -45,7 +49,6 @@ playAttack attack attacker state = seqSteps checkAttack (opponentNames state att
       | otherwise = decision (ChooseToReact (head moats) AttackTrigger (\b -> if b then toSimulation state else attack op state)) op state
       where
         moats = filter ((==cMoat) . typ) $ hand $ playerByName state op
-
 
 trashNCards :: Int -> Int -> Action
 trashNCards inmin inmax player state =
@@ -480,7 +483,7 @@ prosperityCards = map ($ Prosperity)
   [notImplemented "Loan", -- 501 loan
    notImplemented "Trade Route", -- 502 trade route
    notImplemented "Watchtower", -- 503 watchtower
-   notImplemented "Bishop", -- 504 bishop
+   action 504 "Bishop" 4 (plusMoney 1 &&& plusTokens 1 VictoryToken &&& bishop),
    action 505 "Monument" 4 (plusMoney 2 &&& plusTokens 1 VictoryToken),
    carddefA 506 "Quarry" (simpleCost 4) [Treasure] (const 0) quarryEffect noTriggers,
    notImplemented "Talisman", -- 507 talisman
@@ -505,6 +508,15 @@ prosperityCards = map ($ Prosperity)
    action 524 "King's Court" 7 kingsCourt,
    notImplemented "Peddler" -- 525 peddler
    ]
+
+bishop = trashForGain gainPoints &&& eachOtherPlayer mayTrash
+  where
+    gainPoints card player state = plusTokens (moneyCost (cost state (typ card)) `quot` 2) VictoryToken player state
+    mayTrash op state
+      | null h = toSimulation state
+      | otherwise = optDecision (ChooseCard (EffectTrash unknown (Hand op)) h (\c -> trash c (Hand op) op state)) op state
+      where
+        h = hand $ playerByName state op
 
 quarryEffect Nothing = plusMoney 1
 quarryEffect (Just card) =
@@ -686,14 +698,20 @@ armoryGain player state = decision
 
 guildsCards = map ($ Guilds) [
   action 901 "Candlestick Maker" 2 (plusActions 1 &&& plusBuys 1 &&& plusTokens 1 CoinToken),
-  notImplemented "Stonemason",
-  notImplemented "Doctor",
-  notImplemented "Masterpiece",
-  notImplemented "Advisor",
-  notImplemented "Plaza",
-  notImplemented "Taxman",
-  notImplemented "Herald",
-  notImplemented "Baker",
+  notImplemented "Stonemason", -- 902
+  notImplemented "Doctor", -- 903
+  notImplemented "Masterpiece", -- 904
+  notImplemented "Advisor", -- 905
+  notImplemented "Plaza", -- 906
+  notImplemented "Taxman", -- 907
+  notImplemented "Herald", -- 908
+  withTrigger (action 909 "Baker" 5 (plusCards 1 &&& plusActions 1 &&& plusTokens 1 CoinToken))
+    StartOfGameTrigger
+    (\_ state ->
+      foldr
+        (\name sim -> sim `andThen` plusTokens 1 CoinToken name)
+        (return $ State state)
+        (map name $ Map.elems $ players state)),
   notImplemented "Butcher",
   notImplemented "Journeyman",
   notImplemented "Merchant Guild",
@@ -703,21 +721,23 @@ guildsCards = map ($ Guilds) [
 -- Adventures 10xx
 
 adventuresCards = map ($ Adventures) [
-  notImplemented "Coin of the Realm",
-  notImplemented "Page",
-  notImplemented "Peasant",
-  notImplemented "Ratcatcher",
-  notImplemented "Raze",
-  notImplemented "Amulet",
-  notImplemented "Caravan Guard",
-  notImplemented "Dungeon",
-  notImplemented "Gear",
-  notImplemented "Guide",
-  notImplemented "Duplicate",
-  notImplemented "Magpie",
-  notImplemented "Messenger",
-  notImplemented "Miser",
-  notImplemented "Port",
+  notImplemented "Coin of the Realm", -- 1001
+  notImplemented "Page", -- 1002
+  notImplemented "Peasant", -- 1003
+  notImplemented "Ratcatcher", -- 1004
+  notImplemented "Raze", -- 1005
+  notImplemented "Amulet", -- 1006
+  notImplemented "Caravan Guard", -- 1007
+  notImplemented "Dungeon", -- 1008
+  notImplemented "Gear", -- 1009
+  notImplemented "Guide", -- 1010
+  notImplemented "Duplicate", -- 1011
+  notImplemented "Magpie", -- 1012
+  notImplemented "Messenger", -- 1013
+  notImplemented "Miser", -- 1014
+  withTrigger (action 1015 "Port" 4 (plusCards 1 &&& plusActions 2))
+    BuyTrigger
+    (gain cPort),
   notImplemented "Ranger",
   notImplemented "Transmogrify",
   notImplemented "Artificer",

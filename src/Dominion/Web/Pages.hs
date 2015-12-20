@@ -122,7 +122,7 @@ decisionHtml (ChooseCards effect choices (lo,hi) _) =
       forM_ choices $ \card -> do
         H.input H.! A.type_ "image"
                 H.! A.name (fromString (cardName (typ card)))
-                H.! A.class_ "checkbox"
+                H.! A.class_ "cardbox"
                 H.! A.style "margin: 5px; width: 100px; height: 159px"
                 H.! A.src (fromString (cardImagePath (typ card)))
     if length choices <= hi
@@ -239,6 +239,8 @@ htmlFinished state infos =
         forM_ (reverse $ L.sortOn (points . snd) $ Map.toList (players state)) $ \(pid,player) ->
           H.section $ do
             H.h4 $ toHtml $ "Player - " ++ pid ++ ": " ++ show (points player)
+            when (Map.findWithDefault 0 VictoryToken (tokens player) > 0) $ do
+              H.p $ toHtml ("Victory tokens: " ++ show (Map.findWithDefault 0 VictoryToken (tokens player)))
             H.h5 "Cards: "
             showCards (cardListToMap (allCards player))
 
@@ -257,6 +259,20 @@ htmlSetupGame =
     H.div H.! A.class_ "one wide column" $ ""
     H.div H.! A.class_ "fourteen wide column" $ do
       H.div H.! A.id "flash" $ ""
+
+      H.div H.! A.class_ "ui segment" $ do
+        H.div H.! A.class_ "ui form" $ do
+          H.div H.! A.class_ "inline fields" $ do
+            H.label $ "Game type:"
+            H.div H.! A.class_ "field" $ do
+              H.div H.! A.class_ "ui radio checkbox" $ do
+                H.input H.! A.type_ "radio" H.! A.name "gametype" H.! A.value "standard" H.! A.checked "checked"
+                H.label "Standard"
+            H.div H.! A.class_ "field" $ do
+              H.div H.! A.class_ "ui radio checkbox" $ do
+                H.input H.! A.type_ "radio" H.! A.name "gametype" H.! A.value "colony"
+                H.label "Colony"
+
       H.h3 "Choose tableau"
 
       forM_ [Base, Intrigue, Seaside, Alchemy, Prosperity, Cornucopia, Hinterlands, DarkAges, Guilds, Adventures, Promo] $ \ed -> do
