@@ -58,12 +58,22 @@ template link inner =
   H.html $ do
     htmlHeader
     H.body $ do
-      H.div H.! A.class_ "ui inverted segment" $ do
-        H.div H.! A.class_ "ui inverted secondary menu" $ do
-          forM_ [("Home","/"), ("Play","/game/play"), ("Simulation","/simulation")] $ \(label,href) ->
-            H.a H.! A.class_ (if href == link then "active item" else "item") H.! A.href (fromString href) $ label
+      H.div H.! A.class_ "ui fixed inverted menu" $ do
+        H.div H.! A.class_ "ui container" $ do
+          H.a H.! A.class_ (if "/" == link then "active item" else "item") H.! A.href "/" $ "Home"
+
+          H.div H.! A.class_ "ui simple dropdown item" $ do
+            "Play"
+            H.i H.! A.class_ "dropdown icon" $ ""
+            H.div H.! A.class_ "menu" $ do
+              H.a H.! A.class_ "item" H.! A.href "/game/play" $ "Choose tableau"
+              H.a H.! A.class_ "item" H.! A.href "/game/suggested" $ "Pick pre-made tableau"
+
+          H.a H.! A.class_ (if "/simulation" == link then "active item" else "item") H.! A.href "/simulation" $ "Simulation"
+
       H.div H.! A.class_ "ui grid" $ do
         inner
+
       H.footer H.! A.class_ "ui inverted vertical footer segment" $ do
         H.div H.! A.class_ "ui inverted segment" $ do
           H.p $ toHtml ("Powered by Snap (" ++ C8.unpack snapServerVersion ++ ")")
@@ -85,25 +95,25 @@ decisionHtml :: Decision -> H.Html
 decisionHtml (Optional inner _) =
   H.div $ do
     decisionHtml inner
-    H.button H.! A.class_ "choice-button" H.! A.onclick "pass();" $ "Pass"
+    H.button H.! A.class_ "ui button" H.! A.onclick "pass();" $ "Pass"
 
 decisionHtml (ChooseNumber effect (lo,hi) _) =
   H.div $ do
     toHtml $ "Choose how many to use for " ++ show effect
     forM_ [lo..hi] $ \n ->
-      H.button H.! A.class_ "choice-button" H.! A.onclick (fromString ("choose('" ++ show n ++ "');")) $ fromString (show n)
+      H.button H.! A.class_ "ui button" H.! A.onclick (fromString ("choose('" ++ show n ++ "');")) $ fromString (show n)
 
 decisionHtml (ChooseToUse effect _) =
   H.div $ do
     toHtml $ "Use " ++ show effect
-    H.button H.! A.class_ "choice-button" H.! A.onclick "choose('true');" $ "Yes"
-    H.button H.! A.class_ "choice-button" H.! A.onclick "choose('false');" $ "No"
+    H.button H.! A.class_ "ui button" H.! A.onclick "choose('true');" $ "Yes"
+    H.button H.! A.class_ "ui button" H.! A.onclick "choose('false');" $ "No"
 
 decisionHtml (ChooseToReact card trigger _) =
   H.div $ do
     toHtml $ "Use " ++ show card ++ "'s reaction to respond to " ++ show trigger
-    H.button H.! A.class_ "choice-button" H.! A.onclick "choose('true');" $ "Yes"
-    H.button H.! A.class_ "choice-button" H.! A.onclick "choose('false');" $ "No"
+    H.button H.! A.class_ "ui button" H.! A.onclick "choose('true');" $ "Yes"
+    H.button H.! A.class_ "ui button" H.! A.onclick "choose('false');" $ "No"
 
 decisionHtml (ChooseCard effect choices _) =
   H.div $ do
@@ -126,11 +136,11 @@ decisionHtml (ChooseCards effect choices (lo,hi) _) =
                 H.! A.style "margin: 5px; width: 100px; height: 159px"
                 H.! A.src (fromString (cardImagePath (typ card)))
     if length choices <= hi
-      then H.button H.! A.class_ "choice-button"
+      then H.button H.! A.class_ "ui button"
                     H.! A.onclick (fromString ("choose(\""++ L.intercalate "," (map (cardName . typ) choices) ++ "\");"))
                     $ "All"
       else return ()
-    H.button H.! A.class_ "choice-button"
+    H.button H.! A.class_ "ui button"
              H.! A.onclick (fromString ("choices('choices'," ++ show lo ++ "," ++ show hi ++ ");")) $ "Go"
 
 decisionHtml (ChooseEffects no effects _) =
@@ -141,7 +151,7 @@ decisionHtml (ChooseEffects no effects _) =
         H.div H.! A.class_ "ui checkbox" $ do
           H.input H.! A.type_ "checkbox" H.! A.name (fromString (show no))
           H.label $ toHtml (show effect)
-    H.button H.! A.class_ "choice-button"
+    H.button H.! A.class_ "ui button"
              H.! A.onclick (fromString ("choices('choices'," ++ show no ++ "," ++ show no ++ ");")) $ "Go"
 
 
@@ -262,6 +272,7 @@ htmlSetupGame =
 
       H.div H.! A.class_ "ui segment" $ do
         H.div H.! A.class_ "ui form" $ do
+
           H.div H.! A.class_ "inline fields" $ do
             H.label $ "Game type:"
             H.div H.! A.class_ "field" $ do
@@ -272,6 +283,13 @@ htmlSetupGame =
               H.div H.! A.class_ "ui radio checkbox" $ do
                 H.input H.! A.type_ "radio" H.! A.name "gametype" H.! A.value "colony"
                 H.label "Colony"
+
+        H.div $ do
+          H.button H.! A.class_ "ui button"
+                   H.! A.onclick (fromString ("start();")) $ "Go"
+          H.button H.! A.class_ "ui button"
+                   H.! A.onclick (fromString ("randomStart([\"" ++ L.intercalate "\",\"" (map cardName $ filter implemented kingdomCards) ++ "\"]);")) $ "Random"
+
 
       H.h3 "Choose tableau"
 
@@ -293,11 +311,28 @@ htmlSetupGame =
                     H.img H.! A.style "width: 100px; height: 159px;" H.! A.src (fromString (cardImagePath card))
                     H.div H.! A.class_ "content" $ toHtml (cardName card)
 
-      H.div $ do
-        H.button H.! A.class_ "choice-button"
-                 H.! A.onclick (fromString ("start();")) $ "Go"
-        H.button H.! A.class_ "choice-button"
-                 H.! A.onclick (fromString ("randomStart([\"" ++ L.intercalate "\",\"" (map cardName $ filter implemented kingdomCards) ++ "\"]);")) $ "Random"
+htmlSuggestedTableaus :: [(String, [String])] -> H.Html
+htmlSuggestedTableaus tableaus =
+  template "/game/suggested" $ do
+    H.div H.! A.class_ "one wide column" $ ""
+
+    H.div H.! A.class_ "fourteen wide column" $ do
+      forM_ tableaus $ \(name, cards) -> do
+        H.div H.! A.class_ "ui segment" $ do
+          H.h3 $ toHtml name
+          H.div H.! A.class_ "ui horizontal selection list" $ do
+            forM_ cards $ \card -> do
+              let c = (lookupCard card)
+              H.div H.! A.class_ (if not (implemented c) then "item notimplemented" else "item") $ do
+                H.img H.! A.style "width: 100px; height: 159px;" H.! A.src (fromString (cardImagePath c))
+                H.div H.! A.class_ "content" $ toHtml (cardName c)
+          when (all implemented $ map lookupCard cards) $ do
+            H.div $ do
+              H.button H.! A.class_ "ui button"
+                       H.! A.onclick (fromString ("startGame('standard',[\"" ++ L.intercalate "\",\"" cards ++ "\"]);")) $ "Go"
+
+
+
 
 
 htmlSimulation :: [CardDef] -> Stats -> H.Html

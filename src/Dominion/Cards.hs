@@ -22,11 +22,12 @@ maybeCard name = Map.lookup (map toLower name) cardData
 lookupCard :: String -> CardDef
 lookupCard name = cardData Map.! (map toLower name)
 
-cSmithy = cardData Map.! "smithy"
-cChancellor = cardData Map.! "chancellor"
-cIsland = cardData Map.! "island"
-cMoat = cardData Map.! "moat"
-cPort = cardData Map.! "port"
+cSmithy        = cardData Map.! "smithy"
+cChancellor    = cardData Map.! "chancellor"
+cIsland        = cardData Map.! "island"
+cMoat          = cardData Map.! "moat"
+cPort          = cardData Map.! "port"
+cBorderVillage = cardData Map.! "border village"
 
 -- Generic action elements (potentially move to model)
 
@@ -73,6 +74,19 @@ trashForGain gain player state
     h = hand $ playerByName state player
     cont card = (trash card (Hand player) &&& gain card) player state
 
+gainUpto :: Int -> Action
+gainUpto x player state
+  | null candidates = toSimulation state
+  | otherwise =
+    decision
+      (ChooseCard (EffectGain unknownDef (Discard player))
+        (map (`topOfSupply` state) candidates)
+        (\c -> gain (typ c) player state))
+      player state
+  where
+    candidates = (affordableCards (simpleCost x) state)
+
+
 remodelX :: Int -> Action
 remodelX x = trashForGain chooseToGain
   where
@@ -84,6 +98,7 @@ remodelX x = trashForGain chooseToGain
                     (\c -> gain (typ c) player s2))
         player s2
     candidates trashed state = affordableCards (addCost (cost state (typ trashed)) (simpleCost x)) state
+
 
 
 enactEffect :: Effect -> Action
@@ -587,7 +602,7 @@ hinterlandCards = map ($ Hinterlands)
    notImplemented "Duchess", -- 702 duchess
    notImplemented "Fool's Gold", -- 703 fool's gold
    notImplemented "Develop", -- 704 develop
-   action 705 "Oasis" 3 (plusCards 1 &&& plusActions 1 &&& plusMoney 1 &&& discardNCards 1), -- 705 oasis
+   action 705 "Oasis" 3 (plusCards 1 &&& plusActions 1 &&& plusMoney 1 &&& discardNCards 1),
    notImplemented "Oracle", -- 706 oracle
    notImplemented "Scheme", -- 707 scheme
    notImplemented "Tunnel", -- 708 tunnel
@@ -609,7 +624,9 @@ hinterlandCards = map ($ Hinterlands)
    notImplemented "Mandarin", -- 722 mandarin
    notImplemented "Margrave", -- 723 margrave
    notImplemented "Stables", -- 724 stables
-   notImplemented "Border Village", -- 725 border village
+   withTrigger (action 725 "Border Village" 6 (plusCards 1 &&& plusActions 2))
+    GainTrigger
+    (\p s -> gainUpto ((moneyCost (cost s cBorderVillage)) - 1) p s),
    notImplemented "Farmland" -- 726 farmland
    ]
 
@@ -738,21 +755,21 @@ adventuresCards = map ($ Adventures) [
   withTrigger (action 1015 "Port" 4 (plusCards 1 &&& plusActions 2))
     BuyTrigger
     (gain cPort),
-  notImplemented "Ranger",
-  notImplemented "Transmogrify",
-  notImplemented "Artificer",
-  notImplemented "Bridge Troll",
-  notImplemented "Distant Lands",
-  notImplemented "Giant",
-  notImplemented "Haunted Woods",
-  notImplemented "Lost City",
-  notImplemented "Relic",
-  notImplemented "Royal Carriage",
-  notImplemented "Storyteller",
-  notImplemented "Swamp Hag",
-  notImplemented "Treasure Trove",
-  notImplemented "Wine Merchant",
-  notImplemented "Hireling"
+  notImplemented "Ranger", -- 1016
+  notImplemented "Transmogrify", -- 1017
+  notImplemented "Artificer", -- 1018
+  notImplemented "Bridge Troll", -- 1019
+  notImplemented "Distant Lands", -- 1020
+  notImplemented "Giant", -- 1021
+  notImplemented "Haunted Woods", -- 1022
+  notImplemented "Lost City", -- 1023
+  notImplemented "Relic", -- 1024
+  notImplemented "Royal Carriage", -- 1025
+  notImplemented "Storyteller", -- 1026
+  notImplemented "Swamp Hag", -- 1027
+  carddef 1028 "Treasure Trove" (simpleCost 5) [Treasure] noPoints (plusMoney 2 &&& gain gold &&& gain copper) noTriggers,
+  notImplemented "Wine Merchant", -- 1029
+  notImplemented "Hireling" -- 1030
   ]
 
 -- Promo 20xx
