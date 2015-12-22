@@ -63,7 +63,7 @@ template link inner =
           H.a H.! A.class_ (if "/" == link then "active item" else "item") H.! A.href "/" $ "Home"
 
           H.div H.! A.class_ "ui simple dropdown item" $ do
-            "Play"
+            _ <- "Play"
             H.i H.! A.class_ "dropdown icon" $ ""
             H.div H.! A.class_ "menu" $ do
               H.a H.! A.class_ "item" H.! A.href "/game/play" $ "Choose tableau"
