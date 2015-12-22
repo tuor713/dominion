@@ -109,6 +109,14 @@ whileInPlay inner trigger effect (Left card) cont player state
     inp = inPlay $ playerByName state player
 whileInPlay _ _ _ _ cont player state = cont player state
 
+whileInHand :: TriggerHandler -> TriggerHandler
+whileInHand inner trigger effect (Left card) cont player state
+  | card `elem` inp = inner trigger effect (Left card) cont player state
+  | otherwise = cont player state
+  where
+    inp = hand $ playerByName state player
+whileInHand _ _ _ _ cont player state = cont player state
+
 combineHandlers :: TriggerHandler -> TriggerHandler -> TriggerHandler
 combineHandlers h1 h2 trigger effect source cont = h1 trigger effect source (h2 trigger effect source cont)
 
@@ -553,6 +561,16 @@ moveFrom c Trash state              = state { trashPile = L.delete c $ trashPile
 moveFrom c Supply state             = state { piles = Map.adjust tail (typ c) (piles state) }
 moveFrom c (Mat player mat) state   = updatePlayer state player (\p -> p { mats = Map.adjust (L.delete c) mat (mats p) })
 
+getCards :: Location -> GameState -> [Card]
+getCards (Hand player) state = hand $ playerByName state player
+getCards (Discard player) state = discardPile $ playerByName state player
+getCards (TopOfDeck player) state = take 1 $ deck $ playerByName state player
+getCards InPlay state = inPlay $ activePlayer state
+getCards InPlayDuration state = Either.lefts $ inPlayDuration $ activePlayer state
+getCards Trash state = trashPile state
+getCards Supply state = concat $ Map.elems (piles state)
+getCards (Mat player mat) state = Map.findWithDefault [] mat (mats $ playerByName state player)
+
 addDurationEffect :: CardDef -> GameState -> GameState
 addDurationEffect def state =
   updatePlayer state (name (activePlayer state)) (\p -> p { inPlayDuration = (Right def) : inPlayDuration p })
@@ -774,14 +792,21 @@ put card source target _ state = toSimulation $ transfer card source target stat
 gainFrom :: Card -> Location -> Action
 gainFrom card source player state =
   info AllPlayers (player ++ " gains " ++ cardName (typ card)) >>
-  handleTriggers GainTrigger (Left card) (EffectGainFrom card source (Discard player)) (put card source (Discard player))
+  handleAllTriggers GainTrigger
+    ((Left card):map Left (hand (playerByName state player)))
+    (EffectGainFrom card source (Discard player))
+    (put card source (Discard player))
     player state
 
 gainTo :: CardDef -> Location -> Action
 gainTo card target player state
   | inSupply state card =
     info AllPlayers (player ++ " gains " ++ cardName card) >>
-    handleTriggers GainTrigger (Right card) (EffectGain card target) transferT player state
+    handleAllTriggers GainTrigger
+                      ((Right card):map Left (hand (playerByName state player)))
+                      (EffectGain card target)
+                      transferT
+                      player state
   | otherwise = toSimulation state
   where
     transferT _ state = toSimulation $ transfer (topOfSupply card state) Supply target state

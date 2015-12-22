@@ -104,6 +104,8 @@ enactEffect (EffectPlusMoney no) = plusMoney no
 enactEffect (EffectTrashNo no) = trashNCards no no
 enactEffect (EffectDiscardNo no) = discardNCards no
 enactEffect (EffectGain def to) = gainTo def to
+enactEffect (EffectPut card from to) = put card from to
+enactEffect (EffectTrash card from) = trash card from
 enactEffect _ = error "Effect not implemented"
 
 enactEffects :: [Effect] -> Action
@@ -520,7 +522,7 @@ universityGain player state =
 prosperityCards = map ($ Prosperity)
   [notImplemented "Loan", -- 501 loan
    notImplemented "Trade Route", -- 502 trade route
-   notImplemented "Watchtower", -- 503 watchtower
+   carddef 503 "Watchtower" (simpleCost 3) [Action, Reaction] noPoints watchtower (whileInHand watchtowerTrigger),
    action 504 "Bishop" 4 (plusMoney 1 &&& plusTokens 1 VictoryToken &&& bishop),
    action 505 "Monument" 4 (plusMoney 2 &&& plusTokens 1 VictoryToken),
    carddefA 506 "Quarry" (simpleCost 4) [Treasure] (const 0) quarryEffect noTriggers,
@@ -546,6 +548,27 @@ prosperityCards = map ($ Prosperity)
    action 524 "King's Court" 7 kingsCourt,
    notImplemented "Peddler" -- 525 peddler
    ]
+
+watchtower player state
+  | length h >= 6 = toSimulation state
+  | otherwise = plusCards (6 - length h) player state
+  where
+    h = hand $ playerByName state player
+
+watchtowerReplay :: CardDef -> Location -> Action
+watchtowerReplay def loc player state
+  | null cands = toSimulation state
+  | otherwise = chooseEffects 1 [EffectTrash (head cands) loc, EffectPut (head cands) loc (TopOfDeck player)] enactEffects player state
+  where
+    cands = filter ((==def) . typ) $ getCards loc state
+
+watchtowerTrigger :: TriggerHandler
+watchtowerTrigger GainTrigger (EffectGain def to) (Left w) cont =
+  cont &&& reveal [w] &&& \player state -> decision (ChooseToReact w GainTrigger (\b -> if b then watchtowerReplay def to player state else toSimulation state)) player state
+watchtowerTrigger GainTrigger (EffectGainFrom card _ to) (Left w) cont =
+  cont &&& reveal [w] &&& \player state -> decision (ChooseToReact w GainTrigger (\b -> if b then watchtowerReplay (typ card) to player state else toSimulation state)) player state
+
+watchtowerTrigger _ _ _ cont = cont
 
 bank player state = plusMoney (length ts) player state
   where
