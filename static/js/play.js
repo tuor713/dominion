@@ -21,12 +21,14 @@ function pass() {
   choose('');
 }
 
+var cardSelection = [];
+
 function choices(id,low,high) {
   var choices = [];
 
-  $("#"+id+" input.checked").each(function () {
-    choices.push($(this).attr('name'));
-  });
+  for (var i=0; i<cardSelection.length; i++) {
+    choices.push($(cardSelection[i]).attr('name'));
+  }
 
   $("#"+id+" input:checked").each(function () {
     choices.push($(this).attr('name'));
@@ -42,7 +44,14 @@ function choices(id,low,high) {
 }
 
 $(function () {
-  $(".cardbox").click(function(){
+  $(".cardbox").click(function() {
+    var idx = cardSelection.indexOf(this);
+    var it = this;
+    if (idx != -1) {
+      cardSelection = cardSelection.filter(function (e) { return e != it;});
+    } else {
+      cardSelection.push(this);
+    }
     $(this).toggleClass('checked');
   });
 });

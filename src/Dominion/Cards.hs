@@ -345,7 +345,7 @@ intrigueCards = map ($ Intrigue)
 
 baron :: Action
 baron player state
-  | null estates =
+  | not (null estates) =
     decision (ChooseToUse (EffectDiscard (head estates) (Hand player))
                              (\b -> if b
                                     then (discard (head estates) (Hand player) &&& plusMoney 4) player state
@@ -524,7 +524,7 @@ prosperityCards = map ($ Prosperity)
    action 504 "Bishop" 4 (plusMoney 1 &&& plusTokens 1 VictoryToken &&& bishop),
    action 505 "Monument" 4 (plusMoney 2 &&& plusTokens 1 VictoryToken),
    carddefA 506 "Quarry" (simpleCost 4) [Treasure] (const 0) quarryEffect noTriggers,
-   notImplemented "Talisman", -- 507 talisman
+   withTrigger (treasure 507 "Talisman" 4 1) BuyTrigger talismanTrigger,
    action 508 "Worker's Village" 4 (plusCards 1 &&& plusActions 2 &&& plusBuys 1),
    action 509 "City" 5 city,
    notImplemented "Contraband", -- 510 contraband
@@ -540,12 +540,16 @@ prosperityCards = map ($ Prosperity)
     (action 519 "Grand Market" 6 (plusCards 1 &&& plusActions 1 &&& plusBuys 1 &&& plusMoney 2))
     (\state -> not $ copper `elem` (map typ (inPlay (activePlayer state)))),
    withTrigger (treasure 520 "Hoard" 6 2) BuyTrigger hoardTrigger,
-   notImplemented "Bank", -- 521 bank
+   carddef 521 "Bank" (simpleCost 7) [Treasure] noPoints bank noTriggers,
    action 522 "Expand" 7 (remodelX 3),
    notImplemented "Forge", -- 523 forge
    action 524 "King's Court" 7 kingsCourt,
    notImplemented "Peddler" -- 525 peddler
    ]
+
+bank player state = plusMoney (length ts) player state
+  where
+    ts = filter isTreasure $ inPlay $ playerByName state player
 
 bishop = trashForGain gainPoints &&& eachOtherPlayer mayTrash
   where
@@ -561,8 +565,16 @@ hoardTrigger (Left card) (EffectBuy def) player state
   | otherwise = toSimulation state
   where
     inp = inPlay $ playerByName state player
-
 hoardTrigger _ _ _ s = toSimulation s
+
+talismanTrigger (Left card) (EffectBuy def) player state
+  | card `elem` inp && not (hasType def Victory) && smallerEqCost (cost state def) (simpleCost 4) =
+    gain def player state
+  | otherwise = toSimulation state
+  where
+    inp = inPlay $ playerByName state player
+
+talismanTrigger _ _ _ s = toSimulation s
 
 quarryEffect Nothing = plusMoney 1
 quarryEffect (Just card) =
