@@ -66,7 +66,7 @@ data CardDef = CardDef { -- Card id is purely a performance artifact to avoid st
                    cardPoints :: !(Player -> Int),
                    onPlay :: !(Maybe Card -> Action),
                    initialSupply :: Int -> Int,
-                   triggers :: Map.Map Trigger (CardLike -> Effect -> Action),
+                   triggers :: TriggerHandler,
                    canBuy :: GameState -> Bool
                    }
 
@@ -96,13 +96,54 @@ instance Ord Card where
   c1 <= c2 = cardId c1 <= cardId c2
 
 
+type TriggerHandler = Trigger -> Effect -> CardLike -> Action -> Action
+
+nullHandler :: TriggerHandler
+nullHandler _ _ _ cont = cont
+
+whileInPlay :: TriggerHandler -> TriggerHandler
+whileInPlay inner trigger effect (Left card) cont player state
+  | card `elem` inp = inner trigger effect (Left card) cont player state
+  | otherwise = cont player state
+  where
+    inp = inPlay $ playerByName state player
+whileInPlay _ _ _ _ cont player state = cont player state
+
+combineHandlers :: TriggerHandler -> TriggerHandler -> TriggerHandler
+combineHandlers h1 h2 trigger effect source cont = h1 trigger effect source (h2 trigger effect source cont)
+
+onBuy :: (CardDef -> Action) -> TriggerHandler
+onBuy action BuyTrigger (EffectBuy def) _ cont = (action def) &&& cont
+onBuy _ _ _ _ cont = cont
+
+onBuySelf :: Action -> TriggerHandler
+onBuySelf action BuyTrigger (EffectBuy c1) (Right c2) cont = if c1 == c2 then action &&& cont else cont
+onBuySelf _ _ _ _ cont = cont
+
+onGainSelf :: Action -> TriggerHandler
+onGainSelf action GainTrigger (EffectGainFrom c1 _ _) (Left c2) cont = if c1 == c2 then action &&& cont else cont
+onGainSelf action GainTrigger (EffectGain d1 _) (Right d2) cont = if d1 == d2 then action &&& cont else cont
+onGainSelf _ _ _ _ cont = cont
+
+onTrashSelf :: Action -> TriggerHandler
+onTrashSelf action TrashTrigger (EffectTrash c1 _) (Left c2) cont = if c1 == c2 then action &&& cont else cont
+onTrashSelf _ _ _ _ cont = cont
+
+onStartOfTurn :: Action -> TriggerHandler
+onStartOfTurn action StartOfTurnTrigger _ _ cont = action &&& cont
+onStartOfTurn _ _ _ _ cont = cont
+
+onStartOfGame :: Action -> TriggerHandler
+onStartOfGame action StartOfGameTrigger _ _ cont = action &&& cont
+onStartOfGame _ _ _ _ cont = cont
+
 -- Card definition helpers
 
 noPoints :: a -> Int
 noPoints = const 0
 
-noTriggers :: Map.Map Trigger (CardLike -> Effect -> Action)
-noTriggers = Map.empty
+noTriggers :: TriggerHandler
+noTriggers = nullHandler
 
 -- TODO refactor these to use carddef* instead
 treasure :: Int -> String -> Int -> Int -> Edition -> CardDef
@@ -116,7 +157,7 @@ actionA id name cost effect edition = CardDef id name edition (simpleCost cost) 
 
 duration :: Int -> String -> Int -> Action -> Action -> Edition -> CardDef
 duration id name cost effect startOfTurn edition =
-  CardDef id name edition (simpleCost cost) [Action, Duration] noPoints  (\_ -> effect) (const 10) (Map.singleton StartOfTurnTrigger (\_ _ -> startOfTurn)) (const True)
+  CardDef id name edition (simpleCost cost) [Action, Duration] noPoints  (\_ -> effect) (const 10) (onStartOfTurn startOfTurn) (const True)
 
 attack :: Int -> String -> Int -> Action -> Edition -> CardDef
 attack id name cost effect edition = CardDef id name edition (simpleCost cost) [Action, Attack] noPoints (\_ -> effect) (const 10) noTriggers (const True)
@@ -124,17 +165,17 @@ attack id name cost effect edition = CardDef id name edition (simpleCost cost) [
 victory :: Int -> String -> Int -> Int -> Edition -> CardDef
 victory id name cost points edition = CardDef id name edition (simpleCost cost) [Victory] (const points) (\_ -> pass) (const 10) noTriggers (const True)
 
-carddef :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> Action -> Map.Map Trigger (CardLike -> Effect -> Action) -> Edition -> CardDef
+carddef :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> Action -> TriggerHandler -> Edition -> CardDef
 carddef id name cost types points effect triggers edition = CardDef id name edition cost types points (\_ -> effect) (const 10) triggers (const True)
 
-carddefA :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> (Maybe Card -> Action) -> Map.Map Trigger (CardLike -> Effect -> Action) -> Edition -> CardDef
+carddefA :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> (Maybe Card -> Action) -> TriggerHandler -> Edition -> CardDef
 carddefA id name cost types points effect triggers edition = CardDef id name edition cost types points effect (const 10) triggers (const True)
 
 notImplemented name edition = CardDef (-1) name edition (simpleCost 0) [] (\_ -> 0) (\_ -> pass) (const 0) noTriggers (const False)
 
 
-withTrigger :: (Edition -> CardDef) -> Trigger -> (CardLike -> Effect -> Action) -> Edition -> CardDef
-withTrigger cardgen trigger action ed = card { triggers = Map.insert trigger action (triggers card) }
+withTrigger :: (Edition -> CardDef) -> TriggerHandler -> Edition -> CardDef
+withTrigger cardgen trigger ed = card { triggers = trigger }
   where
     card = cardgen ed
 
@@ -401,6 +442,7 @@ mkGame typ names kingdomCards =
         StartOfGameTrigger
         (map Right kingdomCards)
         NullEffect
+        pass
         (head names)
         (protoState players)
   where
@@ -709,20 +751,22 @@ playAll :: [Card] -> Action
 playAll [] _ state = toSimulation state
 playAll (c:cs) player state = play c player state `andThen` playAll cs player
 
-getTrigger :: CardLike -> Trigger -> Effect -> Action
-getTrigger (Left card) trigger = Map.findWithDefault (\_ _ -> pass) trigger (triggers (typ card)) $ Left card
-getTrigger (Right def) trigger = Map.findWithDefault (\_ _ -> pass) trigger (triggers def) $ Right def
+getTrigger :: CardLike -> Trigger -> Effect -> Action -> Action
+getTrigger (Left card) trigger effect cont = (triggers (typ card)) trigger effect (Left card) cont
+getTrigger (Right def) trigger effect cont = (triggers def) trigger effect (Right def) cont
 
 -- partial function, check supply first!
 topOfSupply :: CardDef -> GameState -> Card
 topOfSupply card state = head $ (piles state) Map.! card
 
-handleTriggers :: Trigger -> CardLike -> Effect -> Action
+handleTriggers :: Trigger -> CardLike -> Effect -> Action -> Action
 handleTriggers trigger card = getTrigger card trigger
 
-handleAllTriggers :: Trigger -> [CardLike] -> Effect -> Action
-handleAllTriggers trigger cards effect =
-  foldr (&&&) pass $ map (\c -> getTrigger c trigger effect) cards
+handleAllTriggers :: Trigger -> [CardLike] -> Effect -> Action -> Action
+handleAllTriggers trigger cards effect cont =
+  foldr (\c cont -> getTrigger c trigger effect cont)
+        cont
+        cards
 
 put :: Card -> Location -> Location -> Action
 put card source target _ state = toSimulation $ transfer card source target state
@@ -730,15 +774,14 @@ put card source target _ state = toSimulation $ transfer card source target stat
 gainFrom :: Card -> Location -> Action
 gainFrom card source player state =
   info AllPlayers (player ++ " gains " ++ cardName (typ card)) >>
-  (handleTriggers GainTrigger (Left card) (EffectGainFrom card source (Discard player))
-   &&& put card source (Discard player))
+  handleTriggers GainTrigger (Left card) (EffectGainFrom card source (Discard player)) (put card source (Discard player))
     player state
 
 gainTo :: CardDef -> Location -> Action
 gainTo card target player state
   | inSupply state card =
     info AllPlayers (player ++ " gains " ++ cardName card) >>
-    (handleTriggers GainTrigger (Right card) (EffectGain card target) &&& transferT) player state
+    handleTriggers GainTrigger (Right card) (EffectGain card target) transferT player state
   | otherwise = toSimulation state
   where
     transferT _ state = toSimulation $ transfer (topOfSupply card state) Supply target state
@@ -752,26 +795,22 @@ reveal cards player state = info AllPlayers (player ++ " reveals " ++ summarizeC
 buy :: CardDef -> Action
 buy card player state =
   info AllPlayers (player ++ " buys " ++ cardName card) >>
-  (handleAllTriggers BuyTrigger ((Right card):map Left (inPlay $ playerByName state player)) (EffectBuy card) &&& gain card)
+  handleAllTriggers BuyTrigger ((Right card):map Left (inPlay $ playerByName state player)) (EffectBuy card) (gain card)
     player state
 
 trash :: Card -> Location -> Action
 trash card source player state =
   info AllPlayers (player ++ " trashes " ++ cardName (typ card)) >>
-  (handleTriggers TrashTrigger (Left card) (EffectTrash card source) &&& transferT) player state
+  handleTriggers TrashTrigger (Left card) (EffectTrash card source) transferT player state
   where
     transferT _ state = toSimulation $ transfer card source Trash state
 
 trashAll :: [Card] -> Location -> Action
 trashAll cards source player state =
-  info AllPlayers (player ++ " trashes " ++ summarizeCards cards) >> (foldr (&&&) transferT ts) player state
+  info AllPlayers (player ++ " trashes " ++ summarizeCards cards) >>
+  (foldr (\c cont -> (triggers (typ c)) TrashTrigger (EffectTrash c source) (Left c) cont) transferT cards) player state
   where
-    transferT :: Action
     transferT _ state = toSimulation $ foldr (\c s -> transfer c source Trash s) state cards
-    ts :: [Action]
-    ts = map trashTrigger cards
-    trashTrigger :: Card -> Action
-    trashTrigger c = (Map.findWithDefault (\_ _ -> pass) TrashTrigger (triggers (typ c))) (Left c) (EffectTrash c source)
 
 discard :: Card -> Location -> Action
 discard card loc player state =
@@ -890,8 +929,7 @@ startOfTurn player state
   | null durations = toSimulation state
   | otherwise = allTriggers player (updatePlayer state player (const p { inPlayDuration = [], inPlay = durationCards ++ inPlay p }))
   where
-    trigger card = getTrigger card StartOfTurnTrigger NullEffect
-    allTriggers = foldr (&&&) pass (map trigger durations)
+    allTriggers = handleAllTriggers StartOfTurnTrigger durations NullEffect pass
     p = playerByName state player
     durations = inPlayDuration p
     durationCards = Either.lefts durations

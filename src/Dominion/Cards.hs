@@ -524,12 +524,12 @@ prosperityCards = map ($ Prosperity)
    action 504 "Bishop" 4 (plusMoney 1 &&& plusTokens 1 VictoryToken &&& bishop),
    action 505 "Monument" 4 (plusMoney 2 &&& plusTokens 1 VictoryToken),
    carddefA 506 "Quarry" (simpleCost 4) [Treasure] (const 0) quarryEffect noTriggers,
-   withTrigger (treasure 507 "Talisman" 4 1) BuyTrigger talismanTrigger,
+   withTrigger (treasure 507 "Talisman" 4 1) (whileInPlay (onBuy talismanTrigger)),
    action 508 "Worker's Village" 4 (plusCards 1 &&& plusActions 2 &&& plusBuys 1),
    action 509 "City" 5 city,
    notImplemented "Contraband", -- 510 contraband
    notImplemented "Counting House", -- 511 counting house
-   withTrigger (action 512 "Mint" 5 mintAction) BuyTrigger mintTrigger,
+   withTrigger (action 512 "Mint" 5 mintAction) (onBuySelf mintTrigger),
    notImplemented "Mountebank", -- 513 mountebank
    notImplemented "Rabble", -- 514 rabble
    notImplemented "Royal Seal", -- 515 royal seal
@@ -539,7 +539,7 @@ prosperityCards = map ($ Prosperity)
    withBuyRestriction
     (action 519 "Grand Market" 6 (plusCards 1 &&& plusActions 1 &&& plusBuys 1 &&& plusMoney 2))
     (\state -> not $ copper `elem` (map typ (inPlay (activePlayer state)))),
-   withTrigger (treasure 520 "Hoard" 6 2) BuyTrigger hoardTrigger,
+   withTrigger (treasure 520 "Hoard" 6 2) (whileInPlay (onBuy (\def -> if hasType def Victory then gain gold else pass))),
    carddef 521 "Bank" (simpleCost 7) [Treasure] noPoints bank noTriggers,
    action 522 "Expand" 7 (remodelX 3),
    notImplemented "Forge", -- 523 forge
@@ -560,21 +560,9 @@ bishop = trashForGain gainPoints &&& eachOtherPlayer mayTrash
       where
         h = hand $ playerByName state op
 
-hoardTrigger (Left card) (EffectBuy def) player state
-  | card `elem` inp && hasType def Victory = gain gold player state
+talismanTrigger def player state
+  | not (hasType def Victory) && smallerEqCost (cost state def) (simpleCost 4) = gain def player state
   | otherwise = toSimulation state
-  where
-    inp = inPlay $ playerByName state player
-hoardTrigger _ _ _ s = toSimulation s
-
-talismanTrigger (Left card) (EffectBuy def) player state
-  | card `elem` inp && not (hasType def Victory) && smallerEqCost (cost state def) (simpleCost 4) =
-    gain def player state
-  | otherwise = toSimulation state
-  where
-    inp = inPlay $ playerByName state player
-
-talismanTrigger _ _ _ s = toSimulation s
 
 quarryEffect Nothing = plusMoney 1
 quarryEffect (Just card) =
@@ -597,11 +585,10 @@ mintAction player state
   where
     treasures = filter isTreasure $ hand (playerByName state player)
 
-mintTrigger :: CardLike -> Effect -> Action
-mintTrigger (Right def) _ player state = if def == cMint then trashAll treasures InPlay player state else toSimulation state
+mintTrigger :: Action
+mintTrigger player state = trashAll treasures InPlay player state
   where
     treasures = filter isTreasure $ inPlay (playerByName state player)
-mintTrigger _ _ _ state = toSimulation state
 
 kingsCourt :: Action
 kingsCourt player state
@@ -658,7 +645,7 @@ hinterlandCards = map ($ Hinterlands)
     stdVictorySupply,
    notImplemented "Spice Merchant", -- 713 spice merchant
    notImplemented "Trader", -- 714 trader
-   carddef 715 "Cache" (simpleCost 5) [Treasure] (const 0) (plusMoney 3) (Map.singleton GainTrigger cacheTrigger),
+   carddef 715 "Cache" (simpleCost 5) [Treasure] (const 0) (plusMoney 3) (onGainSelf (gain copper &&& gain copper)),
    notImplemented "Cartographer", -- 716 cartographer
    notImplemented "Embassy", -- 717 embassy
    notImplemented "Haggler", -- 718 haggler
@@ -668,25 +655,11 @@ hinterlandCards = map ($ Hinterlands)
    notImplemented "Mandarin", -- 722 mandarin
    notImplemented "Margrave", -- 723 margrave
    notImplemented "Stables", -- 724 stables
-   withTrigger (action 725 "Border Village" 6 (plusCards 1 &&& plusActions 2)) GainTrigger borderVillageTrigger,
+   withTrigger (action 725 "Border Village" 6 (plusCards 1 &&& plusActions 2)) (onGainSelf borderVillageTrigger),
    notImplemented "Farmland" -- 726 farmland
    ]
 
-cacheTrigger :: CardLike -> Effect -> Action
-cacheTrigger (Right def) _ = if def == cCache then gain copper &&& gain copper else pass
-cacheTrigger (Left c1) (EffectGainFrom c2 _ _) = if c1 == c2 then gain copper &&& gain copper else pass
-cacheTrigger _ _ = pass
-
-borderVillageTrigger (Right def) _ p s =
-  if def == cBorderVillage
-  then gainUpto ((moneyCost (cost s cBorderVillage)) - 1) p s
-  else toSimulation s
-borderVillageTrigger (Left c1) (EffectGainFrom c2 _ _) p s =
-  if c1 == c2
-  then gainUpto ((moneyCost (cost s cBorderVillage)) - 1) p s
-  else toSimulation s
-borderVillageTrigger _ _ _ s = toSimulation s
-
+borderVillageTrigger p s = gainUpto ((moneyCost (cost s cBorderVillage)) - 1) p s
 
 jackOfAllTrades :: Action
 jackOfAllTrades = gain silver &&& spyTop &&& drawTo5 &&& optTrash
@@ -735,7 +708,7 @@ darkAgesCards = map ($ DarkAges)
    withInitialSupply
      (carddef 813 "Feodum" (simpleCost 4) [Victory] (\p -> length (filter ((==silver) . typ) (allCards p)) `quot` 3)
         pass
-        (Map.singleton TrashTrigger deathCartTrigger))
+        (onTrashSelf (gain silver &&& gain silver &&& gain silver)))
      stdVictorySupply,
    notImplemented "Fortress", -- 814 Fortress
    notImplemented "Ironmonger", -- 815 Ironmonger
@@ -769,9 +742,6 @@ armoryGain player state = decision
   where
     candidates = affordableCards (simpleCost 4) state
 
-deathCartTrigger (Left c1) (EffectTrash c2 _) = if c1 == c2 then gain silver &&& gain silver &&& gain silver else pass
-deathCartTrigger _ _ = pass
-
 
 -- Guilds 9xx
 
@@ -785,12 +755,9 @@ guildsCards = map ($ Guilds) [
   notImplemented "Taxman", -- 907
   notImplemented "Herald", -- 908
   withTrigger (action 909 "Baker" 5 (plusCards 1 &&& plusActions 1 &&& plusTokens 1 CoinToken))
-    StartOfGameTrigger
-    (\_ _ _ state ->
-      foldr
-        (\name sim -> sim `andThen` plusTokens 1 CoinToken name)
-        (return $ State state)
-        (map name $ Map.elems $ players state)),
+    (onStartOfGame (\_ state -> foldr (\name sim -> sim `andThen` plusTokens 1 CoinToken name)
+                                      (return $ State state)
+                                      (map name $ Map.elems $ players state))),
   notImplemented "Butcher",
   notImplemented "Journeyman",
   notImplemented "Merchant Guild",
@@ -814,7 +781,7 @@ adventuresCards = map ($ Adventures) [
   notImplemented "Magpie", -- 1012
   notImplemented "Messenger", -- 1013
   notImplemented "Miser", -- 1014
-  withTrigger (action 1015 "Port" 4 (plusCards 1 &&& plusActions 2)) BuyTrigger portTrigger,
+  withTrigger (action 1015 "Port" 4 (plusCards 1 &&& plusActions 2)) (onBuySelf (gain cPort)),
   notImplemented "Ranger", -- 1016
   notImplemented "Transmogrify", -- 1017
   notImplemented "Artificer", -- 1018
@@ -831,10 +798,6 @@ adventuresCards = map ($ Adventures) [
   notImplemented "Wine Merchant", -- 1029
   notImplemented "Hireling" -- 1030
   ]
-
-portTrigger :: CardLike -> Effect -> Action
-portTrigger (Right def) _ = if def == cPort then gain cPort else pass
-portTrigger _ _ = pass
 
 -- Promo 20xx
 
