@@ -10,6 +10,7 @@ import Control.Monad (forM_, when)
 
 import qualified Data.ByteString.Char8 as C8
 import Data.Char (toLower)
+import qualified Data.Either as Either
 import qualified Data.List as L
 import qualified Data.Map.Strict as Map
 import Data.String (fromString)
@@ -165,16 +166,9 @@ showCards :: Map.Map CardDef Int -> H.Html
 showCards cards =
   forM_ (L.sortBy (\(c1,_) (c2,_) -> compareCard c1 c2) (Map.toList cards))
     $ \(card,num) ->
-      H.span H.! A.class_ (fromString ("cardlink " ++ show (head (types card)))) $ do
+      H.span H.! A.class_ (fromString ("cardlink " ++ L.intercalate " " (map show (types card)))) $ do
         toHtml (show num ++ " " ++ cardName card)
         H.img H.! A.src (fromString (cardImagePath card))
-
-      {-
-      H.div H.! A.class_ "imageoverlay" $ do
-        H.img H.! A.style "margin: 5px; width: 100px; height: 159px"
-              H.! A.src (fromString (cardImagePath card))
-        H.h3 H.! A.class_ "overlay" $ toHtml (show num)
-      -}
 
 cardListToMap :: [Card] -> Map.Map CardDef Int
 cardListToMap cards =
@@ -215,9 +209,9 @@ htmlDecision p (state,infos,decision) =
           when (not (null (hand player))) $ do
             H.h5 "Hand: "
             showCards (cardListToMap (hand player))
-          when (not (null (inPlay player))) $ do
+          when (not (null (inPlay player ++ Either.lefts (inPlayDuration player)))) $ do
             H.h5 "InPlay: "
-            showCards (cardListToMap (inPlay player))
+            showCards (cardListToMap (inPlay player ++ Either.lefts (inPlayDuration player)))
           when (not (null (deck player))) $ do
             H.h5 "Deck: "
             showCards (cardListToMap (deck player))

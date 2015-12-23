@@ -3,6 +3,7 @@ module Dominion.Cards where
 import Dominion.Model
 
 import Data.Char (toLower)
+import qualified Data.Either as Either
 import qualified Data.List as L
 import qualified Data.Map.Strict as Map
 
@@ -32,8 +33,23 @@ cMinion        = cardData Map.! "minion"
 cMint          = cardData Map.! "mint"
 cCache         = cardData Map.! "cache"
 cNativeVillage = cardData Map.! "native village"
+cGolem         = cardData Map.! "golem"
+cTransmute     = cardData Map.! "transmute"
 
 -- Generic action elements (potentially move to model)
+
+revealUntil :: ([Card] -> Bool) -> ([Card] -> Action) -> Action
+revealUntil pred cont player state =
+  iter 1 state >>= \(s,num) ->
+  let cards = take num (deck $ playerByName s player)
+  in (reveal cards &&& (cont cards)) player s
+  where
+    iter :: Int -> GameState -> SimulationT (GameState,Int)
+    iter n state = do
+      s <- ensureCanDraw n state player
+      case s of
+        Just ss -> if pred (take n $ deck $ playerByName ss player) then return (ss,n) else iter (n+1) ss
+        Nothing -> return (state, n-1)
 
 eachOtherPlayer :: Action -> Action
 eachOtherPlayer action player state = seqSteps action (opponentNames state player) state
@@ -70,6 +86,14 @@ discardNCards num player state = decision (ChooseCards (EffectDiscard unknown (H
     candidates = hand (playerByName state player)
     num' = min (length candidates) num
     cont cards = seqSteps (\c -> discard c (Hand player) player) cards state
+
+discardDownTo :: Int -> Action
+discardDownTo n op state
+  | length h <= n = toSimulation state
+  | otherwise = decision (ChooseCards (EffectDiscard unknown (Hand op)) h (length h - n,length h - n) cont) op state
+  where
+    h = hand $ playerByName state op
+    cont cards = discardAll cards (Hand op) op state
 
 trashForGain :: (Card -> Action) -> Action
 trashForGain gain player state
@@ -114,8 +138,12 @@ enactEffect (EffectPlusMoney no) = plusMoney no
 enactEffect (EffectTrashNo no) = trashNCards no no
 enactEffect (EffectDiscardNo no) = discardNCards no
 enactEffect (EffectGain def to) = gainTo def to
-enactEffect (EffectPut card from to) = put card from to
+enactEffect (EffectPut card from to) =
+  if isUnknown card
+  then (\p s -> chooseOne (EffectPut card from to) (hand (playerByName s p)) (\c -> put c from to) p s)
+  else put card from to
 enactEffect (EffectTrash card from) = trash card from
+enactEffect (EffectDiscard card from) = discard card from
 enactEffect _ = error "Effect not implemented"
 
 enactEffects :: [Effect] -> Action
@@ -139,7 +167,7 @@ baseCards = map ($ Base)
    actionA 109 "Feast" 4 feast,
    withInitialSupply (carddef 110 "Gardens" (simpleCost 4) [Victory] (\p -> length (allCards p) `quot` 10) pass noTriggers)
     stdVictorySupply,
-   attack 111 "Militia" 4 militia,
+   attack 111 "Militia" 4 (plusMoney 2 &&& playAttack (discardDownTo 3)),
    action 112 "Moneylender" 4 moneylender,
    action 113 "Remodel" 4 (remodelX 2),
    action 114 "Smithy" 4 (plusCards 3),
@@ -201,16 +229,6 @@ feast mCard player state =
                                         (map (`topOfSupply` s2) (affordableCardsM 5 s2))
                                         (\c -> gain (typ c) player s2))
                             player s2
-
-militia :: Action
-militia player state = (plusMoney 2 &&& playAttack discardTo3) player state
-  where
-    discardTo3 op state
-      | length h <= 3 = toSimulation state
-      | otherwise = decision (ChooseCards (EffectDiscard unknown (Hand op)) h (length h - 3,length h - 3) cont) op state
-      where
-        h = hand $ playerByName state op
-        cont cards = seqSteps (\c -> discard c (Hand op) op) cards state
 
 moneylender :: Action
 moneylender player state
@@ -410,18 +428,13 @@ miningVillage (Just card) =
 minionAttack = chooseEffects 1 [EffectPlusMoney 2, SpecialEffect cMinion] act
   where
     act [SpecialEffect _] player state =
-      ((foldr (&&&) pass (map (\c -> discard c (Hand player)) (hand $ playerByName state player)))
-       &&& plusCards 4
-       &&& playAttack attack)
-        player
-        state
+      (discardAll (hand $ playerByName state player) (Hand player) &&& plusCards 4 &&& playAttack attack) player state
     act [a] player state = enactEffect a player state
     act _ _ _ = error "Minion attack got back other than singleton effect"
 
     attack op state =
       if length (hand $ playerByName state op) > 4
-      then (foldr (&&&) (plusCards 4) (map (\c -> discard c (Hand op)) (hand $ playerByName state op)))
-            op state
+      then (discardAll (hand $ playerByName state op) (Hand op) &&& (plusCards 4)) op state
       else toSimulation state
 
 shantyDraw player state = (reveal h &&& if noActions then plusCards 2 else pass) player state
@@ -588,7 +601,7 @@ treasuryTrigger card cont player state
 alchemyCards = map ($ Alchemy)
   [notImplemented "Herbalist", -- 401 Herbalist
    action 402 "Apprentice" 5 (plusActions 1 &&& trashForGain apprenticeBenefit),
-   notImplemented "Transmute", -- 403 Transmute
+   carddef 403 "Transmute" (fullCost 0 1) [Action] (const 0) (trashForGain transmute) noTriggers,
    withInitialSupply (carddef 404 "Vineyard" (fullCost 0 1) [Victory] (\p -> length (filter isAction (allCards p)) `quot` 3) pass noTriggers)
     stdVictorySupply,
    notImplemented "Apothecary", -- 405 Apothecary -> needs ordering of cards
@@ -597,7 +610,7 @@ alchemyCards = map ($ Alchemy)
    notImplemented "Alchemist", -- 408 Alchemist
    carddef 409 "Familiar" (fullCost 3 1) [Action, Attack] (const 0) familiar noTriggers,
    carddef 410 "Philosopher's Stone" (fullCost 3 1) [Treasure] (const 0) philosophersStone noTriggers,
-   notImplemented "Golem", -- 411 Golem -> needs ordering of cards (can be simulated through repeated selection)
+   carddef 411 "Golem" (fullCost 4 1) [Action] (const 0) golem noTriggers,
    notImplemented "Possession" -- 412 Possession
   ]
 
@@ -606,11 +619,32 @@ apprenticeBenefit card player state = (if drawNo == 0 then pass else plusCards d
     drawNo = moneyCost c + 2 * potionCost c
     c = cost state (typ card)
 
+familiar :: Action
 familiar = plusCards 1 &&& plusActions 1 &&& playAttack (gain curse)
+
+golem :: Action
+golem player state = revealUntil ((==2) . length . filter usable) cont player state
+  where
+    cont cards =
+      discardAll (filter (not . usable) cards) (TopOfDeck player)
+      &&& (case acts of
+            [a,b] -> chooseMany (EffectPlayAction unknown) [a,b] (2,2) (seqActions (\c -> playFrom c (TopOfDeck player)))
+            [a] -> playFrom a (TopOfDeck player)
+            _ -> pass)
+      where
+        acts = filter usable cards
+    usable c = isAction c && (typ c) /= cGolem
+
+
 philosophersStone player state = plusMoney num player state
   where
     p = playerByName state player
     num = (length (discardPile p) + length (deck p)) `quot` 5
+
+transmute :: Card -> Action
+transmute card = (if isAction card then gain duchy else pass)
+                 &&& (if isTreasure card then gain cTransmute else pass)
+                 &&& (if isVictory card then gain gold else pass)
 
 universityGain player state =
   optDecision (ChooseCard (EffectGain unknownDef (Discard player)) candidates (\c -> gain (typ c) player state)) player state
@@ -620,7 +654,7 @@ universityGain player state =
 -- Prosperity 5xx
 
 prosperityCards = map ($ Prosperity)
-  [notImplemented "Loan", -- 501 loan
+  [carddef 501 "Loan" (simpleCost 3) [Treasure] noPoints (plusMoney 1 &&& loan) noTriggers,
    notImplemented "Trade Route", -- 502 trade route
    carddef 503 "Watchtower" (simpleCost 3) [Action, Reaction] noPoints watchtower (whileInHand watchtowerTrigger),
    action 504 "Bishop" 4 (plusMoney 1 &&& plusTokens 1 VictoryToken &&& bishop),
@@ -632,23 +666,82 @@ prosperityCards = map ($ Prosperity)
    notImplemented "Contraband", -- 510 contraband
    action 511 "Counting House" 5 countingHouse,
    withTrigger (action 512 "Mint" 5 mintAction) (onBuySelf mintTrigger),
-   notImplemented "Mountebank", -- 513 mountebank
-   notImplemented "Rabble", -- 514 rabble
+   attack 513 "Mountebank" 5 (plusMoney 2 &&& playAttack mountebank),
+   attack 514 "Rabble" 5 (plusCards 3 &&& playAttack (reshuffleIfNeededN 3 &&& rabble)),
    withTrigger (treasure 515 "Royal Seal" 5 2) (whileInPlay royalSealTrigger),
    action 516 "Vault" 5 (plusCards 2 &&& vault),
-   notImplemented "Venture", -- 517 venture
-   notImplemented "Goons", -- 518 goons
+   carddef 517 "Venture" (simpleCost 5) [Treasure] noPoints (plusMoney 1 &&& venture) noTriggers,
+   withTrigger (attack 518 "Goons" 6 (plusBuys 1 &&& plusMoney 2 &&& playAttack (discardDownTo 3)))
+    (whileInPlay (onBuy (\_ -> plusTokens 1 VictoryToken))),
    withBuyRestriction
     (action 519 "Grand Market" 6 (plusCards 1 &&& plusActions 1 &&& plusBuys 1 &&& plusMoney 2))
     (\state -> not $ copper `elem` (map typ (inPlay (activePlayer state)))),
    withTrigger (treasure 520 "Hoard" 6 2) (whileInPlay (onBuy (\def -> if hasType def Victory then gain gold else pass))),
    carddef 521 "Bank" (simpleCost 7) [Treasure] noPoints bank noTriggers,
    action 522 "Expand" 7 (remodelX 3),
-   notImplemented "Forge", -- 523 forge
+   action 523 "Forge" 7 forge,
    action 524 "King's Court" 7 kingsCourt,
-   notImplemented "Peddler" -- 525 peddler
+   withSpecialCost (action 525 "Peddler" 8 (plusCards 1 &&& plusActions 1 &&& plusMoney 1)) peddlerCost
    ]
 
+venture :: Action
+venture = revealUntil (any isTreasure) (\cards p s -> (discardAll (filter (not . isTreasure) cards) (TopOfDeck p)
+                                                       &&& maybe pass (\t -> playFrom t (TopOfDeck p)) (L.find isTreasure cards))
+                                                       p s)
+
+forge :: Action
+forge player state = chooseMany (EffectTrash unknown (Hand player)) h (0,length h) cont player state
+  where
+    h = hand $ playerByName state player
+    cont cards
+      | null cands = trashAll cards (Hand player)
+      | otherwise = trashAll cards (Hand player) &&& chooseOne (EffectGain unknownDef (Discard player)) cands (gain . typ)
+      where
+        total = simpleCost $ moneyCost $ foldr addCost (simpleCost 0) $ map (cost state . typ) cards
+        cands = map (`topOfSupply` state)
+          $ filter ((==total) . cost state)
+          $ availableCards state
+
+loan :: Action
+loan player state = revealUntil (any isTreasure)
+                                (\cs -> if any isTreasure cs
+                                        then
+                                          chooseEffects 1 [EffectDiscard (last cs) (TopOfDeck player), EffectTrash (last cs) (TopOfDeck player)] enactEffects
+                                          &&& discardAll (init cs) (TopOfDeck player)
+                                        else discardAll cs (TopOfDeck player))
+                                player state
+
+mountebank :: Action
+mountebank op state
+  | null curses = hit op state
+  | otherwise = choose (ChooseToUse (EffectDiscard (head curses) (Hand op))) (\b -> if b then discard (head curses) (Hand op) else hit)
+                  op state
+  where
+    hit op state = (gain curse &&& gain copper) op state
+    curses = filter ((==curse) . typ) $ hand $ playerByName state op
+
+peddlerCost :: GameState -> Cost
+peddlerCost state
+  | BuyPhase == phase (turn state) =
+    simpleCost $ max 0 (8 - 2 * actionsInPlay)
+  | otherwise = simpleCost 8
+  where
+    p = activePlayer state
+    actionsInPlay = length (filter isAction (inPlay p ++ Either.lefts (inPlayDuration p)))
+
+-- TODO how can we do the re-ordering more precisely
+rabble :: Action
+rabble op state = (reveal top3 &&& discardAll toDiscard (TopOfDeck op) &&& (if length toKeep > 1 then reorder else pass)) op state
+  where
+    top3 = take 3 $ deck $ playerByName state op
+    toDiscard = filter (\c -> isAction c || isTreasure c) top3
+    toKeep = filter (\c -> not (isAction c || isTreasure c)) top3
+    reorder = chooseMany (EffectPut unknown (TopOfDeck op) (TopOfDeck op))
+                         toKeep
+                         (length toKeep, length toKeep)
+                         (\cs _ s -> toSimulation $ updatePlayer s op (\p -> p { deck = cs ++ drop (length toKeep) (deck p) }))
+
+watchtower :: Action
 watchtower player state
   | length h >= 6 = toSimulation state
   | otherwise = plusCards (6 - length h) player state
@@ -776,7 +869,8 @@ cornucopiaCards = map ($ Cornucopia)
    action 603 "Menagerie" 3 (plusActions 1 &&& menagerie),
    notImplemented "Farming Village", -- 604 farming village
    notImplemented "Horse Traders", -- 605 horse traders
-   notImplemented "Remake", -- 606 remake
+   -- TODO should probably be renamed and abstracted
+   action 606 "Remake" 4 (trashForGain upgradeBenefit &&& trashForGain upgradeBenefit),
    notImplemented "Tournament", -- 607 tournament
    notImplemented "Young Witch", -- 608 young witch
    notImplemented "Harvest", -- 609 harvest
@@ -821,13 +915,14 @@ hinterlandCards = map ($ Hinterlands)
    actionA 719 "Highway" 5 highway,
    notImplemented "Ill-gotten Gains", -- 720 ill-gotten gains
    notImplemented "Inn", -- 721 inn
-   notImplemented "Mandarin", -- 722 mandarin
+   withTrigger (action 722 "Mandarin" 5 (plusMoney 3 &&& mandarinAction)) (onGainSelf mandarinTrigger),
    notImplemented "Margrave", -- 723 margrave
    notImplemented "Stables", -- 724 stables
    withTrigger (action 725 "Border Village" 6 (plusCards 1 &&& plusActions 2)) (onGainSelf borderVillageTrigger),
    notImplemented "Farmland" -- 726 farmland
    ]
 
+borderVillageTrigger :: Action
 borderVillageTrigger p s = gainUpto ((moneyCost (cost s cBorderVillage)) - 1) p s
 
 jackOfAllTrades :: Action
@@ -852,17 +947,29 @@ jackOfAllTrades = gain silver &&& spyTop &&& drawTo5 &&& optTrash
         candidates = filter (not . isTreasure) $ hand $ playerByName state player
         cont card = trash card (Hand player) player state
 
+highway :: Maybe Card -> Action
 highway Nothing = plusCards 1 &&& plusActions 1
 highway (Just card) =
   plusCards 1 &&& plusActions 1 &&&
   addModifier (ModCost (Just Action))
               (ConditionalModifier (\state -> card `elem` (inPlay $ activePlayer state)) (CappedDecModifier 2))
 
+mandarinAction :: Action
+mandarinAction player state
+  | null h = toSimulation state
+  | otherwise = chooseOne (EffectPut unknown (Hand player) (TopOfDeck player)) h (\c -> put c (Hand player) (TopOfDeck player)) player state
+  where
+    h = hand $ playerByName state player
+
+mandarinTrigger :: Action
+mandarinTrigger player state = seqActions (\c -> put c InPlay (TopOfDeck player)) treasures player state
+  where
+    treasures = filter isTreasure $ inPlay (playerByName state player)
 
 -- Dark Ages 8xx
 
 darkAgesCards = map ($ DarkAges)
-  [notImplemented "Poor House", -- 801 Poor House
+  [action 801 "Poor House" 1 poorHouse,
    notImplemented "Beggar", -- 802 Beggar
    notImplemented "Squire", -- 803 Squire
    notImplemented "Vagrant", -- 804 Vagrant
@@ -879,8 +986,8 @@ darkAgesCards = map ($ DarkAges)
         pass
         (onTrashSelf (gain silver &&& gain silver &&& gain silver)))
      stdVictorySupply,
-   notImplemented "Fortress", -- 814 Fortress
-   notImplemented "Ironmonger", -- 815 Ironmonger
+   withTrigger (action 814 "Fortress" 4 (plusCards 1 &&& plusActions 2)) fortressTrigger,
+   action 815 "Ironmonger" 4 (plusCards 1 &&& plusActions 1 &&& reshuffleIfNeeded &&& ironmonger),
    notImplemented "Marauder", -- 816 Marauder
    notImplemented "Procession", -- 817 Procession
    notImplemented "Rats", -- 818 Rats
@@ -889,7 +996,7 @@ darkAgesCards = map ($ DarkAges)
    notImplemented "Band of Misfits", -- 821 Band of Misfits
    notImplemented "Bandit Camp", -- 822 Bandit Camp
    notImplemented "Catacombs", -- 823 Catacombs
-   notImplemented "Count", -- 824 Count
+   action 824 "Count" 5 count,
    notImplemented "Counterfeit", -- 825 Counterfeit
    notImplemented "Cultist", -- 826 Cultist
    notImplemented "Graverobber", -- 827 Graverobber
@@ -899,10 +1006,11 @@ darkAgesCards = map ($ DarkAges)
    notImplemented "Pillage", -- 831 Pillage
    notImplemented "Rebuild", -- 832 Rebuild
    notImplemented "Rogue", -- 833 Rogue
-   notImplemented "Altar", -- 834 Altar
+   action 834 "Altar" 6 (trashForGain (\_ -> gainUpto 5)),
    notImplemented "Hunting Grounds" -- 835 Hunting Grounds
   ]
 
+armoryGain :: Action
 armoryGain player state = decision
         (ChooseCard (EffectGain unknownDef (TopOfDeck player))
                     (map (`topOfSupply` state) candidates)
@@ -911,6 +1019,40 @@ armoryGain player state = decision
   where
     candidates = affordableCards (simpleCost 4) state
 
+count :: Action
+count player state=
+  (chooseEffects 1 [EffectDiscardNo 2, EffectPut unknown (Hand player) (TopOfDeck player), EffectGain copper (Discard player)] enactEffects
+   &&& (\p s -> chooseEffects 1 [EffectPlusMoney 3, EffectTrashNo (length (hand (playerByName s p))), EffectGain duchy (Discard player)]
+                  enactEffects p s))
+    player state
+
+
+fortressTrigger :: TriggerHandler
+fortressTrigger TrashTrigger (EffectTrash c1 _) (Left c2) cont player state =
+  if c1 == c2 then (cont &&& put c1 Trash (Hand player)) player state
+              else cont player state
+fortressTrigger _ _ _ cont p s = cont p s
+
+ironmonger :: Action
+ironmonger player state
+  | null top = toSimulation state
+  | otherwise =
+    (reveal [t]
+     &&& decision (ChooseToUse (EffectDiscard t (TopOfDeck player)) (\b -> if b then discard t (TopOfDeck player) player state
+                                                                                else toSimulation state))
+     &&& (if isAction t then plusActions 1 else pass)
+     &&& (if isTreasure t then plusMoney 1 else pass)
+     &&& (if isVictory t then plusCards 1 else pass))
+    player state
+  where
+    top = getCards (TopOfDeck player) state
+    t = head top
+
+poorHouse :: Action
+poorHouse = plusMoney 4 &&& \p s ->
+  plusMoney (- (min (money (turn s))
+                    (length (filter isTreasure (hand (playerByName s p))))))
+    p s
 
 -- Guilds 9xx
 

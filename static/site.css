@@ -74,6 +74,22 @@ section {
   background-color: papayawhip;
 }
 
+.action.reaction {
+  background-color: steelblue;
+}
+
+.action.duration {
+  background-color: orange;
+}
+
+.action.victory {
+  background: linear-gradient(to bottom right, green, papayawhip);
+}
+
+.treasure.victory {
+  background: linear-gradient(to bottom right, green, gold);
+}
+
 .treasure {
   background-color: gold;
 }

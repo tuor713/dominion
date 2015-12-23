@@ -61,7 +61,7 @@ data CardDef = CardDef { -- Card id is purely a performance artifact to avoid st
                    cardTypeId :: !Int,
                    cardName :: !String,
                    edition :: !Edition,
-                   cardCost :: Cost,
+                   cardCost :: GameState -> Cost,
                    types :: ![CardType],
                    cardPoints :: !(Player -> Int),
                    onPlay :: !(Maybe Card -> Action),
@@ -159,36 +159,36 @@ noTriggers = nullHandler
 
 -- TODO refactor these to use carddef* instead
 treasure :: Int -> String -> Int -> Int -> Edition -> CardDef
-treasure id name cost money edition = CardDef id name edition (simpleCost cost) [Treasure] noPoints (\_ -> plusMoney money) (const 10) noTriggers (const True)
+treasure id name cost money edition = CardDef id name edition (const (simpleCost cost)) [Treasure] noPoints (\_ -> plusMoney money) (const 10) noTriggers (const True)
 
 action :: Int -> String -> Int -> Action -> Edition -> CardDef
-action id name cost effect edition = CardDef id name edition (simpleCost cost) [Action] noPoints (\_ -> effect) (const 10) noTriggers (const True)
+action id name cost effect edition = CardDef id name edition (const (simpleCost cost)) [Action] noPoints (\_ -> effect) (const 10) noTriggers (const True)
 
 actionA :: Int -> String -> Int -> (Maybe Card -> Action) -> Edition -> CardDef
-actionA id name cost effect edition = CardDef id name edition (simpleCost cost) [Action] noPoints effect (const 10) noTriggers (const True)
+actionA id name cost effect edition = CardDef id name edition (const (simpleCost cost)) [Action] noPoints effect (const 10) noTriggers (const True)
 
 duration :: Int -> String -> Int -> Action -> Action -> Edition -> CardDef
 duration id name cost effect startOfTurn edition =
-  CardDef id name edition (simpleCost cost) [Action, Duration] noPoints  (\_ -> effect) (const 10) (onStartOfTurn startOfTurn) (const True)
+  CardDef id name edition (const (simpleCost cost)) [Action, Duration] noPoints  (\_ -> effect) (const 10) (onStartOfTurn startOfTurn) (const True)
 
 durationA :: Int -> String -> Int -> (Maybe Card -> Action) -> Action -> Edition -> CardDef
 durationA id name cost effect startOfTurn edition =
-  CardDef id name edition (simpleCost cost) [Action, Duration] noPoints  effect (const 10) (onStartOfTurn startOfTurn) (const True)
+  CardDef id name edition (const (simpleCost cost)) [Action, Duration] noPoints  effect (const 10) (onStartOfTurn startOfTurn) (const True)
 
 
 attack :: Int -> String -> Int -> Action -> Edition -> CardDef
-attack id name cost effect edition = CardDef id name edition (simpleCost cost) [Action, Attack] noPoints (\_ -> effect) (const 10) noTriggers (const True)
+attack id name cost effect edition = CardDef id name edition (const (simpleCost cost)) [Action, Attack] noPoints (\_ -> effect) (const 10) noTriggers (const True)
 
 victory :: Int -> String -> Int -> Int -> Edition -> CardDef
-victory id name cost points edition = CardDef id name edition (simpleCost cost) [Victory] (const points) (\_ -> pass) (const 10) noTriggers (const True)
+victory id name cost points edition = CardDef id name edition (const (simpleCost cost)) [Victory] (const points) (\_ -> pass) (const 10) noTriggers (const True)
 
 carddef :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> Action -> TriggerHandler -> Edition -> CardDef
-carddef id name cost types points effect triggers edition = CardDef id name edition cost types points (\_ -> effect) (const 10) triggers (const True)
+carddef id name cost types points effect triggers edition = CardDef id name edition (const cost) types points (\_ -> effect) (const 10) triggers (const True)
 
 carddefA :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> (Maybe Card -> Action) -> TriggerHandler -> Edition -> CardDef
-carddefA id name cost types points effect triggers edition = CardDef id name edition cost types points effect (const 10) triggers (const True)
+carddefA id name cost types points effect triggers edition = CardDef id name edition (const cost) types points effect (const 10) triggers (const True)
 
-notImplemented name edition = CardDef (-1) name edition (simpleCost 0) [] (\_ -> 0) (\_ -> pass) (const 0) noTriggers (const False)
+notImplemented name edition = CardDef (-1) name edition (const (simpleCost 0)) [] (\_ -> 0) (\_ -> pass) (const 0) noTriggers (const False)
 
 
 withTrigger :: (Edition -> CardDef) -> TriggerHandler -> Edition -> CardDef
@@ -201,6 +201,9 @@ withInitialSupply cardgen supplyf ed = (cardgen ed) { initialSupply = supplyf }
 
 withBuyRestriction :: (Edition -> CardDef) -> (GameState -> Bool) -> Edition -> CardDef
 withBuyRestriction cardgen pred ed = (cardgen ed) { canBuy = pred }
+
+withSpecialCost :: (Edition -> CardDef) -> (GameState -> Cost) -> Edition -> CardDef
+withSpecialCost cardgen f ed = (cardgen ed) { cardCost = f }
 
 -- Basic cards
 
@@ -223,7 +226,10 @@ colony   = withInitialSupply (victory 9 "Colony" 11 10) stdVictorySupply Prosper
 
 basicCards = [copper, silver, gold, estate, duchy, province, curse, potion, platinum, colony]
 
+unknownDef = CardDef (-1) "XXX" Base (const (simpleCost 0)) [Action] (\_ -> 0) (\_ -> pass) (const 0) noTriggers (const False)
+unknown = Card (-1) unknownDef
 
+isUnknown card = cardName (typ card) == "XXX"
 
 type PlayerId = String
 
@@ -267,12 +273,15 @@ stackMod m1 m2 = StackedModifier [m1,m2]
 
 data Log = LogBuy CardDef | LogPlay Card deriving (Eq, Show)
 
+data Phase = ActionPhase | BuyPhase | CleanupPhase deriving (Eq, Ord, Show)
+
 data TurnState = TurnState { money :: Int,
                              potions :: Int,
                              buys :: Int,
                              actions :: Int,
                              modifiers :: Map.Map ModAttribute Modifier,
-                             turnLog :: [Log]
+                             turnLog :: [Log],
+                             phase :: Phase
                              }
                              deriving (Show)
 
@@ -540,6 +549,9 @@ seqActions :: (a -> Action) -> [a] -> Action
 seqActions _ [] _ state = toSimulation state
 seqActions f (x:xs) p state = f x p state `andThen` seqActions f xs p
 
+choose :: ((a -> Simulation) -> Decision) -> (a -> Action) -> Action
+choose dec cont player state = decision (dec (\input -> cont input player state)) player state
+
 chooseOne :: Effect -> [Card] -> (Card -> Action) -> Action
 chooseOne typ choices cont player state =
   decision (ChooseCard typ choices (\card -> cont card player state)) player state
@@ -665,7 +677,7 @@ cost state card = Cost ((applyMod mod state m),p)
   where
     mod = foldr stackMod (currentModifier state (ModCost Nothing))
             (map (\t -> currentModifier state (ModCost (Just t))) (types card))
-    (Cost (m,p)) = cardCost card
+    (Cost (m,p)) = cardCost card state
 
 affordableCards :: Cost -> GameState -> [CardDef]
 affordableCards bound state =
@@ -696,9 +708,6 @@ buysThisTurn state = Maybe.catMaybes $ map extract $ turnLog $ turn state
     extract (LogBuy c) = Just c
     extract _ = Nothing
 
-
-unknownDef = CardDef (-1) "XXX" Base (simpleCost 0) [Action] (\_ -> 0) (\_ -> pass) (const 0) noTriggers (const False)
-unknown = Card (-1) unknownDef
 
 -- Removes invisble information from the state such as opponents hands
 -- It assumes some intelligent information retention such as about own deck content
@@ -762,7 +771,7 @@ reshuffleDiscard p =
     return (p { discardPile = [], deck = deck p ++ shuffled })
 
 canDraw :: Player -> Bool
-canDraw p = not (null (hand p)) || not (null (discardPile p))
+canDraw p = not (null (deck p)) || not (null (discardPile p))
 
 draw :: Player -> Int -> SimulationT Player
 draw p num
@@ -794,12 +803,16 @@ playEffect card source player state =
                                 then addDurationEffect card state
                                 else state)
 
-play :: Card -> Action
-play card player state =
+playFrom :: Card -> Location -> Action
+playFrom card loc player state =
   playEffect (typ card)
              (Just card)
              player
-             (transfer card (Hand player) (if isDuration card then InPlayDuration else InPlay) state)
+             (transfer card loc (if isDuration card then InPlayDuration else InPlay) state)
+
+
+play :: Card -> Action
+play card player state = playFrom card (Hand player) player state
 
 playAll :: [Card] -> Action
 playAll [] _ state = toSimulation state
@@ -828,6 +841,10 @@ reshuffle player state = reshuffleDiscard (playerByName state player) >>= \p ->
 
 reshuffleIfNeeded :: Action
 reshuffleIfNeeded player state = if null (deck (playerByName state player)) then reshuffle player state else toSimulation state
+
+reshuffleIfNeededN :: Int -> Action
+reshuffleIfNeededN n player state = if length (deck (playerByName state player)) < n then reshuffle player state else toSimulation state
+
 
 put :: Card -> Location -> Location -> Action
 put card source target _ state = toSimulation $ transfer card source target state
@@ -886,6 +903,7 @@ discard card loc player state =
   info AllPlayers (player ++ " discards " ++ cardName (typ card)) >>
   handleTriggers DiscardTrigger (Left card) (EffectDiscard card loc) (put card loc (Discard player)) player state
 
+-- TODO all triggers have to happen upfront
 discardAll :: [Card] -> Location -> Action
 discardAll cards loc = seqActions (\c -> discard c loc) cards
 
@@ -916,10 +934,13 @@ plusTokens num token player state = toSimulation $ updatePlayer state player $ \
 pass :: Action
 pass _ = toSimulation
 
+goToPhase :: Phase -> Action
+goToPhase ph _ state = toSimulation $ state { turn = (turn state) { phase = ph } }
+
 -- Macro flows
 
 newTurn :: TurnState
-newTurn = TurnState { money = 0, buys = 1, actions = 1, potions = 0, modifiers = Map.empty, turnLog = [] }
+newTurn = TurnState { money = 0, buys = 1, actions = 1, potions = 0, modifiers = Map.empty, turnLog = [], phase = ActionPhase }
 
 nextTurn :: GameState -> Simulation
 nextTurn state = (discardAll (inPlay player) InPlay
@@ -1013,7 +1034,10 @@ startOfTurn player state
 playTurn :: Action
 playTurn name state =
   info AllPlayers ("Turn " ++ show (turnNo state) ++ " - " ++ name)
-  >> (startOfTurn &&& actionPhase &&& useCoinTokens &&& playTreasures &&& buyPhase &&& cleanupPhase) name state
+  >> (goToPhase ActionPhase &&& startOfTurn &&& actionPhase &&&
+      goToPhase BuyPhase &&& useCoinTokens &&& playTreasures &&& buyPhase &&&
+      goToPhase CleanupPhase &&& cleanupPhase)
+      name state
 
 winner :: GameState -> Result
 winner state
