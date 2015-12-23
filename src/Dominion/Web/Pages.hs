@@ -182,7 +182,7 @@ cardListToMap cards =
 
 
 htmlDecision :: PlayerId -> (GameState,[Info],Decision) -> H.Html
-htmlDecision _ (state,infos,decision) =
+htmlDecision p (state,infos,decision) =
   template "/play" $ do
     H.div H.! A.class_ "ten wide column" $ do
       H.div H.! A.id "flash" $ ""
@@ -224,11 +224,14 @@ htmlDecision _ (state,infos,decision) =
           when (not (null (discardPile player))) $ do
             H.h5 "Discard: "
             showCards (cardListToMap (discardPile player))
-          forM_ (Map.toList (mats player)) $ \(mat,cards) ->
-            when (not (null cards)) $ do
-              H.h5 $ toHtml (show mat)
-              showCards (cardListToMap cards)
 
+          when (not (null $ Map.findWithDefault [] IslandMat (mats player))) $ do
+            H.h5 $ "Island Mat"
+            showCards (cardListToMap (mats player Map.! IslandMat))
+
+          when (not (null $ Map.findWithDefault [] NativeVillageMat (mats player)) && pid == p) $ do
+            H.h5 $ "Native Village Mat"
+            showCards (cardListToMap (mats player Map.! NativeVillageMat))
 
     H.div H.! A.class_ "six wide column" $ do
       H.section H.! A.class_ "logs" $ do

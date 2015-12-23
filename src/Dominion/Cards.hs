@@ -31,6 +31,7 @@ cBorderVillage = cardData Map.! "border village"
 cMinion        = cardData Map.! "minion"
 cMint          = cardData Map.! "mint"
 cCache         = cardData Map.! "cache"
+cNativeVillage = cardData Map.! "native village"
 
 -- Generic action elements (potentially move to model)
 
@@ -41,9 +42,18 @@ playAttack :: Action -> Action
 playAttack attack attacker state = seqSteps checkAttack (opponentNames state attacker) state
   where
     checkAttack op state
-      | null moats = attack op state
-      | otherwise = decision (ChooseToReact (head moats) AttackTrigger (\b -> if b then toSimulation state else attack op state)) op state
+      | null moats = cont
+      | otherwise = decision (ChooseToReact (head moats)
+                                            AttackTrigger
+                                            (\b -> if b then toSimulation state else cont))
+                                            op state
       where
+        opponent = playerByName state op
+        cont = handleAllTriggers
+                AttackTrigger
+                (map Left (hand opponent) ++ inPlayDuration opponent)
+                NullEffect
+                attack op state
         moats = filter ((==cMoat) . typ) $ hand $ playerByName state op
 
 trashNCards :: Int -> Int -> Action
@@ -151,8 +161,7 @@ baseCards = map ($ Base)
 cellar :: Action
 cellar = plusActions 1
   &&+ \p s -> chooseMany (EffectDiscard unknown (Hand p)) (hand (playerByName s p)) (0,length $ (hand (playerByName s p)))
-  &&= \cards -> seqActions (\c -> discard c (Hand p)) cards
-  &&& plusCards (length cards)
+  &&= \cards -> discardAll cards (Hand p) &&& plusCards (length cards)
 
 chapel :: Action
 chapel = trashNCards 0 4
@@ -176,14 +185,12 @@ bureaucrat :: Action
 bureaucrat player state = (gainTo silver (TopOfDeck player) &&& playAttack treasureToDeck) player state
   where
     treasureToDeck op state
-      | null treasures = info AllPlayers (op ++ " reveals hand " ++ summarizeCards h) >> toSimulation state
-      -- TODO QDiscard is an approximation only
-      | otherwise = decision (ChooseCard (EffectDiscard unknown (Hand op)) treasures cont) op state
+      | null treasures = reveal h op state
+      | otherwise = decision (ChooseCard (EffectPut unknown (Hand op) (TopOfDeck op)) treasures cont) op state
       where
         h = hand $ playerByName state op
         treasures = filter isTreasure h
-        cont card = info AllPlayers (op ++ " reveals " ++ cardName (typ card))
-          >> toSimulation (transfer card (Hand op) (TopOfDeck op) state)
+        cont card = (reveal [card] &&& put card (Hand op) (TopOfDeck op)) op state
 
 feast :: Maybe Card -> Action
 feast mCard player state =
@@ -445,32 +452,61 @@ upgradeBenefit trashed player state
 seasideCards = map ($ Seaside)
   [notImplemented "Embargo", -- 301 Embargo
    notImplemented "Haven", -- 302 Haven
-   notImplemented "Lighthouse", -- 303 Lighthouse
-   notImplemented "Native Village", -- 304 Native Village
-   notImplemented "Pearl Diver", -- 305 Pearl Diver
+   withTrigger (duration 303 "Lighthouse" 2 (plusActions 1 &&& plusMoney 1) (plusMoney 1))
+    (whileInPlay lighthouseProtection),
+   action 304 "Native Village" 2 (plusActions 2 &&& nativeVillage),
+   action 305 "Pearl Diver" 2 (plusCards 1 &&& plusActions 1 &&& reshuffleIfNeeded &&& pearlDiver),
    notImplemented "Ambassador", -- 306 Ambassador
    duration 307 "Fishing Village" 3 (plusActions 2 &&& plusMoney 1) (plusActions 1 &&& plusMoney 1),
    notImplemented "Lookout", -- 308 Lookout
    notImplemented "Smugglers", -- 309 Smugglers
    action 310 "Warehouse" 3 (plusCards 3 &&& plusActions 1 &&& discardNCards 3),
    duration 311 "Caravan" 4 (plusCards 1 &&& plusActions 1) (plusCards 1),
-   notImplemented "Cutpurse", -- 312 Cutpurse
+   attack 312 "Cutpurse" 4 (plusMoney 2 &&& playAttack cutpurse),
    withInitialSupply (carddefA 313 "Island" (simpleCost 4) [Action, Victory] (const 2) island noTriggers) stdVictorySupply,
    notImplemented "Navigator", -- 314 Navigator
    notImplemented "Pirate Ship", -- 315 Pirate Ship
    action 316 "Salvager" 4 (plusBuys 1 &&& trashForGain salvager),
-   notImplemented "Sea Hag", -- 317 Sea Hag
+   attack 317 "Sea Hag" 4 (playAttack (reshuffleIfNeeded &&& seaHag)),
    notImplemented "Treasure Map", -- 318 Treasure Map
    action 319 "Bazaar" 5 (plusCards 1 &&& plusActions 2 &&& plusMoney 1),
-   notImplemented "Explorer", -- 320 Explorer
-   notImplemented "Ghost Ship", -- 321 Ghosh Ship
+   action 320 "Explorer" 5 explorer,
+   attack 321 "Ghost Ship" 5 (plusCards 2 &&& playAttack ghostShip),
    duration 322 "Merchant Ship" 5 (plusMoney 2) (plusMoney 2),
    notImplemented "Outpost", -- 323 Outpost
-   notImplemented "Tactician", -- 324 Tactician
-   notImplemented "Treasury", -- 325 Treasury
+   durationA 324 "Tactician" 5 tactician (plusCards 5 &&& plusBuys 1 &&& plusActions 1),
+   withTrigger (action 325 "Treasury" 5 (plusCards 1 &&& plusActions 1 &&& plusMoney 1))
+               (onDiscardFromPlay treasuryTrigger),
    duration 326 "Wharf" 5 (plusCards 2 &&& plusBuys 1) (plusCards 2 &&& plusBuys 1)
   ]
 
+cutpurse :: Action
+cutpurse op state
+  | null cands = reveal h op state
+  | otherwise = discard (head cands) (Hand op) op state
+  where
+    cands = filter ((==copper) . typ) h
+    h = hand $ playerByName state op
+
+explorer :: Action
+explorer player state =
+  chooseToReveal (==province)
+                 (gainTo gold (Hand player))
+                 (gainTo silver (Hand player))
+                 player
+                 state
+
+ghostShip :: Action
+ghostShip op state
+  | numToPut > 0 = chooseMany (EffectPut unknown (Hand op) (TopOfDeck op)) h (numToPut,numToPut)
+                    (\cards -> seqActions (\c -> put c (Hand op) (TopOfDeck op)) cards)
+                    op state
+  | otherwise = toSimulation state
+  where
+    numToPut = length h - 3
+    h = hand $ playerByName state op
+
+island :: Maybe Card -> Action
 island mCard player state
   | null h = islandPut player state
   | otherwise = chooseOne (EffectPut unknown (Hand player) (Mat player IslandMat)) h cont player state
@@ -481,7 +517,71 @@ island mCard player state
       Just card -> put card InPlay (Mat player IslandMat)
       Nothing -> pass
 
+lighthouseProtection :: TriggerHandler
+lighthouseProtection AttackTrigger _ _ _ = pass
+lighthouseProtection _ _ _ cont = cont
+
+nativeVillage :: Action
+nativeVillage player state = chooseEffects 1 [EffectPut unknown (TopOfDeck player) (Mat player NativeVillageMat),
+                                              EffectPut unknown (Mat player NativeVillageMat) (Hand player)]
+                                cont player state
+  where
+    cont [(EffectPut _ (TopOfDeck _) (Mat _ NativeVillageMat))] player state =
+      (reshuffleIfNeeded &&& \p s -> let d = deck (playerByName s p) in
+                                      if null d then toSimulation s
+                                                else put (head d) (TopOfDeck p) (Mat p NativeVillageMat) p s)
+      player state
+
+
+    cont [(EffectPut _ (Mat _ NativeVillageMat) (Hand _))] player state =
+      seqActions (\c -> put c (Mat player NativeVillageMat) (Hand player))
+                 (getCards (Mat player NativeVillageMat) state)
+                 player state
+    cont _ _ _ = error "Invalid selection for Native Village"
+
+
+pearlDiver :: Action
+pearlDiver player state
+  | null d = toSimulation state
+  | otherwise = decision (ChooseToUse (EffectPut (last d) (BottomOfDeck player) (TopOfDeck player))
+                                      (\b -> if b then put (last d) (BottomOfDeck player) (TopOfDeck player) player state
+                                                  else toSimulation state))
+                         player state
+  where
+    d = deck $ playerByName state player
+
+salvager :: Card -> Action
 salvager card player state = plusMoney (moneyCost (cost state (typ card))) player state
+
+seaHag :: Action
+seaHag op state
+  | null top = gainTo curse (TopOfDeck op) op state
+  | otherwise = (discard (head top) (TopOfDeck op) &&& gainTo curse (TopOfDeck op)) op state
+  where
+    top = getCards (TopOfDeck op) state
+
+
+tactician :: Maybe Card -> Action
+tactician source player state
+  | null h = case source of
+              -- nothing is going to happen, tactician should be discarded at the end of turn
+              (Just card) -> put card InPlayDuration InPlay player state
+              Nothing -> toSimulation state
+  | otherwise = seqActions (\c -> discard c (Hand player)) h player state
+  where
+    h = hand $ playerByName state player
+
+treasuryTrigger :: Card -> Action -> Action
+treasuryTrigger card cont player state
+  | null (filter (`hasType` Victory) buys) =
+    decision (ChooseToUse (EffectPut card (Discard player) (TopOfDeck player))
+                          (\b -> if b then (cont &&& put card (Discard player) (TopOfDeck player)) player state
+                                      else cont player state))
+      player state
+  | otherwise = cont player state
+  where
+    buys = buysThisTurn state
+
 
 -- Alchemy 4xx
 

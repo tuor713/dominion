@@ -19,7 +19,7 @@ data CardType = Action | Treasure | Victory | CurseType {- This is a bit of a ha
     Prize | Looter | Ruins | Knight | Reserve | Traveller
     deriving (Eq, Ord, Read, Show)
 
-data Location = Hand PlayerId | Discard PlayerId | TopOfDeck PlayerId |
+data Location = Hand PlayerId | Discard PlayerId | TopOfDeck PlayerId | BottomOfDeck PlayerId |
   InPlay | InPlayDuration | Trash | Supply | Mat PlayerId Mat
   deriving (Eq, Show)
 
@@ -120,6 +120,10 @@ whileInHand _ _ _ _ cont player state = cont player state
 combineHandlers :: TriggerHandler -> TriggerHandler -> TriggerHandler
 combineHandlers h1 h2 trigger effect source cont = h1 trigger effect source (h2 trigger effect source cont)
 
+onDiscardFromPlay :: (Card -> Action -> Action) -> TriggerHandler
+onDiscardFromPlay act DiscardTrigger (EffectDiscard c1 InPlay) (Left c2) cont = if c1 == c2 then act c2 cont else cont
+onDiscardFromPlay _ _ _ _ cont = cont
+
 onBuy :: (CardDef -> Action) -> TriggerHandler
 onBuy action BuyTrigger (EffectBuy def) _ cont = (action def) &&& cont
 onBuy _ _ _ _ cont = cont
@@ -166,6 +170,11 @@ actionA id name cost effect edition = CardDef id name edition (simpleCost cost) 
 duration :: Int -> String -> Int -> Action -> Action -> Edition -> CardDef
 duration id name cost effect startOfTurn edition =
   CardDef id name edition (simpleCost cost) [Action, Duration] noPoints  (\_ -> effect) (const 10) (onStartOfTurn startOfTurn) (const True)
+
+durationA :: Int -> String -> Int -> (Maybe Card -> Action) -> Action -> Edition -> CardDef
+durationA id name cost effect startOfTurn edition =
+  CardDef id name edition (simpleCost cost) [Action, Duration] noPoints  effect (const 10) (onStartOfTurn startOfTurn) (const True)
+
 
 attack :: Int -> String -> Int -> Action -> Edition -> CardDef
 attack id name cost effect edition = CardDef id name edition (simpleCost cost) [Action, Attack] noPoints (\_ -> effect) (const 10) noTriggers (const True)
@@ -218,7 +227,7 @@ basicCards = [copper, silver, gold, estate, duchy, province, curse, potion, plat
 
 type PlayerId = String
 
-data Mat = IslandMat deriving (Eq, Ord, Show)
+data Mat = IslandMat | NativeVillageMat deriving (Eq, Ord, Show)
 data Token = VictoryToken | CoinToken deriving (Eq, Ord, Show)
 
 data Player = Player { name :: PlayerId,
@@ -256,11 +265,14 @@ stackMod mod (StackedModifier xs) = StackedModifier (mod:xs)
 stackMod (StackedModifier xs) mod = StackedModifier (xs ++ [mod])
 stackMod m1 m2 = StackedModifier [m1,m2]
 
+data Log = LogBuy CardDef | LogPlay Card deriving (Eq, Show)
+
 data TurnState = TurnState { money :: Int,
                              potions :: Int,
                              buys :: Int,
                              actions :: Int,
-                             modifiers :: Map.Map ModAttribute Modifier
+                             modifiers :: Map.Map ModAttribute Modifier,
+                             turnLog :: [Log]
                              }
                              deriving (Show)
 
@@ -315,6 +327,7 @@ data Trigger =
   BuyTrigger |
   GainTrigger |
   TrashTrigger |
+  DiscardTrigger |
   StartOfTurnTrigger |
   StartOfGameTrigger
   deriving (Eq, Ord, Show)
@@ -539,32 +552,46 @@ chooseEffects :: Int -> [Effect] -> ([Effect] -> Action) -> Action
 chooseEffects num effects cont player state =
   decision (ChooseEffects num effects (\chosen -> cont chosen player state)) player state
 
+chooseToReveal :: (CardDef -> Bool) -> Action -> Action -> Action
+chooseToReveal selector fyes fno player state
+  | null cands = fno player state
+  | otherwise = decision (ChooseToUse (EffectReveal (head cands))
+                                      (\b -> if b then (reveal [(head cands)] &&& fyes) player state
+                                                  else fno player state))
+                  player state
+  where
+    cands = filter (selector . typ) $ hand $ playerByName state player
+
+
 -- Game functions
 
 moveTo :: Card -> Location -> GameState -> GameState
-moveTo c (Hand player) state      = updatePlayer state player (\p -> p { hand = c : hand p })
-moveTo c (Discard player) state   = updatePlayer state player (\p -> p { discardPile = c : discardPile p })
-moveTo c (TopOfDeck player) state = updatePlayer state player (\p -> p { deck = c : deck p })
-moveTo c InPlay state             = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = c : inPlay p })
-moveTo c InPlayDuration state     = updatePlayer state (name (activePlayer state)) (\p -> p { inPlayDuration = (Left c) : inPlayDuration p })
-moveTo c Trash state              = state { trashPile = c : trashPile state }
-moveTo c Supply state             = state { piles = Map.adjust (c:) (typ c) (piles state) }
-moveTo c (Mat player mat) state   = updatePlayer state player (\p -> p { mats = Map.insertWith (++) mat [c] (mats p) })
+moveTo c (Hand player) state         = updatePlayer state player (\p -> p { hand = c : hand p })
+moveTo c (Discard player) state      = updatePlayer state player (\p -> p { discardPile = c : discardPile p })
+moveTo c (TopOfDeck player) state    = updatePlayer state player (\p -> p { deck = c : deck p })
+moveTo c (BottomOfDeck player) state = updatePlayer state player (\p -> p { deck = deck p ++ [c]})
+moveTo c InPlay state                = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = c : inPlay p })
+moveTo c InPlayDuration state        = updatePlayer state (name (activePlayer state)) (\p -> p { inPlayDuration = (Left c) : inPlayDuration p })
+moveTo c Trash state                 = state { trashPile = c : trashPile state }
+moveTo c Supply state                = state { piles = Map.adjust (c:) (typ c) (piles state) }
+moveTo c (Mat player mat) state      = updatePlayer state player (\p -> p { mats = Map.insertWith (++) mat [c] (mats p) })
 
 moveFrom :: Card -> Location -> GameState -> GameState
-moveFrom c (Hand player) state      = updatePlayer state player (\p -> p { hand = L.delete c $ hand p })
-moveFrom c (Discard player) state   = updatePlayer state player (\p -> p { discardPile = L.delete c $ discardPile p })
-moveFrom c (TopOfDeck player) state = updatePlayer state player (\p -> p { deck = L.delete c $ deck p })
-moveFrom c InPlay state             = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = L.delete c $ inPlay p })
-moveFrom c InPlayDuration state     = updatePlayer state (name (activePlayer state)) (\p -> p { inPlayDuration = L.delete (Left c) $ inPlayDuration p })
-moveFrom c Trash state              = state { trashPile = L.delete c $ trashPile state }
-moveFrom c Supply state             = state { piles = Map.adjust tail (typ c) (piles state) }
-moveFrom c (Mat player mat) state   = updatePlayer state player (\p -> p { mats = Map.adjust (L.delete c) mat (mats p) })
+moveFrom c (Hand player) state         = updatePlayer state player (\p -> p { hand = L.delete c $ hand p })
+moveFrom c (Discard player) state      = updatePlayer state player (\p -> p { discardPile = L.delete c $ discardPile p })
+moveFrom c (TopOfDeck player) state    = updatePlayer state player (\p -> p { deck = L.delete c $ deck p })
+moveFrom c (BottomOfDeck player) state = updatePlayer state player (\p -> p { deck = reverse $ L.delete c $ reverse (deck p)})
+moveFrom c InPlay state                = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = L.delete c $ inPlay p })
+moveFrom c InPlayDuration state        = updatePlayer state (name (activePlayer state)) (\p -> p { inPlayDuration = L.delete (Left c) $ inPlayDuration p })
+moveFrom c Trash state                 = state { trashPile = L.delete c $ trashPile state }
+moveFrom c Supply state                = state { piles = Map.adjust tail (typ c) (piles state) }
+moveFrom c (Mat player mat) state      = updatePlayer state player (\p -> p { mats = Map.adjust (L.delete c) mat (mats p) })
 
 getCards :: Location -> GameState -> [Card]
 getCards (Hand player) state = hand $ playerByName state player
 getCards (Discard player) state = discardPile $ playerByName state player
 getCards (TopOfDeck player) state = take 1 $ deck $ playerByName state player
+getCards (BottomOfDeck player) state = take 1 $ reverse $ deck $ playerByName state player
 getCards InPlay state = inPlay $ activePlayer state
 getCards InPlayDuration state = Either.lefts $ inPlayDuration $ activePlayer state
 getCards Trash state = trashPile state
@@ -663,6 +690,13 @@ points p = pcards + ptokens
 turnNo :: GameState -> Int
 turnNo g = ((ply g + 1) `div` length (players g))
 
+buysThisTurn :: GameState -> [CardDef]
+buysThisTurn state = Maybe.catMaybes $ map extract $ turnLog $ turn state
+  where
+    extract (LogBuy c) = Just c
+    extract _ = Nothing
+
+
 unknownDef = CardDef (-1) "XXX" Base (simpleCost 0) [Action] (\_ -> 0) (\_ -> pass) (const 0) noTriggers (const False)
 unknown = Card (-1) unknownDef
 
@@ -730,8 +764,7 @@ reshuffleDiscard p =
 canDraw :: Player -> Bool
 canDraw p = not (null (hand p)) || not (null (discardPile p))
 
-draw :: Player -> Int -> SimulationT
- Player
+draw :: Player -> Int -> SimulationT Player
 draw p num
   | length (deck p) < num = fmap (\p -> p !!! num) (reshuffleDiscard p)
   | otherwise = return $ p !!! num
@@ -750,6 +783,9 @@ ensureCanDraw num state name
 addModifier :: ModAttribute -> Modifier -> Action
 addModifier attr mod _ state =
   toSimulation $ state { turn = (turn state) { modifiers = Map.insertWith stackMod attr mod (modifiers (turn state)) } }
+
+addLog :: Log -> Action
+addLog item _ state = toSimulation $ state { turn = (turn state) { turnLog = item : turnLog (turn state) }}
 
 playEffect :: CardDef -> Maybe Card -> Action
 playEffect card source player state =
@@ -786,6 +822,13 @@ handleAllTriggers trigger cards effect cont =
         cont
         cards
 
+reshuffle :: Action
+reshuffle player state = reshuffleDiscard (playerByName state player) >>= \p ->
+                         toSimulation $ state { players = Map.insert player p (players state) }
+
+reshuffleIfNeeded :: Action
+reshuffleIfNeeded player state = if null (deck (playerByName state player)) then reshuffle player state else toSimulation state
+
 put :: Card -> Location -> Location -> Action
 put card source target _ state = toSimulation $ transfer card source target state
 
@@ -820,7 +863,8 @@ reveal cards player state = info AllPlayers (player ++ " reveals " ++ summarizeC
 buy :: CardDef -> Action
 buy card player state =
   info AllPlayers (player ++ " buys " ++ cardName card) >>
-  handleAllTriggers BuyTrigger ((Right card):map Left (inPlay $ playerByName state player)) (EffectBuy card) (gain card)
+  handleAllTriggers BuyTrigger ((Right card):map Left (inPlay $ playerByName state player)) (EffectBuy card)
+    (addLog (LogBuy card) &&& gain card)
     player state
 
 trash :: Card -> Location -> Action
@@ -840,7 +884,10 @@ trashAll cards source player state =
 discard :: Card -> Location -> Action
 discard card loc player state =
   info AllPlayers (player ++ " discards " ++ cardName (typ card)) >>
-  return (State $ transfer card loc (Discard player) state)
+  handleTriggers DiscardTrigger (Left card) (EffectDiscard card loc) (put card loc (Discard player)) player state
+
+discardAll :: [Card] -> Location -> Action
+discardAll cards loc = seqActions (\c -> discard c loc) cards
 
 plusMoney :: Int -> Action
 plusMoney num _ state = toSimulation $ state { turn = (turn state) { money = num + money (turn state) } }
@@ -872,18 +919,22 @@ pass _ = toSimulation
 -- Macro flows
 
 newTurn :: TurnState
-newTurn = TurnState { money = 0, buys = 1, actions = 1, potions = 0, modifiers = Map.empty }
+newTurn = TurnState { money = 0, buys = 1, actions = 1, potions = 0, modifiers = Map.empty, turnLog = [] }
 
-nextTurn :: GameState -> SimulationT GameState
-nextTurn state = nnext
+nextTurn :: GameState -> Simulation
+nextTurn state = (discardAll (inPlay player) InPlay
+                  &&& discardAll (hand player) (Hand current)
+                  &&& plusCards 5
+                  &&& next)
+                  current state
   where
-    current = head (turnOrder state)
-    next = state { turn = newTurn,
-                   turnOrder = tail (turnOrder state) ++ [current],
-                   ply = 1 + ply state}
-
-    -- TODO can cleanup trigger anything like discard ?
-    nnext = updatePlayerR next current (\p -> draw p { hand = [], inPlay = [], discardPile = hand p ++ inPlay p ++ discardPile p } 5)
+    player = activePlayer state
+    current = activePlayerId state
+    next :: Action
+    next _ state = toSimulation $
+                   state { turn = newTurn,
+                           turnOrder = tail (turnOrder state) ++ [current],
+                           ply = 1 + ply state}
 
 checkFinished :: GameState -> Bool
 checkFinished state =
@@ -892,16 +943,16 @@ checkFinished state =
 
 -- TODO island mat should be handled by and end game trigger of sorts
 endGame :: GameState -> GameState
-endGame state = state { finished = True, players = Map.map clearIslandMat (players state) }
+endGame state = state { finished = True, players = Map.map clearMats (players state) }
   where
-    clearIslandMat player = player { deck = deck player ++ Map.findWithDefault [] IslandMat (mats player),
-                                     mats = Map.delete IslandMat (mats player)
-                                     }
+    clearMats player = player { deck = deck player
+                                       ++ Map.findWithDefault [] IslandMat (mats player)
+                                       ++ Map.findWithDefault [] NativeVillageMat (mats player),
+                                mats = Map.delete NativeVillageMat $ Map.delete IslandMat (mats player)
+                                }
 
 cleanupPhase :: Action
-cleanupPhase _ state = M.liftM State (nextTurn (if done then endGame state else state))
-  where
-    done = checkFinished state
+cleanupPhase _ state = nextTurn state `andThen` \s -> return $ State $ if checkFinished s then endGame s else s
 
 buyPhase :: Action
 buyPhase name state

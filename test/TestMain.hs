@@ -66,7 +66,7 @@ gameEndTest = testGroup "Game End"
     ]
   where
     sut = evalSim (mkGame StandardGame ["Alice","Bob"] starterTableau) (mkStdGen 0)
-    next = evalSim (nextTurn sut) (mkStdGen 0)
+    next = toState $ evalSim (nextTurn sut) (mkStdGen 0)
     afterEstate = toState $ evalSim ((gain estate &&& cleanupPhase) "Alice" sut) (mkStdGen 0)
 
 
@@ -80,7 +80,8 @@ cardTests = testGroup "Cards"
       4 @=? cardPoints (lookupCard "duke") Player { deck = map fakeCard [duchy,estate,copper],
                                                     hand = map fakeCard [duchy,duchy],
                                                     discardPile = map fakeCard [gold,duchy],
-                                                    inPlay = []}]
+                                                    inPlay = [],
+                                                    inPlayDuration = []}]
 
 
 -- Bots

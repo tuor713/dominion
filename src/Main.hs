@@ -235,18 +235,20 @@ instance J.ToJSON Trigger where
   toJSON BuyTrigger = J.String "buy"
   toJSON GainTrigger = J.String "gain"
   toJSON TrashTrigger = J.String "trash"
+  toJSON DiscardTrigger = J.String "discard"
   toJSON StartOfTurnTrigger = J.String "startOfTurn"
   toJSON StartOfGameTrigger = J.String "startOfGame"
 
 instance J.ToJSON Location where
-  toJSON Supply         = J.toJSON [J.String "supply"]
-  toJSON (Hand p)       = J.toJSON [J.String "hand" , jString p]
-  toJSON (Discard p)    = J.toJSON [J.String "discardPile", jString p]
-  toJSON Trash          = J.toJSON [J.String "trash"]
-  toJSON (TopOfDeck p)  = J.toJSON [J.String "topOfDeck", jString p]
-  toJSON InPlay         = J.toJSON [J.String "inPlay"]
-  toJSON InPlayDuration = J.toJSON [J.String "inPlayDuration"]
-  toJSON (Mat p mat)    = J.toJSON [J.String "mat", jString p, jString (show mat)]
+  toJSON Supply           = J.toJSON [J.String "supply"]
+  toJSON (Hand p)         = J.toJSON [J.String "hand" , jString p]
+  toJSON (Discard p)      = J.toJSON [J.String "discardPile", jString p]
+  toJSON Trash            = J.toJSON [J.String "trash"]
+  toJSON (TopOfDeck p)    = J.toJSON [J.String "topOfDeck", jString p]
+  toJSON (BottomOfDeck p) = J.toJSON [J.String "bottomOfDeck", jString p]
+  toJSON InPlay           = J.toJSON [J.String "inPlay"]
+  toJSON InPlayDuration   = J.toJSON [J.String "inPlayDuration"]
+  toJSON (Mat p mat)      = J.toJSON [J.String "mat", jString p, jString (show mat)]
 
 instance J.ToJSON Effect where
   toJSON (EffectPlusCards no)          = J.toJSON [J.String "plusCards", J.toJSON no]
