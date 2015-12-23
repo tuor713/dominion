@@ -663,7 +663,7 @@ points p = pcards + ptokens
 turnNo :: GameState -> Int
 turnNo g = ((ply g + 1) `div` length (players g))
 
-unknownDef = CardDef (-1) "XXX" Base (simpleCost 0) [] (\_ -> 0) (\_ -> pass) (const 0) noTriggers (const False)
+unknownDef = CardDef (-1) "XXX" Base (simpleCost 0) [Action] (\_ -> 0) (\_ -> pass) (const 0) noTriggers (const False)
 unknown = Card (-1) unknownDef
 
 -- Removes invisble information from the state such as opponents hands
@@ -793,7 +793,7 @@ gainFrom :: Card -> Location -> Action
 gainFrom card source player state =
   info AllPlayers (player ++ " gains " ++ cardName (typ card)) >>
   handleAllTriggers GainTrigger
-    ((Left card):map Left (hand (playerByName state player)))
+    ((Left card):(map Left (hand (playerByName state player)) ++ map Left (inPlay (playerByName state player))))
     (EffectGainFrom card source (Discard player))
     (put card source (Discard player))
     player state
@@ -803,7 +803,7 @@ gainTo card target player state
   | inSupply state card =
     info AllPlayers (player ++ " gains " ++ cardName card) >>
     handleAllTriggers GainTrigger
-                      ((Right card):map Left (hand (playerByName state player)))
+                      ((Right card):(map Left (hand (playerByName state player)) ++ map Left (inPlay (playerByName state player))))
                       (EffectGain card target)
                       transferT
                       player state

@@ -55,3 +55,33 @@ section {
 .notimplemented {
   opacity: 0.3;
 }
+
+.cardlink {
+  margin-right: 0.5em;
+  padding: 1px;
+}
+
+.cardlink img {
+  display: none;
+}
+
+.cardlink:hover img {
+  display: block;
+  position: fixed;
+}
+
+.action {
+  background-color: papayawhip;
+}
+
+.treasure {
+  background-color: gold;
+}
+
+.victory {
+  background-color: green;
+}
+
+.cursetype {
+  background-color: mediumpurple;
+}

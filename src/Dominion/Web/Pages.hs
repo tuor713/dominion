@@ -165,10 +165,16 @@ showCards :: Map.Map CardDef Int -> H.Html
 showCards cards =
   forM_ (L.sortBy (\(c1,_) (c2,_) -> compareCard c1 c2) (Map.toList cards))
     $ \(card,num) ->
+      H.span H.! A.class_ (fromString ("cardlink " ++ show (head (types card)))) $ do
+        toHtml (show num ++ " " ++ cardName card)
+        H.img H.! A.src (fromString (cardImagePath card))
+
+      {-
       H.div H.! A.class_ "imageoverlay" $ do
         H.img H.! A.style "margin: 5px; width: 100px; height: 159px"
               H.! A.src (fromString (cardImagePath card))
         H.h3 H.! A.class_ "overlay" $ toHtml (show num)
+      -}
 
 cardListToMap :: [Card] -> Map.Map CardDef Int
 cardListToMap cards =
@@ -185,7 +191,7 @@ htmlDecision _ (state,infos,decision) =
         decisionHtml decision
 
       H.section H.! A.class_ "state" $ do
-        H.div $ do
+        H.p $ do
           H.h4 "Turn: "
           H.span $ toHtml $ "Turn: " ++ show (turnNo state) ++ ", "
           H.span $ toHtml $ "Actions: " ++ show (actions (turn state)) ++ ", "
@@ -193,35 +199,35 @@ htmlDecision _ (state,infos,decision) =
           H.span $ toHtml $ "Money: " ++ show (money (turn state))
           when (0 < potions (turn state)) $ H.span $ toHtml $ ", Potions: " ++ show (potions (turn state))
 
-        H.div $ do
+        H.p $ do
           H.h4 "Tableau:"
           showCards $ Map.map length (piles state)
 
-        forM_ (Map.toAscList (players state)) $ \(pid,player) ->
-          H.div $ do
-            H.h4 $ toHtml $ "Player - " ++ pid
-            when (not (Map.null (tokens player))) $ do
-              H.h5 "Tokens: "
-              H.p $
-                forM_ (Map.toList (tokens player)) $ \(token,num) -> do
-                  toHtml $ show token ++ ": " ++ show num
-                  H.br
-            when (not (null (deck player))) $ do
-              H.h5 "Deck: "
-              showCards (cardListToMap (deck player))
-            when (not (null (discardPile player))) $ do
-              H.h5 "Discard: "
-              showCards (cardListToMap (discardPile player))
-            when (not (null (hand player))) $ do
-              H.h5 "Hand: "
-              showCards (cardListToMap (hand player))
-            when (not (null (inPlay player))) $ do
-              H.h5 "InPlay: "
-              showCards (cardListToMap (inPlay player))
-            forM_ (Map.toList (mats player)) $ \(mat,cards) ->
-              when (not (null cards)) $ do
-                H.h5 $ toHtml (show mat)
-                showCards (cardListToMap cards)
+      forM_ (Map.toAscList (players state)) $ \(pid,player) ->
+        H.section $ do
+          H.h4 $ toHtml $ "Player - " ++ pid
+          when (not (Map.null (tokens player))) $ do
+            H.h5 "Tokens: "
+            H.p $
+              forM_ (Map.toList (tokens player)) $ \(token,num) -> do
+                toHtml $ show token ++ ": " ++ show num
+                H.br
+          when (not (null (hand player))) $ do
+            H.h5 "Hand: "
+            showCards (cardListToMap (hand player))
+          when (not (null (inPlay player))) $ do
+            H.h5 "InPlay: "
+            showCards (cardListToMap (inPlay player))
+          when (not (null (deck player))) $ do
+            H.h5 "Deck: "
+            showCards (cardListToMap (deck player))
+          when (not (null (discardPile player))) $ do
+            H.h5 "Discard: "
+            showCards (cardListToMap (discardPile player))
+          forM_ (Map.toList (mats player)) $ \(mat,cards) ->
+            when (not (null cards)) $ do
+              H.h5 $ toHtml (show mat)
+              showCards (cardListToMap cards)
 
 
     H.div H.! A.class_ "six wide column" $ do

@@ -458,7 +458,7 @@ seasideCards = map ($ Seaside)
    withInitialSupply (carddefA 313 "Island" (simpleCost 4) [Action, Victory] (const 2) island noTriggers) stdVictorySupply,
    notImplemented "Navigator", -- 314 Navigator
    notImplemented "Pirate Ship", -- 315 Pirate Ship
-   action 316 "Salvager" 4 (trashForGain salvager),
+   action 316 "Salvager" 4 (plusBuys 1 &&& trashForGain salvager),
    notImplemented "Sea Hag", -- 317 Sea Hag
    notImplemented "Treasure Map", -- 318 Treasure Map
    action 319 "Bazaar" 5 (plusCards 1 &&& plusActions 2 &&& plusMoney 1),
@@ -530,12 +530,12 @@ prosperityCards = map ($ Prosperity)
    action 508 "Worker's Village" 4 (plusCards 1 &&& plusActions 2 &&& plusBuys 1),
    action 509 "City" 5 city,
    notImplemented "Contraband", -- 510 contraband
-   notImplemented "Counting House", -- 511 counting house
+   action 511 "Counting House" 5 countingHouse,
    withTrigger (action 512 "Mint" 5 mintAction) (onBuySelf mintTrigger),
    notImplemented "Mountebank", -- 513 mountebank
    notImplemented "Rabble", -- 514 rabble
-   notImplemented "Royal Seal", -- 515 royal seal
-   notImplemented "Vault", -- 516 vault
+   withTrigger (treasure 515 "Royal Seal" 5 2) (whileInPlay royalSealTrigger),
+   action 516 "Vault" 5 (plusCards 2 &&& vault),
    notImplemented "Venture", -- 517 venture
    notImplemented "Goons", -- 518 goons
    withBuyRestriction
@@ -567,8 +567,29 @@ watchtowerTrigger GainTrigger (EffectGain def to) (Left w) cont =
   cont &&& reveal [w] &&& \player state -> decision (ChooseToReact w GainTrigger (\b -> if b then watchtowerReplay def to player state else toSimulation state)) player state
 watchtowerTrigger GainTrigger (EffectGainFrom card _ to) (Left w) cont =
   cont &&& reveal [w] &&& \player state -> decision (ChooseToReact w GainTrigger (\b -> if b then watchtowerReplay (typ card) to player state else toSimulation state)) player state
-
 watchtowerTrigger _ _ _ cont = cont
+
+royalSealTrigger :: TriggerHandler
+royalSealTrigger GainTrigger (EffectGain def to) _ cont =
+  cont &&& \player state ->
+    let cands = filter ((==def) . typ) (getCards to state) in
+    if null cands
+    then toSimulation state
+    else optDecision (ChooseToUse (EffectPut (head cands) (Discard player) (TopOfDeck player))
+                                  (\b -> if b then put (head cands) (Discard player) (TopOfDeck player) player state
+                                              else toSimulation state))
+          player state
+royalSealTrigger GainTrigger (EffectGainFrom card _ to) _ cont =
+  cont &&& \player state ->
+    let cands = filter (==card) (getCards to state) in
+    if null cands
+    then toSimulation state
+    else optDecision (ChooseToUse (EffectPut (head cands) (Discard player) (TopOfDeck player))
+                                  (\b -> if b then put (head cands) (Discard player) (TopOfDeck player) player state
+                                              else toSimulation state))
+          player state
+royalSealTrigger _ _ _ cont = cont
+
 
 bank player state = plusMoney (length ts) player state
   where
@@ -601,6 +622,17 @@ city = plusCards 1
     extra 1 = plusCards 1
     extra _ = plusCards 1 &&& plusMoney 1 &&& plusBuys 1
 
+countingHouse :: Action
+countingHouse player state
+  | null cands = toSimulation state
+  | otherwise = chooseMany (EffectPut unknown (Discard player) (Hand player))
+                           cands
+                           (0,length cands)
+                           (\cards -> seqActions (\c -> put c (Discard player) (Hand player)) cards)
+                           player state
+  where
+    cands = filter ((==copper) . typ) $ discardPile $ playerByName state player
+
 mintAction :: Action
 mintAction player state
   | null treasures = toSimulation state
@@ -621,6 +653,20 @@ kingsCourt player state
     actions = filter isAction (hand (playerByName state player))
     cont card = (play card &&& playEffect (typ card) Nothing &&& playEffect (typ card) Nothing) player state
 
+vault :: Action
+vault player state =
+  (chooseMany (EffectDiscard unknown (Hand player)) h (0,length h) (\cards -> seqActions (\c -> discard c (Hand player)) cards &&& plusMoney (length cards))
+   &&& eachOtherPlayer otherAction)
+    player state
+  where
+    h = hand $ playerByName state player
+    otherCont player state cards = (seqActions (\c -> discard c (Hand player)) cards &&& if length cards == 2 then plusCards 1 else pass) player state
+    otherAction player state
+      | null h2 = toSimulation state
+      | otherwise = optDecision (ChooseCards (EffectDiscard unknown (Hand player)) h2 (num,num) (otherCont player state)) player state
+      where
+        h2 = hand $ playerByName state player
+        num = min 2 (length h2)
 
 -- Cornucopia 6xx
 
