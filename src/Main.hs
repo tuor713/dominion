@@ -172,7 +172,11 @@ suggestedTableauHandler = (writeHtml . htmlSuggestedTableaus)
 
    ("Paths to Victory",         ["bishop", "counting house", "goons", "monument", "peddler", "baron", "harem", "pawn", "shanty town", "upgrade"]),
    ("All Along the Watchtower", ["hoard", "talisman", "trade route", "vault", "watchtower", "bridge", "great hall", "mining village", "pawn", "torturer"]),
-   ("Lucky Seven",              ["bank", "expand", "forge", "king's court", "vault", "bridge", "coppersmith", "swindler", "tribute", "wishing well"])
+   ("Lucky Seven",              ["bank", "expand", "forge", "king's court", "vault", "bridge", "coppersmith", "swindler", "tribute", "wishing well"]),
+
+   ("Arts and Crafts",          ["stonemason", "advisor", "baker", "journeyman", "merchant guild", "laboratory", "cellar", "workshop", "festival", "moneylender"]),
+   ("Clean Living",             ["butcher", "baker", "candlestick maker", "doctor", "soothsayer", "militia", "thief", "moneylender", "gardens", "village"]),
+   ("Gilding the Lily",         ["plaza", "masterpiece", "candlestick maker", "taxman", "herald", "library", "remodel", "adventurer", "market", "chancellor"])
    ]
 
 data StartGameReq = StartGameReq { gamePlayers :: [String], gameCards :: [String], gameType :: GameType }

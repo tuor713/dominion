@@ -175,6 +175,18 @@ cardListToMap cards =
   Map.fromListWith (+) $ map ((,1) . typ) cards
 
 
+logsSidebar :: [(String,String)] -> H.Html
+logsSidebar infos =
+  H.div H.! A.class_ "six wide column" $ do
+    H.section H.! A.class_ "logs" $ do
+      H.h3 "Game Log"
+      H.div $ do
+        forM_  infos $ \(vis,msg) ->
+          H.div H.! A.class_ "log" $ do
+            H.span H.! A.class_ "player" $ toHtml ("@" ++ vis ++ " ")
+            H.span $ toHtml msg
+
+
 htmlDecision :: PlayerId -> (GameState,[Info],Decision) -> H.Html
 htmlDecision p (state,infos,decision) =
   template "/play" $ do
@@ -227,17 +239,10 @@ htmlDecision p (state,infos,decision) =
             H.h5 $ "Native Village Mat"
             showCards (cardListToMap (mats player Map.! NativeVillageMat))
 
-    H.div H.! A.class_ "six wide column" $ do
-      H.section H.! A.class_ "logs" $ do
-        H.h3 "Game Log"
-        H.div $ do
-          when (length infos > 20) $ do
-            H.div H.! A.class_ "log" $ do
-              H.span "[...]"
-          forM_  (drop (max 0 (length infos - 20)) infos) $ \(vis,msg) ->
-            H.div H.! A.class_ "log" $ do
-              H.span H.! A.class_ "player" $ toHtml ("@" ++ show vis ++ " ")
-              H.span $ toHtml msg
+    logsSidebar $
+      if length infos > 20
+      then ("", "[...]"):map (\(vis,msg) -> ("@" ++ show vis, msg)) (drop (max 0 (length infos - 20)) infos)
+      else map (\(vis,msg) -> ("@" ++ show vis, msg)) infos
 
 
 htmlFinished :: GameState -> [Info] -> H.Html
@@ -257,14 +262,8 @@ htmlFinished state infos =
             H.h5 "Cards: "
             showCards (cardListToMap (allCards player))
 
-    H.div H.! A.class_ "six wide column" $ do
-      H.section H.! A.class_ "logs" $ do
-        H.h3 "Game Log"
-        H.div $ do
-          forM_  infos $ \(vis,msg) ->
-            H.div H.! A.class_ "log" $ do
-              H.span H.! A.class_ "player" $ toHtml ("@" ++ show vis ++ " ")
-              H.span $ toHtml msg
+    logsSidebar (map (\(vis,msg) -> ("@" ++ show vis, msg)) infos)
+
 
 htmlSetupGame :: H.Html
 htmlSetupGame =
@@ -314,6 +313,7 @@ htmlSetupGame =
                     H.img H.! A.style "width: 100px; height: 159px;" H.! A.src (fromString (cardImagePath card))
                     H.div H.! A.class_ "content" $ toHtml (cardName card)
 
+
 htmlSuggestedTableaus :: [(String, [String])] -> H.Html
 htmlSuggestedTableaus tableaus =
   template "/game/suggested" $ do
@@ -333,9 +333,6 @@ htmlSuggestedTableaus tableaus =
             H.div $ do
               H.button H.! A.class_ "ui button"
                        H.! A.onclick (fromString ("startGame('standard',[\"" ++ L.intercalate "\",\"" cards ++ "\"]);")) $ "Go"
-
-
-
 
 
 htmlSimulation :: [CardDef] -> Stats -> H.Html

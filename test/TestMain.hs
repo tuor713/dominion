@@ -11,6 +11,9 @@ import qualified Data.List as L
 import Test.Tasty
 import Test.Tasty.HUnit
 
+import CardTests
+import TestUtil
+
 
 
 main :: IO ()
@@ -50,10 +53,6 @@ initialStateTest = testGroup "Game creation"
     [sut,sutColony] = map (\typ -> evalSim (mkGame typ ["Alice","Bob"] starterTableau) (mkStdGen 0)) [StandardGame, ColonyGame]
     sutPotion = evalSim (mkGame StandardGame ["Alice","Bob"] (lookupCard "vineyard":tail starterTableau)) (mkStdGen 0)
 
-toState :: GameStep -> GameState
-toState (State state) = state
-toState _ = error "Trying to extract state from decision"
-
 gameEndTest = testGroup "Game End"
   [ testCase "Tie at the start of the game" $
     Tie ["Alice","Bob"] @=? winner sut,
@@ -70,27 +69,11 @@ gameEndTest = testGroup "Game End"
     afterEstate = toState $ evalSim ((gain estate &&& cleanupPhase) "Alice" sut) (mkStdGen 0)
 
 
--- Cards
-
-fakeCard :: CardDef -> Card
-fakeCard typ = Card 0 typ
-
-cardTests = testGroup "Cards"
-  [ testCase "[Duke]'s victory points are equal to the number of [Duchies]" $
-      4 @=? cardPoints (lookupCard "duke") Player { deck = map fakeCard [duchy,estate,copper],
-                                                    hand = map fakeCard [duchy,duchy],
-                                                    discardPile = map fakeCard [gold,duchy],
-                                                    inPlay = [],
-                                                    inPlayDuration = []}]
-
 
 -- Bots
 
 botTests = testGroup "Bots"
   [ gainsToEndGameTest ]
-
-mkPiles :: [(CardDef,Int)] -> Map.Map CardDef [Card]
-mkPiles cs = Map.fromList $ map (\(def,no) -> (def, map fakeCard $ replicate no def)) cs
 
 gainsToEndGameTest = testGroup "gainsToEndGame"
   [ testCase "number of provinces" $

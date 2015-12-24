@@ -1062,18 +1062,26 @@ guildsCards = map ($ Guilds) [
   notImplemented "Doctor", -- 903
   notImplemented "Masterpiece", -- 904
   notImplemented "Advisor", -- 905
-  notImplemented "Plaza", -- 906
+  action 906 "Plaza" 4 (plusCards 1 &&& plusActions 2 &&& plaza),
   notImplemented "Taxman", -- 907
   notImplemented "Herald", -- 908
   withTrigger (action 909 "Baker" 5 (plusCards 1 &&& plusActions 1 &&& plusTokens 1 CoinToken))
     (onStartOfGame (\_ state -> foldr (\name sim -> sim `andThen` plusTokens 1 CoinToken name)
                                       (return $ State state)
                                       (map name $ Map.elems $ players state))),
-  notImplemented "Butcher",
-  notImplemented "Journeyman",
-  notImplemented "Merchant Guild",
-  notImplemented "Soothsayer"
+  notImplemented "Butcher", -- 910
+  notImplemented "Journeyman", -- 911
+  withTrigger (action 912 "Merchant Guild" 5 (plusBuys 1 &&& plusMoney 1))
+    (whileInPlay (onBuy (\_ -> plusTokens 1 CoinToken))),
+  notImplemented "Soothsayer" -- 913
   ]
+
+plaza :: Action
+plaza p s
+  | null ts = toSimulation s
+  | otherwise = optDecision (ChooseCard (EffectDiscard unknown (Hand p)) ts (\c -> discard c (Hand p) p s)) p s
+  where
+    ts = filter isTreasure $ hand $ playerByName s p
 
 -- Adventures 10xx
 
