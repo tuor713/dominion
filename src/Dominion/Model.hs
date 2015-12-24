@@ -960,6 +960,7 @@ nextTurn state = (discardAll (inPlay player) InPlay
 checkFinished :: GameState -> Bool
 checkFinished state =
   numInSupply state province == 0
+  || numInSupply state colony == 0
   || Map.size (Map.filter null (piles state)) >= 3
 
 -- TODO island mat should be handled by and end game trigger of sorts
