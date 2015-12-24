@@ -286,11 +286,28 @@ htmlSetupGame =
                 H.input H.! A.type_ "radio" H.! A.name "gametype" H.! A.value "colony"
                 H.label "Colony"
 
-        H.div $ do
-          H.button H.! A.class_ "ui button"
-                   H.! A.onclick (fromString ("start();")) $ "Go"
-          H.button H.! A.class_ "ui button"
-                   H.! A.onclick (fromString ("randomStart([\"" ++ L.intercalate "\",\"" (map cardName $ filter implemented kingdomCards) ++ "\"]);")) $ "Random"
+          forM_ (zip ["Alice", "Bob", "Carol", "Dave"] [1..4]) $ \(name,idx :: Int) -> do
+            H.div H.! A.class_ "six wide field" $ do
+              H.label $ toHtml ("Player " ++ show idx)
+              H.div H.! A.class_ "two fields" $ do
+                H.div H.! A.class_ "field" $ do
+                  H.input H.! A.type_ "text" H.! A.id (fromString ("playerName" ++ show idx))
+                          H.! A.name (fromString ("playerName" ++ show idx)) H.! A.value name
+                H.div H.! A.class_ "field" $ do
+                  H.select H.! A.class_ "ui dropdown" H.! A.id (fromString ("playerType" ++ show idx))
+                           H.! A.name (fromString ("playerType" ++ show idx)) $ do
+                    when (idx > 2) $ do
+                      H.option H.! A.value "none" H.! A.selected "selected" $ "None"
+                    (if idx == 1 then H.option H.! A.value "human" H.! A.selected "selected" $ "Human"
+                                 else H.option H.! A.value "human" $ "Human")
+                    (if idx == 2 then H.option H.! A.value "bot" H.! A.selected "selected" $ "Bot"
+                                 else H.option H.! A.value "bot" $ "Bot")
+
+          H.div $ do
+            H.button H.! A.class_ "ui button"
+                     H.! A.onclick (fromString ("start();")) $ "Go"
+            H.button H.! A.class_ "ui button"
+                     H.! A.onclick (fromString ("randomStart([\"" ++ L.intercalate "\",\"" (map cardName $ filter implemented kingdomCards) ++ "\"]);")) $ "Random"
 
 
       H.h3 "Choose tableau"

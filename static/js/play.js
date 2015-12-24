@@ -57,8 +57,18 @@ $(function () {
 });
 
 function startGame(type, cards) {
+  var players = [];
+
+  for (var i=1;i<5;i++) {
+    var typ = $("#playerType"+i+" option:selected").attr("value");
+    if (typ != "none") {
+      var name = $("#playerName"+i).attr("value");
+      players.push({"name":name, "type":typ});
+    }
+  }
+
   $.post("/game/start",
-      JSON.stringify({ "players":["Alice","Bob"], "cards":cards, "type":type }),
+      JSON.stringify({ "players":players, "cards":cards, "type":type }),
       function (id) { window.location.href = "/game/"+id +"/decision/Alice?format=html"; },
       'text'
     );
