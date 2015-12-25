@@ -23,18 +23,22 @@ maybeCard name = Map.lookup (map toLower name) cardData
 lookupCard :: String -> CardDef
 lookupCard name = cardData Map.! (map toLower name)
 
-cSmithy        = cardData Map.! "smithy"
-cChancellor    = cardData Map.! "chancellor"
-cIsland        = cardData Map.! "island"
-cMoat          = cardData Map.! "moat"
-cPort          = cardData Map.! "port"
-cBorderVillage = cardData Map.! "border village"
-cMinion        = cardData Map.! "minion"
-cMint          = cardData Map.! "mint"
-cCache         = cardData Map.! "cache"
-cNativeVillage = cardData Map.! "native village"
-cGolem         = cardData Map.! "golem"
-cTransmute     = cardData Map.! "transmute"
+cWitch           = cardData Map.! "witch"
+cChapel          = cardData Map.! "chapel"
+cMilitia         = cardData Map.! "militia"
+cSmithy          = cardData Map.! "smithy"
+cChancellor      = cardData Map.! "chancellor"
+cIsland          = cardData Map.! "island"
+cMoat            = cardData Map.! "moat"
+cPort            = cardData Map.! "port"
+cBorderVillage   = cardData Map.! "border village"
+cMinion          = cardData Map.! "minion"
+cMint            = cardData Map.! "mint"
+cCache           = cardData Map.! "cache"
+cNativeVillage   = cardData Map.! "native village"
+cGolem           = cardData Map.! "golem"
+cTransmute       = cardData Map.! "transmute"
+cJackOfAllTrades = cardData Map.! "jack of all trades"
 
 -- Generic action elements (potentially move to model)
 

@@ -42,25 +42,30 @@ main = Env.getArgs >>= \(cmd:args) ->
 
 
 runConsole :: [String] -> IO ()
-runConsole [] = runConsole ["1000"]
-runConsole (num:_) =
+runConsole [] = runConsole ["1000", defaultBotId, "Big Money", "market,library,smithy,cellar,chapel,militia,village,laboratory,witch,jack of all trades"]
+runConsole [num] = runConsole [num, defaultBotId, "Big Money", "market,library,smithy,cellar,chapel,militia,village,laboratory,witch,jack of all trades"]
+runConsole [num, a] = runConsole [num, a, "Big Money", "market,library,smithy,cellar,chapel,militia,village,laboratory,witch,jack of all trades"]
+runConsole [num, a, b] = runConsole [num, a, b, "market,library,smithy,cellar,chapel,militia,village,laboratory,witch,jack of all trades"]
+runConsole (num:a:b:cards:_) =
   do
+    bots <- sequence [(Maybe.fromJust $ lookup a botLibrary) a,
+                      (Maybe.fromJust $ lookup b botLibrary) b]
     stats <- runSimulations
-              [("Alice",aiBot $ bigSmithy "Alice"), ("Bob",aiBot $ doubleJack "Bob")]
+              (zip [a,b] bots)
               tableau
-              (emptyStats ["Alice","Bob"])
+              (emptyStats [a,b])
               (read num)
     putStrLn (showStats stats)
   where
-    tableau = map lookupCard ["market", "library", "smithy", "cellar", "chapel", "militia",
-                              "village", "laboratory", "witch", "jack of all trades"]
+    tableau = map (lookupCard . C8.unpack) $ C8.split ',' $ C8.pack cards
 
 roundRobin :: Int -> [String] -> IO ()
 roundRobin _ [] = return ()
 roundRobin _ [_] = return ()
 roundRobin n (a:bots) = do
   M.forM_ bots $ \b -> do
-    bots <- sequence [(Maybe.fromJust $ lookup a botLibrary) a, (Maybe.fromJust $ lookup b botLibrary) b]
+    bots <- sequence [(Maybe.fromJust $ lookup a botLibrary) a,
+                      (Maybe.fromJust $ lookup b botLibrary) b]
     stats <- runSimulationsR
               (zip [a,b] bots)
               (emptyStats [a,b])
@@ -153,7 +158,7 @@ startGameHandler :: IORef.IORef GameRepository -> Snap ()
 startGameHandler gamesRepository = do
   body <- readRequestBody 10000
   let req = J.decode body :: Maybe StartGameReq
-  let (players,cards,gameTyp) = maybe ([HumanPlayer "Alice", BotPlayer "Bob" "Double Jack"], defaultTableau, StandardGame)
+  let (players,cards,gameTyp) = maybe ([HumanPlayer "Alice", BotPlayer "Bob" defaultBotId], defaultTableau, StandardGame)
                                       (\req -> (gamePlayers req, gameCards req, gameType req)) req
   let tableau = map lookupCard cards
 
@@ -173,7 +178,7 @@ startGameHandler gamesRepository = do
                       "village", "laboratory", "witch", "jack of all trades"]
     mkMVar (HumanPlayer name) = newEmptyMVar >>= \mv -> return (name, External mv)
     mkMVar (BotPlayer name botid) = do
-      bot <- maybe (return (aiBot (doubleJack name)))
+      bot <- maybe ((Maybe.fromJust $ lookup defaultBotId botLibrary) name)
                    ($ name)
                    (lookup botid botLibrary)
       return (name, Bot bot)

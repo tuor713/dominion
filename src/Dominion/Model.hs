@@ -672,6 +672,9 @@ isDuration card = hasCardType card Duration
 isVictory card = hasCardType card Victory
 isAttack card = hasCardType card Attack
 
+cardInTableau :: CardDef -> GameState -> Bool
+cardInTableau def = Map.member def . piles
+
 cost :: GameState -> CardDef -> Cost
 cost state card = Cost ((applyMod mod state m),p)
   where

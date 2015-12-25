@@ -2,6 +2,7 @@
 module Dominion.Web.JsonInstances where
 
 import Dominion.Model
+import Dominion.Bots
 
 import qualified Control.Applicative as Ap
 import qualified Data.Aeson as J
@@ -25,7 +26,7 @@ data StartGameReq = StartGameReq { gamePlayers :: [PlayerDefinition],
 instance J.FromJSON PlayerDefinition where
   parseJSON (J.Object v) = v J..: "type" >>= \(typ::String) ->
     if typ == "human" then HumanPlayer <$> v J..: "name"
-                      else BotPlayer <$> v J..: "name" <*> (v J..:? "bot" J..!= "Double Jack")
+                      else BotPlayer <$> v J..: "name" <*> (v J..:? "bot" J..!= defaultBotId)
 
   parseJSON _ = Ap.empty
 

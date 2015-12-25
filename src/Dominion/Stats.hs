@@ -7,10 +7,10 @@ import qualified Data.Map.Strict as Map
 
 type StatsCollector a = a -> [GameState] -> a
 
-data Stats = Stats { turnsPerGame :: Map.Map Int Int,
-                     avgPointsPerTurn :: Map.Map PlayerId (Map.Map Int (Int,Int)),
-                     winRatio :: Map.Map PlayerId Int,
-                     totalGames :: Int
+data Stats = Stats { turnsPerGame :: !(Map.Map Int Int),
+                     avgPointsPerTurn :: !(Map.Map PlayerId (Map.Map Int (Int,Int))),
+                     winRatio :: !(Map.Map PlayerId Int),
+                     totalGames :: !Int
                      }
 
 collectStats :: StatsCollector Stats
@@ -41,14 +41,14 @@ emptyStats players = Stats { totalGames = 0,
 
 statWinRatio :: Stats -> [(PlayerId,Double)]
 statWinRatio stats =
-  Map.toAscList $ Map.map ((/ fromIntegral (totalGames stats)) . fromIntegral) (winRatio stats)
+  Map.toAscList $ Map.map ((*100.0) . (/ fromIntegral (totalGames stats)) . fromIntegral) (winRatio stats)
 
 statNumberOfGames :: Stats -> Int
 statNumberOfGames stats = totalGames stats
 
 statTurnsPerGame :: Stats -> [(Int,Double)]
 statTurnsPerGame stats =
-  Map.toAscList $ Map.map ((/ fromIntegral (totalGames stats)) . fromIntegral) (turnsPerGame stats)
+  Map.toAscList $ Map.map ((*100.0) . (/ fromIntegral (totalGames stats)) . fromIntegral) (turnsPerGame stats)
 
 statAvgVictoryPerTurn :: Stats -> Map.Map PlayerId [(Int,Double)]
 statAvgVictoryPerTurn stats =
