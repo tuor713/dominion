@@ -11,6 +11,7 @@ import Dominion.Web.Pages
 
 import Control.Applicative
 import Control.Concurrent
+import qualified Control.Monad as M
 import Control.Monad.IO.Class
 import Snap.Core
 import Snap.Util.FileServe
@@ -35,6 +36,7 @@ main :: IO ()
 main = Env.getArgs >>= \(cmd:args) ->
   case cmd of
     "run" -> runConsole args
+    "tournament" -> runTournament args
     "web" -> runWeb
     _ -> return ()
 
@@ -43,17 +45,36 @@ runConsole :: [String] -> IO ()
 runConsole [] = runConsole ["1000"]
 runConsole (num:_) =
   do
-    gen <- newStdGen
-    let stats = evalSim (runSimulations
-                          [("Alice",bigSmithy "Alice"), ("Bob",doubleJack "Bob")]
-                          tableau
-                          (emptyStats ["Alice","Bob"])
-                          (read num))
-                        gen
+    stats <- runSimulations
+              [("Alice",aiBot $ bigSmithy "Alice"), ("Bob",aiBot $ doubleJack "Bob")]
+              tableau
+              (emptyStats ["Alice","Bob"])
+              (read num)
     putStrLn (showStats stats)
   where
     tableau = map lookupCard ["market", "library", "smithy", "cellar", "chapel", "militia",
                               "village", "laboratory", "witch", "jack of all trades"]
+
+roundRobin :: Int -> [String] -> IO ()
+roundRobin _ [] = return ()
+roundRobin _ [_] = return ()
+roundRobin n (a:bots) = do
+  M.forM_ bots $ \b -> do
+    bots <- sequence [(Maybe.fromJust $ lookup a botLibrary) a, (Maybe.fromJust $ lookup b botLibrary) b]
+    stats <- runSimulationsR
+              (zip [a,b] bots)
+              (emptyStats [a,b])
+              n
+    putStrLn $ show (statWinRatio stats)
+  roundRobin n bots
+
+runTournament :: [String] -> IO ()
+runTournament [] = error "Need to call tournament with a list of bots"
+runTournament (n:bots) = roundRobin num bots
+  where
+    num :: Int
+    num = read n
+
 
 runWeb :: IO ()
 runWeb = do
@@ -151,9 +172,11 @@ startGameHandler gamesRepository = do
     defaultTableau = ["market", "library", "smithy", "cellar", "chapel", "militia",
                       "village", "laboratory", "witch", "jack of all trades"]
     mkMVar (HumanPlayer name) = newEmptyMVar >>= \mv -> return (name, External mv)
-    mkMVar (BotPlayer name botid) = return $ (name, Bot $ aiBot (maybe (doubleJack name)
-                                                                ($ name)
-                                                                (lookup botid botLibrary)))
+    mkMVar (BotPlayer name botid) = do
+      bot <- maybe (return (aiBot (doubleJack name)))
+                   ($ name)
+                   (lookup botid botLibrary)
+      return (name, Bot bot)
 
 
 nextDecision :: IORef.IORef GameRepository -> Int -> PlayerId -> Snap ()
@@ -236,11 +259,9 @@ simulationHandler =
     let cardNames = C8.split ',' $ Maybe.fromJust cards
     let tableau = map (lookupCard . C8.unpack) cardNames
 
-    gen <- liftIO $ newStdGen
-    let stats = evalSim (runSimulations [("Alice",bigSmithy "Alice"), ("Bob",doubleJack "Bob")]
-                                        tableau
-                                        (emptyStats ["Alice","Bob"])
-                                        numGames)
-                        gen
+    stats <- liftIO $ runSimulations [("Alice",aiBot $ bigSmithy "Alice"), ("Bob",aiBot $ doubleJack "Bob")]
+                                      tableau
+                                      (emptyStats ["Alice","Bob"])
+                                      numGames
 
     writeHtml $ htmlSimulation tableau stats

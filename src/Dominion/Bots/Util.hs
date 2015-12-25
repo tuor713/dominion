@@ -5,6 +5,7 @@ import Dominion.Model
 
 import qualified Control.Monad as M
 import qualified Data.Map.Strict as Map
+import qualified Data.IORef as IORef
 
 
 -- TODO
@@ -13,6 +14,7 @@ import qualified Data.Map.Strict as Map
 -- => should we include bot state or is this covered by IO monad ?
 type Bot = GameState -> Decision -> IO Simulation
 type AIBot = GameState -> Decision -> Simulation
+type StateBot a = a -> GameState -> Decision -> (Simulation,a)
 
 -- Utilities for defining bots
 
@@ -26,6 +28,14 @@ simpleBot bot id state decision = bot id state decision Nothing
 aiBot :: AIBot -> Bot
 aiBot bot state int = return $ bot state int
 
+stateBot :: a -> StateBot a -> IO Bot
+stateBot initial bot = do
+  ref <- IORef.newIORef initial
+  return $ \state decision -> do
+    s <- IORef.readIORef ref
+    let (sim,s') = bot s state decision
+    IORef.writeIORef ref s'
+    return sim
 
 -- Behavioural traits
 

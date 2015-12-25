@@ -104,29 +104,40 @@ human player _ = interact player
 
 -- Simulation running
 
-runSimulation :: Map.Map PlayerId AIBot -> [GameState] -> GameStep -> SimulationT [GameState]
-runSimulation bots accu (State state)
+runSimulation :: Map.Map PlayerId Bot -> [GameState] -> GameStep -> StdGen -> IO [GameState]
+runSimulation bots accu (State state) gen
   | finished state = return $ reverse (state:accu)
   | otherwise =
     do
-      next <- playTurn (activePlayerId state) state
-      runSimulation bots (state:accu) next
+      let (next,(gen',_)) = runSim (playTurn (activePlayerId state) state) gen
+      runSimulation bots (state:accu) next gen'
 
-runSimulation bots accu (Decision player state decision) =
+runSimulation bots accu (Decision player state decision) gen =
   do
-    next <- (bots Map.! player) (visibleState player state) decision
-    runSimulation bots accu next
+    ioNext <- (bots Map.! player) (visibleState player state) decision
+    let (next,(gen',_)) = runSim ioNext gen
+    runSimulation bots accu next gen'
 
--- Sample run:
--- runSimulations [("Alice",bigSmithy), ("Bob",betterBigMoney)] (map lookupCard ["market", "library", "smithy", "cellar", "chapel", "witch", "village", "laboratory", "festival", "festival"]) 100 >>= stats
-runSimulations :: [(PlayerId,AIBot)] -> [CardDef] -> Stats -> Int -> SimulationT Stats
+runSimulations :: [(PlayerId,Bot)] -> [CardDef] -> Stats -> Int -> IO Stats
 runSimulations _ _ stats 0 = return stats
 runSimulations bots tableau stats num =
   do
-    players <- shuffle (map fst bots)
-    initial <- mkGame StandardGame players tableau
-    states <- runSimulation (Map.fromList bots) [] (State initial)
+    gen <- newStdGen
+    let players = evalSim (shuffle (map fst bots)) gen
+    let initial = evalSim (mkGame StandardGame players tableau) gen
+    states <- runSimulation (Map.fromList bots) [] (State initial) gen
     runSimulations bots tableau (collectStats stats states) (num-1)
+
+runSimulationsR :: [(PlayerId,Bot)] -> Stats -> Int -> IO Stats
+runSimulationsR _ stats 0 = return stats
+runSimulationsR bots stats num =
+  do
+    gen <- newStdGen
+    let cardlist = evalSim (shuffle kingdomCards) gen
+    let players = evalSim (shuffle (map fst bots)) gen
+    let initial = evalSim (mkGame StandardGame players (take 10 cardlist)) gen
+    states <- runSimulation (Map.fromList bots) [] (State initial) gen
+    runSimulationsR bots (collectStats stats states) (num-1)
 
 
 -- Stats
