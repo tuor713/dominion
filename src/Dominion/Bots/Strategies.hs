@@ -68,13 +68,14 @@ bigLibrary = partialBot $
 
 bmCourtyard = partialBotConfig (emptyConfig { buyLevels = Set.fromList [2,3,6,8] }) $
   buysIf "Province" (\s -> totalMoney s > 15 && checkPPR s)
-  `alt` buysIf "Duchy" ((<=5) . gainsToEndGame)
+  `alt` buysIf "Duchy" ((<=4) . gainsToEndGame)
   `alt` buysIf "Estate" ((<=2) . gainsToEndGame)
   `alt` buys "Gold"
+  `alt` buysIf "Duchy" ((<=5) . gainsToEndGame)
   `alt` buysIf "Silver" ((==0) . numInDeck "Silver")
   `alt` buysIf "Courtyard" ((==0) . numInDeck "Courtyard")
   `alt` buysIf "Courtyard" (\s -> (fromIntegral (numInDeck "Courtyard" s) :: Double)
-                                  < (fromIntegral (length (filter isTreasure (hand (activePlayer s)))) / 8))
+                                  < (fromIntegral (numTypeInDeck Treasure s) / 8))
   `alt` buys "Silver"
 
 doubleJack = partialBot $

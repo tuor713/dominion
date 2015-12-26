@@ -44,7 +44,7 @@ defaultBot _ _ state (ChooseCard (EffectTrash _ _) cards f) alt
 defaultBot config ownId state (ChooseCard (EffectPut _ (Hand p) (TopOfDeck _)) cards f) alt
   -- Courtyard type putting cards back
   | ownId == p && activePlayerId state == ownId && actions (turn state) == 0 && any isAction cards =
-    f (L.maximumBy (\a b -> compare (cardScore (typ a)) (cardScore (typ b))) cards)
+    f (L.maximumBy (\a b -> compare (cardScore (typ a)) (cardScore (typ b))) $ filter isAction cards)
   | ownId == p && activePlayerId state == ownId && Set.notMember (moneyInHand ownId state) (buyLevels config) =
     let money = moneyInHand ownId state
         nextLevel = Set.lookupLE money (buyLevels config)

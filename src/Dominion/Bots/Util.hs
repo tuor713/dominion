@@ -95,3 +95,6 @@ numInDeck :: String -> GameState -> Int
 numInDeck name = \state -> length $ filter ((==card) . typ) $ allCards $ activePlayer state
   where
     card = lookupCard name
+
+numTypeInDeck :: CardType -> GameState -> Int
+numTypeInDeck typ = \state -> length $ filter (`hasCardType` typ) $ allCards $ activePlayer state

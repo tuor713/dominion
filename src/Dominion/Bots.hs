@@ -26,6 +26,7 @@ defaultStrategy bot Nothing state decision = (bot state decision, Just bot)
 
 multiStrategy :: PlayerId -> StateBot (Maybe AIBot)
 multiStrategy id =
+  altStrategy id (cardInTableau (lookupCard "Courtyard")) bmCourtyard $
   altStrategy id (cardInTableau cJackOfAllTrades) doubleJack $
   altStrategy id (\s -> cardInTableau cChapel s && cardInTableau cWitch s) chapelWitch $
   altStrategy id (cardInTableau cMilitia) doubleMilitia $

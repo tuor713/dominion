@@ -857,9 +857,6 @@ put card source target p state =
   info (VisibleToPlayer p) (p ++ " puts " ++ show card ++ " from " ++ show source ++ " to " ++ show target) >>
   move card source target p state
 
--- gainInternal :: Card -> Location -> Location -> Action
--- gainInternal card source traget
-
 gainFrom :: Card -> Location -> Action
 gainFrom card source player state =
   info AllPlayers (player ++ " gains " ++ cardName (typ card)) >>
