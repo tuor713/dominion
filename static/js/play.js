@@ -54,6 +54,8 @@ $(function () {
     }
     $(this).toggleClass('checked');
   });
+
+  $('.ui.dropdown').dropdown();
 });
 
 function startGame(type, cards) {

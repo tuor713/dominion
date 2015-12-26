@@ -29,7 +29,8 @@ multiStrategy _ (Just bot) state decision = (bot state decision, Just bot)
 botLibrary :: [(String, PlayerId -> IO Bot)]
 botLibrary =
   [("Big Money", return . aiBot . betterBigMoney),
-   ("Big Money Smithy", return . aiBot . bigSmithy),
+   ("Big Smithy", return . aiBot . bigSmithy),
+   ("Big Library", return . aiBot . bigLibrary),
    ("Double Jack", return . aiBot . doubleJack),
    ("Double Militia", return . aiBot . doubleMilitia),
    ("Chapel Witch", return . aiBot . chapelWitch),

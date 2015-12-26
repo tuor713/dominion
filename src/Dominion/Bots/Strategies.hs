@@ -51,6 +51,16 @@ bigSmithy = partialBot $
                                in num < 1 || (num < 2 && deckSize s >= 16))
   `alt` buys "Silver"
 
+bigLibrary = partialBot $
+  buysIf "Province" (\s -> totalMoney s > 15 && checkPPR s)
+  `alt` buysIf "Duchy" ((<=5) . gainsToEndGame)
+  `alt` buysIf "Estate" ((<=2) . gainsToEndGame)
+  `alt` buys "Gold"
+  `alt` buysIf "Library" (\s -> let num = numInDeck "Library" s
+                               in num < 1 || (num < 2 && deckSize s >= 16))
+  `alt` buys "Silver"
+
+
 doubleJack = partialBot $
   buysIf "Province" ((>15) . totalMoney)
   `alt` buysIf "Duchy" ((<=5) . gainsToEndGame)

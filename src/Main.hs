@@ -23,6 +23,7 @@ import qualified Data.IORef as IORef
 import Data.List.Split (wordsBy)
 import qualified Data.Maybe as Maybe
 import qualified Data.Map.Strict as Map
+import qualified Data.Map.Lazy as LMap
 import qualified System.Environment as Env
 import System.Random (newStdGen)
 
@@ -40,12 +41,14 @@ main = Env.getArgs >>= \(cmd:args) ->
     "web" -> runWeb
     _ -> return ()
 
+testTableau :: String
+testTableau = "market,library,smithy,cellar,chapel,militia,village,laboratory,witch,jack of all trades"
 
 runConsole :: [String] -> IO ()
-runConsole [] = runConsole ["1000", defaultBotId, "Big Money", "market,library,smithy,cellar,chapel,militia,village,laboratory,witch,jack of all trades"]
-runConsole [num] = runConsole [num, defaultBotId, "Big Money", "market,library,smithy,cellar,chapel,militia,village,laboratory,witch,jack of all trades"]
-runConsole [num, a] = runConsole [num, a, "Big Money", "market,library,smithy,cellar,chapel,militia,village,laboratory,witch,jack of all trades"]
-runConsole [num, a, b] = runConsole [num, a, b, "market,library,smithy,cellar,chapel,militia,village,laboratory,witch,jack of all trades"]
+runConsole [] = runConsole ["1000", defaultBotId, "Big Money", testTableau]
+runConsole [num] = runConsole [num, defaultBotId, "Big Money", testTableau]
+runConsole [num, a] = runConsole [num, a, "Big Money", testTableau]
+runConsole [num, a, b] = runConsole [num, a, b, testTableau]
 runConsole (num:a:b:cards:_) =
   do
     bots <- sequence [(Maybe.fromJust $ lookup a botLibrary) a,
@@ -253,20 +256,33 @@ makeDecisionHandler gamesRepository = do
 
 -- Simulation
 
+-- TODO make all of this safer
 simulationHandler :: Snap ()
 simulationHandler =
   do
     num <- getParam "num"
     let numGames = maybe 1000 fst (num >>= C8.readInt)
 
-    cards <- getParam "cards"
-    -- TODO make this safe
-    let cardNames = C8.split ',' $ Maybe.fromJust cards
+    params <- getParams
+    let cardNames = Maybe.fromMaybe (C8.split ',' $ C8.pack testTableau)
+                                    (LMap.lookup "cards" params)
+
     let tableau = map (lookupCard . C8.unpack) cardNames
 
-    stats <- liftIO $ runSimulations [("Alice",aiBot $ bigSmithy "Alice"), ("Bob",aiBot $ doubleJack "Bob")]
+    [b1, b2] <- sequence $ map getParam ["bot1", "bot2"]
+    let bot1 = maybe "Double Jack" C8.unpack b1
+    let bot2 = maybe "Big Money" C8.unpack b2
+    let p1 = bot1
+    -- in case we run a bot against itself
+    let p2 = if bot1 == bot2 then bot2 ++ "2" else bot2
+
+    ai1 <- liftIO $ (Maybe.fromJust $ lookup bot1 botLibrary) p1
+    ai2 <- liftIO $ (Maybe.fromJust $ lookup bot2 botLibrary) p2
+
+
+    stats <- liftIO $ runSimulations [(p1, ai1), (p2, ai2)]
                                       tableau
-                                      (emptyStats ["Alice","Bob"])
+                                      (emptyStats [p1,p2])
                                       numGames
 
-    writeHtml $ htmlSimulation tableau stats
+    writeHtml $ htmlSimulation tableau stats [bot1,bot2]

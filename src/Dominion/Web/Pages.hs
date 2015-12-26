@@ -5,6 +5,7 @@ import Dominion.Model
 import Dominion.Cards
 import Dominion.Stats
 import Dominion
+import Dominion.Bots (botLibrary)
 
 import Control.Monad (forM_, when)
 
@@ -47,9 +48,11 @@ input = Parent "input" "<input" "</input>"
 
 htmlHeader = H.head $ do
   H.link H.! A.href "/static/site.css" H.! A.rel "stylesheet"
-  H.link H.! A.href "/static/libs/semanticui/semantic.min.css" H.! A.rel "stylesheet" H.! A.type_ "text/css"
   H.script H.! A.src "/static/js/jquery-2.1.4.min.js" $ ""
+
+  H.link H.! A.href "/static/libs/semanticui/semantic.min.css" H.! A.rel "stylesheet" H.! A.type_ "text/css"
   H.script H.! A.src "/static/libs/semanticui/semantic.min.js" $ ""
+
   H.script H.! A.src "/static/js/play.js" $ ""
   H.script H.! A.src "/static/js/d3.v3.min.js" H.! A.charset "utf-8" $ ""
   H.script H.! A.src "/static/js/graph.js" H.! A.charset "utf-8" $ ""
@@ -254,13 +257,13 @@ htmlFinished state infos =
           H.h4 "Tableau:"
           showCards $ Map.map length (piles state)
 
-        forM_ (reverse $ L.sortOn (points . snd) $ Map.toList (players state)) $ \(pid,player) ->
-          H.section $ do
-            H.h4 $ toHtml $ "Player - " ++ pid ++ ": " ++ show (points player)
-            when (Map.findWithDefault 0 VictoryToken (tokens player) > 0) $ do
-              H.p $ toHtml ("Victory tokens: " ++ show (Map.findWithDefault 0 VictoryToken (tokens player)))
-            H.h5 "Cards: "
-            showCards (cardListToMap (allCards player))
+      forM_ (reverse $ L.sortOn (points . snd) $ Map.toList (players state)) $ \(pid,player) ->
+        H.section $ do
+          H.h4 $ toHtml $ "Player - " ++ pid ++ ": " ++ show (points player)
+          when (Map.findWithDefault 0 VictoryToken (tokens player) > 0) $ do
+            H.p $ toHtml ("Victory tokens: " ++ show (Map.findWithDefault 0 VictoryToken (tokens player)))
+          H.h5 "Cards: "
+          showCards (cardListToMap (allCards player))
 
     logsSidebar (map (\(vis,msg) -> ("@" ++ show vis, msg)) infos)
 
@@ -352,41 +355,71 @@ htmlSuggestedTableaus tableaus =
                        H.! A.onclick (fromString ("startGame('standard',[\"" ++ L.intercalate "\",\"" cards ++ "\"]);")) $ "Go"
 
 
-htmlSimulation :: [CardDef] -> Stats -> H.Html
-htmlSimulation tableau stats =
+htmlSimulation :: [CardDef] -> Stats -> [PlayerId] -> H.Html
+htmlSimulation tableau stats players =
   template "/simulation" $ do
     H.div H.! A.class_ "one wide column" $ ""
     H.div H.! A.class_ "fourteen wide column" $ do
-      H.h3 "Tableau"
+      H.div H.! A.class_ "ui segment" $ do
+        H.form H.! A.class_ "ui form" H.! A.action "/simulation" $ do
 
-      H.div $ do
-        forM_ (L.sortBy compareCard tableau) $ \card ->
-          H.img H.! A.style "margin: 5px; width: 150px; height: 238px"
-                H.! A.src (fromString (cardImagePath card))
+          H.div H.! A.class_ "three wide field" $ do
+            H.label "Number of games"
+            H.input H.! A.type_ "text" H.! A.name "num" H.! A.value (fromString (show (statNumberOfGames stats)))
 
-      H.h3 "Stats"
-      H.pre $ toHtml $ showStats stats
+          H.div H.! A.class_ "fields" $ do
+            forM_ (zip players [1..]) $ \(name,idx :: Int) -> do
+              H.div H.! A.class_ "field" $ do
+                H.label $ toHtml ("Player " ++ show idx)
+                H.select H.! A.class_ "ui selection dropdown" H.! A.name (fromString ("bot" ++ show idx)) $ do
+                  forM_ (map fst botLibrary) $ \bot -> do
+                    (if bot == name then H.option H.! A.value (fromString bot) H.! A.selected "selected" $ toHtml bot
+                                    else H.option H.! A.value (fromString bot) $ toHtml bot)
 
-      H.h3 "Winners"
-      svg H.! A.id "winners" H.! A.class_ "chart" $ ""
+          H.div H.! A.class_ "field" $ do
+            H.label "Tableau"
+            H.select H.! A.class_ "ui fluid search dropdown" H.! A.multiple "multiple" H.! A.name "cards" $ do
+              forM_ (map cardName kingdomCards) $ \name -> do
+                if name `elem` (map cardName tableau)
+                  then H.option H.! A.value (fromString name) H.! A.selected "selected" $ toHtml name
+                  else H.option H.! A.value (fromString name) $ toHtml name
 
-      H.h3 "Turns per Game"
-      svg H.! A.id "turns" H.! A.class_ "chart" $ ""
+          H.div $ do
+            H.input H.! A.type_ "submit" H.! A.class_ "ui button" H.! A.value "Go"
 
-      H.h3 "Average Victory Points per Turn"
-      svg H.! A.id "avgVictory" H.! A.class_ "chart" $ ""
+      H.section $ do
+        H.h3 "Tableau"
+        H.div $ do
+          forM_ (take 5 $ L.sortBy compareCard tableau) $ \card ->
+            H.img H.! A.style "margin: 5px; width: 100px; height: 159px"
+                  H.! A.src (fromString (cardImagePath card))
+        H.div $ do
+          forM_ (drop 5 $ L.sortBy compareCard tableau) $ \card ->
+            H.img H.! A.style "margin: 5px; width: 100px; height: 159px"
+                  H.! A.src (fromString (cardImagePath card))
 
-      H.script $ fromString
-                 ("barChart(\"#winners\",300,200,percentageData(" ++
-                  dataToJavaScriptArray (statWinRatio stats) ++
-                  "));\n" ++
+        H.h3 "Stats"
+        H.pre $ toHtml $ showStats stats
 
-                  "barChart(\"#turns\",600,400,percentageData(" ++
-                  dataToJavaScriptArray (statTurnsPerGame stats) ++
-                  "));\n" ++
+        H.h3 "Winners"
+        svg H.! A.id "winners" H.! A.class_ "chart" $ ""
 
-                  "scatterPlot(\"#avgVictory\",600,400,"++
-                  dataToJavaScriptArray ((statAvgVictoryPerTurn stats) Map.! "Alice") ++ "," ++
-                  dataToJavaScriptArray ((statAvgVictoryPerTurn stats) Map.! "Bob") ++
-                  ");\n"
-                  )
+        H.h3 "Turns per Game"
+        svg H.! A.id "turns" H.! A.class_ "chart" $ ""
+
+        H.h3 "Average Victory Points per Turn"
+        svg H.! A.id "avgVictory" H.! A.class_ "chart" $ ""
+
+        H.script $ fromString
+                   ("barChart(\"#winners\",300,200,percentageData(" ++
+                    dataToJavaScriptArray (statWinRatio stats) ++
+                    "));\n" ++
+
+                    "barChart(\"#turns\",600,400,percentageData(" ++
+                    dataToJavaScriptArray (statTurnsPerGame stats) ++
+                    "));\n" ++
+
+                    "scatterPlot(\"#avgVictory\",600,400," ++
+                    L.intercalate "," (map (\p -> dataToJavaScriptArray ((statAvgVictoryPerTurn stats) Map.! p)) players) ++
+                    ");\n"
+                    )
