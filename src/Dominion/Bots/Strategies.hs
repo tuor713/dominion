@@ -4,12 +4,18 @@ import Dominion.Bots.Default
 import Dominion.Bots.Util
 import Dominion.Model hiding (buys)
 
+import qualified Data.Set as Set
 import qualified Data.Map.Strict as Map
 import qualified Data.Maybe as Maybe
 
 
+
+partialBotConfig :: DefaultBotConfig -> PartialBot -> PlayerId -> AIBot
+partialBotConfig config bot id = simpleBot (\id state decision option -> Maybe.fromMaybe (defaultBot config id state decision option) $ bot id state decision option) id
+
 partialBot :: PartialBot -> PlayerId -> AIBot
-partialBot bot id = simpleBot (\id state decision option -> Maybe.fromMaybe (defaultBot id state decision option) $ bot id state decision option) id
+partialBot bot id = partialBotConfig emptyConfig bot id
+
 
 -- Penultimate province rule
 checkPPR state =
@@ -60,6 +66,16 @@ bigLibrary = partialBot $
                                in num < 1 || (num < 2 && deckSize s >= 16))
   `alt` buys "Silver"
 
+bmCourtyard = partialBotConfig (emptyConfig { buyLevels = Set.fromList [2,3,6,8] }) $
+  buysIf "Province" (\s -> totalMoney s > 15 && checkPPR s)
+  `alt` buysIf "Duchy" ((<=5) . gainsToEndGame)
+  `alt` buysIf "Estate" ((<=2) . gainsToEndGame)
+  `alt` buys "Gold"
+  `alt` buysIf "Silver" ((==0) . numInDeck "Silver")
+  `alt` buysIf "Courtyard" ((==0) . numInDeck "Courtyard")
+  `alt` buysIf "Courtyard" (\s -> (fromIntegral (numInDeck "Courtyard" s) :: Double)
+                                  < (fromIntegral (length (filter isTreasure (hand (activePlayer s)))) / 8))
+  `alt` buys "Silver"
 
 doubleJack = partialBot $
   buysIf "Province" ((>15) . totalMoney)

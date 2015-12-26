@@ -848,9 +848,17 @@ reshuffleIfNeeded player state = if null (deck (playerByName state player)) then
 reshuffleIfNeededN :: Int -> Action
 reshuffleIfNeededN n player state = if length (deck (playerByName state player)) < n then reshuffle player state else toSimulation state
 
+-- same as put but without the extra logging
+move :: Card -> Location -> Location -> Action
+move card source target _ state = toSimulation $ transfer card source target state
 
 put :: Card -> Location -> Location -> Action
-put card source target _ state = toSimulation $ transfer card source target state
+put card source target p state =
+  info (VisibleToPlayer p) (p ++ " puts " ++ show card ++ " from " ++ show source ++ " to " ++ show target) >>
+  move card source target p state
+
+-- gainInternal :: Card -> Location -> Location -> Action
+-- gainInternal card source traget
 
 gainFrom :: Card -> Location -> Action
 gainFrom card source player state =
@@ -858,7 +866,7 @@ gainFrom card source player state =
   handleAllTriggers GainTrigger
     ((Left card):(map Left (hand (playerByName state player)) ++ map Left (inPlay (playerByName state player))))
     (EffectGainFrom card source (Discard player))
-    (put card source (Discard player))
+    (move card source (Discard player))
     player state
 
 gainTo :: CardDef -> Location -> Action
@@ -901,14 +909,17 @@ trashAll cards source player state =
   where
     transferT _ state = toSimulation $ foldr (\c s -> transfer c source Trash s) state cards
 
+doDiscard :: Card -> Location -> Action
+doDiscard card loc player state = handleTriggers DiscardTrigger (Left card) (EffectDiscard card loc) (move card loc (Discard player)) player state
+
 discard :: Card -> Location -> Action
-discard card loc player state =
-  info AllPlayers (player ++ " discards " ++ cardName (typ card)) >>
-  handleTriggers DiscardTrigger (Left card) (EffectDiscard card loc) (put card loc (Discard player)) player state
+discard card loc player state = info AllPlayers (player ++ " discards " ++ cardName (typ card)) >> doDiscard card loc player state
 
 -- TODO all triggers have to happen upfront
 discardAll :: [Card] -> Location -> Action
-discardAll cards loc = seqActions (\c -> discard c loc) cards
+discardAll cards loc player state =
+  info AllPlayers (player ++ " discards " ++ summarizeCards cards) >>
+  seqActions (\c -> doDiscard c loc) cards player state
 
 plusMoney :: Int -> Action
 plusMoney num _ state = toSimulation $ state { turn = (turn state) { money = num + money (turn state) } }

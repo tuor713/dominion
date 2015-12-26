@@ -27,6 +27,7 @@ cWitch           = cardData Map.! "witch"
 cChapel          = cardData Map.! "chapel"
 cMilitia         = cardData Map.! "militia"
 cSmithy          = cardData Map.! "smithy"
+cLibrary         = cardData Map.! "library"
 cChancellor      = cardData Map.! "chancellor"
 cIsland          = cardData Map.! "island"
 cMoat            = cardData Map.! "moat"
@@ -396,7 +397,7 @@ courtyard = plusCards 3 &&& putOneBack
                 cont
                 player
                 state
-    cont card player state = toSimulation $ transfer card (Hand player) (TopOfDeck player) state
+    cont card player = put card (Hand player) (TopOfDeck player) player
 
 ironworks player state =
   (chooseOne (EffectGain unknownDef (Discard player)) (map (`topOfSupply` state) (affordableCardsM 4 state))

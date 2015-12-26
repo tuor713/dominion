@@ -279,10 +279,18 @@ simulationHandler =
     ai1 <- liftIO $ (Maybe.fromJust $ lookup bot1 botLibrary) p1
     ai2 <- liftIO $ (Maybe.fromJust $ lookup bot2 botLibrary) p2
 
+    requestType <- getParam "submit"
+    let sampleGame = "Sample Game" == Maybe.fromMaybe "Go" requestType
 
-    stats <- liftIO $ runSimulations [(p1, ai1), (p2, ai2)]
-                                      tableau
-                                      (emptyStats [p1,p2])
-                                      numGames
+    if sampleGame
+      then do
+        (state,infos) <- liftIO $ runSampleGame [(p1, ai1), (p2, ai2)] tableau
+        writeHtml $ htmlSampleGame state tableau infos [bot1,bot2]
 
-    writeHtml $ htmlSimulation tableau stats [bot1,bot2]
+      else do
+        stats <- liftIO $ runSimulations [(p1, ai1), (p2, ai2)]
+                                          tableau
+                                          (emptyStats [p1,p2])
+                                          numGames
+
+        writeHtml $ htmlSimulation tableau stats [bot1,bot2]

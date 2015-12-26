@@ -65,6 +65,7 @@ colonyGame state = Map.member colony (piles state)
 
 moneyValue :: CardDef -> Int
 moneyValue card
+  | card == platinum = 5
   | card == gold = 3
   | card == silver = 2
   | card == copper = 1

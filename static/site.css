@@ -27,6 +27,10 @@ section {
   display:inline-block;
 }
 
+.log.turn {
+  padding-top: 5px;
+}
+
 .overlay {
   position: absolute;
   left: 0px;

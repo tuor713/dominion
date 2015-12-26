@@ -354,38 +354,71 @@ htmlSuggestedTableaus tableaus =
               H.button H.! A.class_ "ui button"
                        H.! A.onclick (fromString ("startGame('standard',[\"" ++ L.intercalate "\",\"" cards ++ "\"]);")) $ "Go"
 
+htmlSimulationForm :: [CardDef] -> Int -> [PlayerId] -> H.Html
+htmlSimulationForm tableau numGames players =
+  H.div H.! A.class_ "ui segment" $ do
+    H.form H.! A.class_ "ui form" H.! A.action "/simulation" $ do
+
+      H.div H.! A.class_ "three wide field" $ do
+        H.label "Number of games"
+        H.input H.! A.type_ "text" H.! A.name "num" H.! A.value (fromString (show numGames))
+
+      H.div H.! A.class_ "fields" $ do
+        forM_ (zip players [1..]) $ \(name,idx :: Int) -> do
+          H.div H.! A.class_ "field" $ do
+            H.label $ toHtml ("Player " ++ show idx)
+            H.select H.! A.class_ "ui selection dropdown" H.! A.name (fromString ("bot" ++ show idx)) $ do
+              forM_ (map fst botLibrary) $ \bot -> do
+                (if bot == name then H.option H.! A.value (fromString bot) H.! A.selected "selected" $ toHtml bot
+                                else H.option H.! A.value (fromString bot) $ toHtml bot)
+
+      H.div H.! A.class_ "field" $ do
+        H.label "Tableau"
+        H.select H.! A.class_ "ui fluid search dropdown" H.! A.multiple "multiple" H.! A.name "cards" $ do
+          forM_ (map cardName kingdomCards) $ \name -> do
+            if name `elem` (map cardName tableau)
+              then H.option H.! A.value (fromString name) H.! A.selected "selected" $ toHtml name
+              else H.option H.! A.value (fromString name) $ toHtml name
+
+      H.div $ do
+        H.input H.! A.type_ "submit" H.! A.class_ "ui button" H.! A.name "submit" H.! A.value "Go"
+        H.input H.! A.type_ "submit" H.! A.class_ "ui button" H.! A.name "submit" H.! A.value "Sample Game"
+
+
+htmlSampleGame :: GameState -> [CardDef] -> [Info] -> [PlayerId] -> H.Html
+htmlSampleGame state tableau infos bots =
+  template "/simulation" $ do
+    H.div H.! A.class_ "one wide column" $ ""
+    H.div H.! A.class_ "fourteen wide column" $ do
+      htmlSimulationForm tableau 1000 bots
+
+      H.section H.! A.class_ "state" $ do
+        H.div $ do
+          H.h4 "Tableau:"
+          showCards $ Map.map length (piles state)
+
+      forM_ (reverse $ L.sortOn (points . snd) $ Map.toList (players state)) $ \(pid,player) ->
+        H.section $ do
+          H.h4 $ toHtml $ "Player - " ++ pid ++ ": " ++ show (points player)
+          when (Map.findWithDefault 0 VictoryToken (tokens player) > 0) $ do
+            H.p $ toHtml ("Victory tokens: " ++ show (Map.findWithDefault 0 VictoryToken (tokens player)))
+          H.h5 "Cards: "
+          showCards (cardListToMap (allCards player))
+
+      H.section $ do
+        H.h3 "Log"
+        H.div $ do
+          forM_  infos $ \(vis,msg) ->
+            H.div H.! A.class_ (fromString (if L.isPrefixOf "Turn" msg then "log turn" else "log")) $ do
+              H.span H.! A.class_ "player" $ toHtml ("@" ++ show vis ++ " ")
+              H.span $ toHtml msg
 
 htmlSimulation :: [CardDef] -> Stats -> [PlayerId] -> H.Html
 htmlSimulation tableau stats players =
   template "/simulation" $ do
     H.div H.! A.class_ "one wide column" $ ""
     H.div H.! A.class_ "fourteen wide column" $ do
-      H.div H.! A.class_ "ui segment" $ do
-        H.form H.! A.class_ "ui form" H.! A.action "/simulation" $ do
-
-          H.div H.! A.class_ "three wide field" $ do
-            H.label "Number of games"
-            H.input H.! A.type_ "text" H.! A.name "num" H.! A.value (fromString (show (statNumberOfGames stats)))
-
-          H.div H.! A.class_ "fields" $ do
-            forM_ (zip players [1..]) $ \(name,idx :: Int) -> do
-              H.div H.! A.class_ "field" $ do
-                H.label $ toHtml ("Player " ++ show idx)
-                H.select H.! A.class_ "ui selection dropdown" H.! A.name (fromString ("bot" ++ show idx)) $ do
-                  forM_ (map fst botLibrary) $ \bot -> do
-                    (if bot == name then H.option H.! A.value (fromString bot) H.! A.selected "selected" $ toHtml bot
-                                    else H.option H.! A.value (fromString bot) $ toHtml bot)
-
-          H.div H.! A.class_ "field" $ do
-            H.label "Tableau"
-            H.select H.! A.class_ "ui fluid search dropdown" H.! A.multiple "multiple" H.! A.name "cards" $ do
-              forM_ (map cardName kingdomCards) $ \name -> do
-                if name `elem` (map cardName tableau)
-                  then H.option H.! A.value (fromString name) H.! A.selected "selected" $ toHtml name
-                  else H.option H.! A.value (fromString name) $ toHtml name
-
-          H.div $ do
-            H.input H.! A.type_ "submit" H.! A.class_ "ui button" H.! A.value "Go"
+      htmlSimulationForm tableau (statNumberOfGames stats) players
 
       H.section $ do
         H.h3 "Tableau"
