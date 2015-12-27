@@ -27,9 +27,6 @@ cardScore card
   | card == cSmithy = 60
   | otherwise = 40
 
-moneyInHand :: PlayerId -> GameState -> Int
-moneyInHand id state = sum $ map (moneyValue . typ) $ hand $ playerByName state id
-
 defaultBot :: DefaultBotConfig -> SimpleBot
 defaultBot _ _ _ (ChooseCards (EffectPlayTreasure _) choices _ f) _ = f choices
 defaultBot _ _ _ (ChooseCard (EffectPlayAction _) actions f) _ = f (head actions)
@@ -71,9 +68,11 @@ defaultBot _ ownId _ (ChooseToUse (EffectDiscard card (TopOfDeck p)) f) _
     ctyp = typ card
     desirable = ctyp /= copper && ctyp /= curse && ctyp /= estate && ctyp /= duchy && ctyp /= province
 
-defaultBot _ _ _ (ChooseCards (EffectTrash _ _) cards (lo,hi) f) _ = f choices
+defaultBot _ ownId state (ChooseCards (EffectTrash _ _) cards (lo,hi) f) _ = f choices
   where
-    wantsToTrash = filter (\c -> typ c == curse || typ c == copper || typ c == estate) cards
+    money = moneyInDeck ownId state
+    mHand = moneySum cards
+    wantsToTrash = filter (\c -> typ c == curse || (typ c == copper && (money - mHand <= 3)) || typ c == estate) cards
     trashOrder = L.sortOn (cardScore . typ) cards
     choices = take (min (max lo (length wantsToTrash)) hi) trashOrder
 

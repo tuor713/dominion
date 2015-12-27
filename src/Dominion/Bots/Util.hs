@@ -71,6 +71,15 @@ moneyValue card
   | card == copper = 1
   | otherwise = 0
 
+moneySum :: [Card] -> Int
+moneySum = sum . map (moneyValue . typ)
+
+moneyInHand :: PlayerId -> GameState -> Int
+moneyInHand id state = moneySum $ hand $ playerByName state id
+
+moneyInDeck :: PlayerId -> GameState -> Int
+moneyInDeck id state = moneySum $ allCards $ playerByName state id
+
 totalMoney :: GameState -> Int
 totalMoney state = state |> activePlayer |> allCards |> map (moneyValue . typ) |> sum
 

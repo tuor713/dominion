@@ -11,6 +11,8 @@ import Dominion.Bots.Util
 import Dominion.Model
 import Dominion.Cards
 
+import qualified Data.List as L
+
 defaultBotId :: String
 defaultBotId = "Multi Strategy"
 
@@ -37,7 +39,7 @@ multiStrategy id =
   defaultStrategy (betterBigMoney id)
 
 botLibrary :: [(String, PlayerId -> IO Bot)]
-botLibrary =
+botLibrary = L.sortOn fst $
   [("Big Money", return . aiBot . betterBigMoney),
    ("Big Smithy", return . aiBot . bigSmithy),
    ("Big Library", return . aiBot . bigLibrary),
