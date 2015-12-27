@@ -453,6 +453,6 @@ htmlSimulation tableau stats players =
                     "));\n" ++
 
                     "scatterPlot(\"#avgVictory\",600,400," ++
-                    L.intercalate "," (map (\p -> dataToJavaScriptArray ((statAvgVictoryPerTurn stats) Map.! p)) players) ++
+                    L.intercalate "," (map (\p -> "\"" ++ p ++ "\"," ++ dataToJavaScriptArray ((statAvgVictoryPerTurn stats) Map.! p)) players) ++
                     ");\n"
                     )

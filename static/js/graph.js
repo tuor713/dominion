@@ -38,9 +38,11 @@ function barChart(selector,width,height,data) {
 }
 
 function scatterPlot(selector, width, height) {
+  var labels = [];
   var args = [];
-  for (var i = 3; i < arguments.length; i++) {
-    args.push(arguments[i]);
+  for (var i = 3; i < arguments.length; i+=2) {
+    labels.push(arguments[i])
+    args.push(arguments[i+1]);
   }
 
   var maxdata = args[0];
@@ -63,7 +65,7 @@ function scatterPlot(selector, width, height) {
 
   var chart = d3.select(selector)
     .attr("width", width + 60)
-    .attr("height", height + 60)
+    .attr("height", height + 90)
     .append("g")
     .attr("transform", "translate(30,30)");
 
@@ -76,7 +78,7 @@ function scatterPlot(selector, width, height) {
     .attr("class","y axis")
     .call(yAxis);
 
-  var colors = ["steelblue", "red", "green"];
+  var colors = ["steelblue", "red", "green", "orange"];
   for (var i=0; i<args.length; i++) {
     data = args[i];
     var circle = chart.selectAll("circle"+i)
@@ -87,6 +89,26 @@ function scatterPlot(selector, width, height) {
       .attr("fill",colors[i])
       .attr("r", 5);
   }
+
+  // draw legend
+  var legend = chart.selectAll(".legend")
+      .data(d3.range(0,args.length))
+      .enter().append("g")
+      .attr("class", "legend")
+      .attr("transform", function(d) { return "translate("+ (d*150) + ","+(height+30)+")"; });
+
+  // draw legend colored rectangles
+  legend.append("rect")
+      .attr("width", 18)
+      .attr("height", 18)
+      .style("fill", function (d) { return colors[d]; });
+
+  // draw legend text
+  legend.append("text")
+      .attr("x", 20)
+      .attr("y", 9)
+      .attr("dy", ".35em")
+      .text(function(d) { return labels[d];});
 }
 
 function percentageData(data) {
