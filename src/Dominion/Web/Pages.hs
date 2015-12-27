@@ -328,7 +328,7 @@ htmlSetupGame =
                     H.img H.! A.style "width: 100px; height: 159px;" H.! A.src (fromString (cardImagePath card))
                     H.div H.! A.class_ "content" $ toHtml (cardName card)
                 else
-                  H.div H.! A.class_ "item" H.! A.onclick "$(this).toggleClass('selected');"
+                  H.div H.! A.class_ "cardselection item" H.! A.onclick "$(this).toggleClass('selected');"
                         H.! A.id (fromString (cardName card)) $ do
                     H.img H.! A.style "width: 100px; height: 159px;" H.! A.src (fromString (cardImagePath card))
                     H.div H.! A.class_ "content" $ toHtml (cardName card)
@@ -433,33 +433,36 @@ htmlSimulation tableau stats players =
 
         H.h3 "Stats"
         H.pre $ toHtml $ showStats stats
+    H.div H.! A.class_ "one wide column" $ ""
 
-        H.h3 "Winners"
-        svg H.! A.id "winners" H.! A.class_ "chart" $ ""
+    H.div H.! A.class_ "one wide column" $ ""
+    H.div H.! A.class_ "seven wide column" $ do
+      H.h3 "Winners"
+      svg H.! A.id "winners" H.! A.class_ "chart" $ ""
 
-        H.h3 "Turns per Game"
-        svg H.! A.id "turns" H.! A.class_ "chart" $ ""
+      H.h3 "Turns per Game"
+      svg H.! A.id "turns" H.! A.class_ "chart" $ ""
 
-        H.h3 "Average Victory Points per Turn"
-        svg H.! A.id "avgVictory" H.! A.class_ "chart" $ ""
+    H.div H.! A.class_ "seven wide column" $ do
+      H.h3 "Average Victory Points per Turn"
+      svg H.! A.id "avgVictory" H.! A.class_ "chart" $ ""
 
-        H.h3 "Average Money Contents Points per Turn"
-        svg H.! A.id "avgMoney" H.! A.class_ "chart" $ ""
+      H.h3 "Average Money Contents Points per Turn"
+      svg H.! A.id "avgMoney" H.! A.class_ "chart" $ ""
 
-        H.script $ fromString
-                   ("barChart(\"#winners\",300,200,percentageData(" ++
-                    dataToJavaScriptArray (statWinRatio stats) ++
-                    "));\n" ++
+    H.script $ fromString
+               ("barChart(\"#winners\",450,300,percentageData(" ++
+                dataToJavaScriptArray (statWinRatio stats) ++
+                "));\n" ++
 
-                    "barChart(\"#turns\",600,400,percentageData(" ++
-                    dataToJavaScriptArray (statTurnsPerGame stats) ++
-                    "));\n" ++
+                "barChart(\"#turns\",450,300,percentageData(" ++
+                dataToJavaScriptArray (statTurnsPerGame stats) ++
+                "));\n" ++
 
-                    "scatterPlot(\"#avgVictory\",600,400," ++
-                    L.intercalate "," (map (\p -> "\"" ++ p ++ "\"," ++ dataToJavaScriptArray ((statAvgVictoryPerTurn stats) Map.! p)) players) ++
-                    ");\n" ++
+                "linePlot(\"#avgVictory\",450,300," ++
+                L.intercalate "," (map (\p -> "\"" ++ p ++ "\"," ++ dataToJavaScriptArray ((statAvgVictoryPerTurn stats) Map.! p)) players) ++
+                ");\n" ++
 
-                    "scatterPlot(\"#avgMoney\",600,400," ++
-                    L.intercalate "," (map (\p -> "\"" ++ p ++ "\"," ++ dataToJavaScriptArray ((statAvgMoneyPerTurn stats) Map.! p)) players) ++
-                    ");\n"
-                    )
+                "linePlot(\"#avgMoney\",450,300," ++
+                L.intercalate "," (map (\p -> "\"" ++ p ++ "\"," ++ dataToJavaScriptArray ((statAvgMoneyPerTurn stats) Map.! p)) players) ++
+                ");\n")

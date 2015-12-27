@@ -79,7 +79,7 @@ function startGame(type, cards) {
 function start() {
   var tableau = [];
 
-  $(".item.selected").each(function () {
+  $(".cardselection.selected").each(function () {
     tableau.push($(this).attr('id'));
   });
 
@@ -98,7 +98,7 @@ function shuffle(o){
 function randomStart(cards) {
   var tableau = [];
 
-  $(".item.selected").each(function () {
+  $(".cardselection.selected").each(function () {
     tableau.push($(this).attr('id'));
   });
 
