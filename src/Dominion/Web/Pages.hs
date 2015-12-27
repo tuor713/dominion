@@ -46,6 +46,7 @@ input = Parent "input" "<input" "</input>"
 
 -- Fragments
 
+htmlHeader :: H.Html
 htmlHeader = H.head $ do
   H.link H.! A.href "/static/site.css" H.! A.rel "stylesheet"
   H.script H.! A.src "/static/js/jquery-2.1.4.min.js" $ ""
@@ -174,9 +175,7 @@ showCards cards =
         H.img H.! A.src (fromString (cardImagePath card))
 
 cardListToMap :: [Card] -> Map.Map CardDef Int
-cardListToMap cards =
-  Map.fromListWith (+) $ map ((,1) . typ) cards
-
+cardListToMap cards = Map.fromListWith (+) $ map ((,1) . typ) cards
 
 logsSidebar :: [(String,String)] -> H.Html
 logsSidebar infos =
@@ -185,7 +184,7 @@ logsSidebar infos =
       H.h3 "Game Log"
       H.div $ do
         forM_  infos $ \(vis,msg) ->
-          H.div H.! A.class_ "log" $ do
+          H.div H.! A.class_ (fromString (if L.isPrefixOf "Turn" msg then "log turn" else "log")) $ do
             H.span H.! A.class_ "player" $ toHtml ("@" ++ vis ++ " ")
             H.span $ toHtml msg
 
@@ -244,8 +243,8 @@ htmlDecision p (state,infos,decision) =
 
     logsSidebar $
       if length infos > 20
-      then ("", "[...]"):map (\(vis,msg) -> ("@" ++ show vis, msg)) (drop (max 0 (length infos - 20)) infos)
-      else map (\(vis,msg) -> ("@" ++ show vis, msg)) infos
+      then ("", "[...]"):map (\(vis,msg) -> (show vis, msg)) (drop (max 0 (length infos - 20)) infos)
+      else map (\(vis,msg) -> (show vis, msg)) infos
 
 
 htmlFinished :: GameState -> Stats -> [Info] -> H.Html
@@ -275,7 +274,7 @@ htmlFinished state stats infos =
         H.h3 "Average Money Contents Points per Turn"
         svg H.! A.id "avgMoney" H.! A.class_ "chart" $ ""
 
-    logsSidebar (map (\(vis,msg) -> ("@" ++ show vis, msg)) infos)
+    logsSidebar (map (\(vis,msg) -> (show vis, msg)) infos)
 
     let ps = Map.keys (players state) in
       H.script $ fromString
@@ -286,8 +285,6 @@ htmlFinished state stats infos =
                   "linePlot(\"#avgMoney\",600,400," ++
                   L.intercalate "," (map (\p -> "\"" ++ p ++ "\"," ++ dataToJavaScriptArray ((statAvgMoneyPerTurn stats) Map.! p)) ps) ++
                   ");\n")
-
-
 
 htmlSetupGame :: H.Html
 htmlSetupGame =

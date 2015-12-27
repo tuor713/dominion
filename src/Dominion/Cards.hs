@@ -42,6 +42,8 @@ cGolem           = cardData Map.! "golem"
 cTransmute       = cardData Map.! "transmute"
 cJackOfAllTrades = cardData Map.! "jack of all trades"
 cGardens         = cardData Map.! "gardens"
+cWishingWell     = cardData Map.! "wishing well"
+cCrossroads      = cardData Map.! "crossroads"
 
 -- Generic action elements (potentially move to model)
 
@@ -135,6 +137,12 @@ remodelX x = trashForGain chooseToGain
         player s2
     candidates trashed state = affordableCards (addCost (cost state (typ trashed)) (simpleCost x)) state
 
+nameACard :: Effect -> (CardDef -> Action) -> Action
+nameACard effect action p s = choose (ChooseCard effect choices)
+                                     (\card -> action (typ card))
+                                     p s
+  where
+    choices = map (Card (-1)) (Map.keys $ piles s)
 
 
 enactEffect :: Effect -> Action
@@ -354,10 +362,10 @@ intrigueCards = map ($ Intrigue)
    action 206 "Shanty Town" 3 (plusActions 2 &&& shantyDraw),
    action 207 "Steward" 3 (chooseEffects 1 [EffectPlusCards 2, EffectPlusMoney 2, EffectTrashNo 2] enactEffects),
    notImplemented "Swindler", -- 208
-   notImplemented "Wishing Well", -- 209
+   action 209 "Wishing Well" 3 (plusCards 1 &&& plusActions 1 &&& nameACard (SpecialEffect cWishingWell) (\def -> reshuffleIfNeeded &&& wishingWell def)),
    action 210 "Baron" 4 (plusBuys 1 &&& baron),
    action 211 "Bridge" 4 (plusBuys 1 &&& plusMoney 1 &&& addModifier (ModCost Nothing) (CappedDecModifier 1)),
-   notImplemented "Conspirator",-- 212
+   action 212 "Conspirator" 4 (plusMoney 2 &&& conspirator),
    notImplemented "Coppersmith", -- 213
    action 214 "Ironworks" 4 ironworks,
    actionA 215 "Mining Village" 4 miningVillage,
@@ -391,6 +399,14 @@ baron player state
     h = hand $ playerByName state player
     estates = filter ((==estate) . typ) h
 
+conspirator :: Action
+conspirator p s
+  | actionsThisTurn >= 3 = (plusCards 1 &&& plusActions 1) p s
+  | otherwise = toSimulation s
+  where
+    actionsThisTurn = length $ filter (`hasType` Action) $ playsThisTurn s
+
+courtyard :: Action
 courtyard = plusCards 3 &&& putOneBack
   where
     putOneBack :: Action
@@ -402,6 +418,7 @@ courtyard = plusCards 3 &&& putOneBack
                 state
     cont card player = put card (Hand player) (TopOfDeck player) player
 
+ironworks :: Action
 ironworks player state =
   (chooseOne (EffectGain unknownDef (Discard player)) (map (`topOfSupply` state) (affordableCardsM 4 state))
    &&= \c -> gain (typ c) &&& ironBenefits c)
@@ -467,6 +484,17 @@ upgradeBenefit trashed player state
     candidates = map (`topOfSupply` state)
       $ filter ((==exactCost) . cost state)
       $ availableCards state
+
+wishingWell :: CardDef -> Action
+wishingWell def p s
+  | null d = toSimulation s
+  | typ (head d) == def = (reveal [head d] &&& put (head d) (TopOfDeck p) (Hand p)) p s
+  | otherwise = reveal [head d] p s
+  where
+    d = deck player
+    player = playerByName s p
+
+
 
 -- Seaside 3xx
 
@@ -900,7 +928,7 @@ menagerie player state = (reveal h &&& (if unique then plusCards 3 else plusCard
 -- Hinterlands 7xx
 
 hinterlandCards = map ($ Hinterlands)
-  [notImplemented "Crossroads", -- 701 crossroads
+  [action 701 "Crossroads" 2 crossRoads,
    notImplemented "Duchess", -- 702 duchess
    notImplemented "Fool's Gold", -- 703 fool's gold
    notImplemented "Develop", -- 704 develop
@@ -918,20 +946,32 @@ hinterlandCards = map ($ Hinterlands)
    notImplemented "Trader", -- 714 trader
    carddef 715 "Cache" (simpleCost 5) [Treasure] (const 0) (plusMoney 3) (onGainSelf (gain copper &&& gain copper)),
    notImplemented "Cartographer", -- 716 cartographer
-   notImplemented "Embassy", -- 717 embassy
+   withTrigger (action 717 "Embassy" 5 (plusCards 5 &&& discardNCards 3))
+    (onGainSelf (eachOtherPlayer (gain silver))),
    notImplemented "Haggler", -- 718 haggler
    actionA 719 "Highway" 5 highway,
    notImplemented "Ill-gotten Gains", -- 720 ill-gotten gains
    notImplemented "Inn", -- 721 inn
    withTrigger (action 722 "Mandarin" 5 (plusMoney 3 &&& mandarinAction)) (onGainSelf mandarinTrigger),
-   notImplemented "Margrave", -- 723 margrave
-   notImplemented "Stables", -- 724 stables
+   attack 723 "Margrave" 5 (plusCards 3 &&& plusBuys 1 &&& playAttack (plusCards 1 &&& discardDownTo 3)),
+   action 724 "Stables" 5 stables,
    withTrigger (action 725 "Border Village" 6 (plusCards 1 &&& plusActions 2)) (onGainSelf borderVillageTrigger),
    notImplemented "Farmland" -- 726 farmland
    ]
 
 borderVillageTrigger :: Action
 borderVillageTrigger p s = gainUpto ((moneyCost (cost s cBorderVillage)) - 1) p s
+
+crossRoads :: Action
+crossRoads p s = (reveal h
+                  &&& (if numVictory > 0 then plusCards numVictory else pass)
+                  &&& (if numCrossroads == 1 then plusActions 3 else pass))
+                  p s
+  where
+    h = hand $ playerByName s p
+    numVictory = length $ filter isVictory h
+    numCrossroads = length $ filter (==cCrossroads) $ playsThisTurn s
+
 
 jackOfAllTrades :: Action
 jackOfAllTrades = gain silver &&& spyTop &&& drawTo5 &&& optTrash
@@ -973,6 +1013,13 @@ mandarinTrigger :: Action
 mandarinTrigger player state = seqActions (\c -> put c InPlay (TopOfDeck player)) treasures player state
   where
     treasures = filter isTreasure $ inPlay (playerByName state player)
+
+stables :: Action
+stables p s
+  | null ts = toSimulation s
+  | otherwise = optDecision (ChooseCard (EffectDiscard ts (Hand p)) ts (\card -> (discard card &&& plusCards 3 &&& plusActions 1) p s)) p s
+  where
+    ts = filter isTreasure $ hand $ playerByName s p
 
 -- Dark Ages 8xx
 

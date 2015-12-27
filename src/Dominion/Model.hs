@@ -280,7 +280,7 @@ stackMod mod (StackedModifier xs) = StackedModifier (mod:xs)
 stackMod (StackedModifier xs) mod = StackedModifier (xs ++ [mod])
 stackMod m1 m2 = StackedModifier [m1,m2]
 
-data Log = LogBuy CardDef | LogPlay Card deriving (Eq, Show)
+data Log = LogBuy CardDef | LogPlay CardDef deriving (Eq, Show)
 
 data Phase = ActionPhase | BuyPhase | CleanupPhase deriving (Eq, Ord, Show)
 
@@ -720,6 +720,12 @@ buysThisTurn state = Maybe.catMaybes $ map extract $ turnLog $ turn state
     extract (LogBuy c) = Just c
     extract _ = Nothing
 
+playsThisTurn :: GameState -> [CardDef]
+playsThisTurn state = Maybe.catMaybes $ map extract $ turnLog $ turn state
+  where
+    extract (LogPlay c) = Just c
+    extract _ = Nothing
+
 moneyValue :: CardDef -> Int
 moneyValue card
   | card == platinum = 5
@@ -821,9 +827,11 @@ addLog item _ state = toSimulation $ state { turn = (turn state) { turnLog = ite
 playEffect :: CardDef -> Maybe Card -> Action
 playEffect card source player state =
   info AllPlayers (player ++ " plays " ++ cardName card)
-  >> onPlay card source player (if Maybe.isNothing source && hasType card Duration
-                                then addDurationEffect card state
-                                else state)
+  >> (addLog (LogPlay card) &&& onPlay card source)
+     player
+     (if Maybe.isNothing source && hasType card Duration
+      then addDurationEffect card state
+      else state)
 
 playFrom :: Card -> Location -> Action
 playFrom card loc player state =
