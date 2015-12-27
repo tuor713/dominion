@@ -248,8 +248,8 @@ htmlDecision p (state,infos,decision) =
       else map (\(vis,msg) -> ("@" ++ show vis, msg)) infos
 
 
-htmlFinished :: GameState -> [Info] -> H.Html
-htmlFinished state infos =
+htmlFinished :: GameState -> Stats -> [Info] -> H.Html
+htmlFinished state stats infos =
   template "/play" $ do
     H.div H.! A.class_ "ten wide column" $ do
       H.section H.! A.class_ "state" $ do
@@ -261,11 +261,32 @@ htmlFinished state infos =
         H.section $ do
           H.h4 $ toHtml $ "Player - " ++ pid ++ ": " ++ show (points player)
           when (Map.findWithDefault 0 VictoryToken (tokens player) > 0) $ do
-            H.p $ toHtml ("Victory tokens: " ++ show (Map.findWithDefault 0 VictoryToken (tokens player)))
-          H.h5 "Cards: "
-          showCards (cardListToMap (allCards player))
+            H.p $ do
+              H.b $ "Victory tokens: "
+              toHtml (show (Map.findWithDefault 0 VictoryToken (tokens player)))
+          H.p $ do
+            H.b $ "Cards: "
+            showCards (cardListToMap (allCards player))
+
+      H.section $ do
+        H.h3 "Average Victory Points per Turn"
+        svg H.! A.id "avgVictory" H.! A.class_ "chart" $ ""
+
+        H.h3 "Average Money Contents Points per Turn"
+        svg H.! A.id "avgMoney" H.! A.class_ "chart" $ ""
 
     logsSidebar (map (\(vis,msg) -> ("@" ++ show vis, msg)) infos)
+
+    let ps = Map.keys (players state) in
+      H.script $ fromString
+                 ("linePlot(\"#avgVictory\",600,400," ++
+                  L.intercalate "," (map (\p -> "\"" ++ p ++ "\"," ++ dataToJavaScriptArray ((statAvgVictoryPerTurn stats) Map.! p)) ps) ++
+                  ");\n" ++
+
+                  "linePlot(\"#avgMoney\",600,400," ++
+                  L.intercalate "," (map (\p -> "\"" ++ p ++ "\"," ++ dataToJavaScriptArray ((statAvgMoneyPerTurn stats) Map.! p)) ps) ++
+                  ");\n")
+
 
 
 htmlSetupGame :: H.Html

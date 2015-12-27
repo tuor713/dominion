@@ -44,6 +44,7 @@ collectStats stats game =
             (avgPointsPerTurn stats)
             (init game)
 
+emptyStats :: [PlayerId] -> Stats
 emptyStats players = Stats { totalGames = 0,
                              avgPointsPerTurn = Map.fromList (map (,Map.empty) players),
                              avgMoneyPerTurn = Map.fromList (map (,Map.empty) players),

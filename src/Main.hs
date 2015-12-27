@@ -78,11 +78,7 @@ roundRobin n (a:bots) = do
 
 runTournament :: [String] -> IO ()
 runTournament [] = error "Need to call tournament with a list of bots"
-runTournament (n:bots) = roundRobin num bots
-  where
-    num :: Int
-    num = read n
-
+runTournament (n:bots) = roundRobin (read n) bots
 
 runWeb :: IO ()
 runWeb = do
@@ -112,7 +108,7 @@ writeHtml = writeLBS . renderHtml
 -- Game API
 
 data PlayerState = Bot Bot | External (MVar GameStep)
-type Game = (Map.Map PlayerId PlayerState, SimulationState)
+type Game = (Map.Map PlayerId PlayerState, SimulationState, [GameState])
 
 type GameRepository = (Int,Map.Map Int Game)
 
@@ -125,23 +121,24 @@ playerUpdateState (Bot _) _ = return ()
 playerUpdateState (External mvar) state = putMVar mvar (State state)
 
 playerDecision :: Game -> PlayerState -> PlayerId -> GameState -> Decision -> IO (Maybe (Game,GameStep))
-playerDecision (states,simState) (Bot bot) _ state decision = do
+playerDecision (states,simState,stateLog) (Bot bot) _ state decision = do
   sim <- bot state decision
   let (next,simState') = runSim sim (sim2Gen simState)
-  return $ Just ((states,combineSimStates simState simState'),next)
+  return $ Just ((states,combineSimStates simState simState', stateLog), next)
 
 playerDecision _ (External mvar) id state decision =
   putMVar mvar (Decision id state decision) >> return Nothing
 
 playerStates :: Game -> Map.Map PlayerId PlayerState
-playerStates = fst
+playerStates (states,_,_) = states
 
 nextStep :: Game -> GameStep -> IO Game
-nextStep game@(states,simState) (State state)
-  | finished state = sequence (map (\p -> playerUpdateState p state) $ Map.elems $ playerStates game) >> return game
+nextStep game@(states,simState,stateLog) (State state)
+  | finished state = sequence (map (\p -> playerUpdateState p state) $ Map.elems $ playerStates game)
+                     >> return (states, simState, reverse (state:stateLog))
   | otherwise = do
     let (next,simState') = runSim (playTurn (activePlayerId state) state) (sim2Gen simState)
-    nextStep (states,combineSimStates simState simState') next
+    nextStep (states, combineSimStates simState simState', state:stateLog) next
 
 nextStep game (Decision p state dec) = do
   next <- playerDecision game ((playerStates game) Map.! p) p state dec
@@ -172,7 +169,7 @@ startGameHandler gamesRepository = do
 
     mvars <- sequence $ map mkMVar players
 
-    game <- nextStep (Map.fromList mvars,simState) (State newGame)
+    game <- nextStep (Map.fromList mvars,simState,[]) (State newGame)
     IORef.writeIORef gamesRepository (nextId+1, Map.insert nextId game games)
     return nextId
   writeBS $ C8.pack $ show id
@@ -195,14 +192,15 @@ nextDecision gamesRepository gameId player = do
 
   (_,games) <- liftIO $ IORef.readIORef gamesRepository
 
-  let (states,simState) = games Map.! gameId
+  let (states,simState,stateLog) = games Map.! gameId
   let mvar = externalDecision $ states Map.! player
-
 
   decision <- liftIO $ readMVar mvar
   case decision of
     (State state) -> if useHtml
-                     then writeHtml (htmlFinished state (sim2Infos simState))
+                     then writeHtml (htmlFinished state
+                                                  (collectStats (emptyStats (Map.keys (players state))) stateLog)
+                                                  (sim2Infos simState))
                      else writeBS "{'status':'finished'}"
     (Decision _ state dec) -> writeLBS $ formatHandler (visibleState player state, filter (canSee player) $ sim2Infos simState, dec)
 
@@ -235,7 +233,7 @@ makeDecisionHandler gamesRepository = do
 
   let gameId = fst $ Maybe.fromJust $ C8.readInt (Maybe.fromJust id)
   let playerId = C8.unpack (Maybe.fromJust player)
-  let (states,simState) = games Map.! gameId
+  let (states,simState,stateLog) = games Map.! gameId
   let mvar = externalDecision $ states Map.! playerId
 
   param <- readRequestBody 1000
@@ -248,7 +246,7 @@ makeDecisionHandler gamesRepository = do
       let (next,simState') = runSim (parseDecision dec $ C8.unpack text) (sim2Gen simState)
 
       liftIO $ do
-        game' <- nextStep (states,combineSimStates simState simState') next
+        game' <- nextStep (states,combineSimStates simState simState',stateLog) next
         IORef.modifyIORef' gamesRepository (\(id,games) -> (id,Map.insert gameId game' games))
 
       nextDecision gamesRepository gameId playerId
