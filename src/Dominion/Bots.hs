@@ -26,6 +26,7 @@ defaultStrategy bot Nothing state decision = (bot state decision, Just bot)
 
 multiStrategy :: PlayerId -> StateBot (Maybe AIBot)
 multiStrategy id =
+  altStrategy id (\s -> cardInTableau (lookupCard "Beggar") s && cardInTableau (lookupCard "Gardens") s) beggarGardens $
   altStrategy id (cardInTableau (lookupCard "Courtyard")) bmCourtyard $
   altStrategy id (cardInTableau cJackOfAllTrades) doubleJack $
   altStrategy id (\s -> cardInTableau cChapel s && cardInTableau cWitch s) chapelWitch $
@@ -43,5 +44,6 @@ botLibrary =
    ("Double Jack", return . aiBot . doubleJack),
    ("Double Militia", return . aiBot . doubleMilitia),
    ("Chapel Witch", return . aiBot . chapelWitch),
-   ("Multi Strategy", stateBot Nothing . multiStrategy)]
+   ("Multi Strategy", stateBot Nothing . multiStrategy),
+   ("BeggarGardens", return . aiBot . beggarGardens)]
 

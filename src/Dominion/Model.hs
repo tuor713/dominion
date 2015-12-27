@@ -149,6 +149,15 @@ onStartOfGame :: Action -> TriggerHandler
 onStartOfGame action StartOfGameTrigger _ _ cont = action &&& cont
 onStartOfGame _ _ _ _ cont = cont
 
+onAttack :: Action -> TriggerHandler
+onAttack action AttackTrigger _ _ cont = action &&& cont
+onAttack _ _ _ _ cont = cont
+
+onAttackA :: (CardLike -> Action) -> TriggerHandler
+onAttackA action AttackTrigger _ source cont = (action source) &&& cont
+onAttackA _ _ _ _ cont = cont
+
+
 -- Card definition helpers
 
 noPoints :: a -> Int

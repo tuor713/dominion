@@ -23,6 +23,7 @@ maybeCard name = Map.lookup (map toLower name) cardData
 lookupCard :: String -> CardDef
 lookupCard name = cardData Map.! (map toLower name)
 
+cBeggar          = cardData Map.! "beggar"
 cWitch           = cardData Map.! "witch"
 cChapel          = cardData Map.! "chapel"
 cMilitia         = cardData Map.! "militia"
@@ -40,6 +41,7 @@ cNativeVillage   = cardData Map.! "native village"
 cGolem           = cardData Map.! "golem"
 cTransmute       = cardData Map.! "transmute"
 cJackOfAllTrades = cardData Map.! "jack of all trades"
+cGardens         = cardData Map.! "gardens"
 
 -- Generic action elements (potentially move to model)
 
@@ -975,7 +977,9 @@ mandarinTrigger player state = seqActions (\c -> put c InPlay (TopOfDeck player)
 
 darkAgesCards = map ($ DarkAges)
   [action 801 "Poor House" 1 poorHouse,
-   notImplemented "Beggar", -- 802 Beggar
+   carddef 802 "Beggar" (simpleCost 2) [Action, Reaction] noPoints
+    (\p -> (gainTo copper (Hand p) &&& gainTo copper (Hand p) &&& gainTo copper (Hand p)) p)
+    (whileInHand (onAttackA beggarTrigger)),
    notImplemented "Squire", -- 803 Squire
    notImplemented "Vagrant", -- 804 Vagrant
    notImplemented "Forager", -- 805 Forager
@@ -1023,6 +1027,13 @@ armoryGain player state = decision
         player state
   where
     candidates = affordableCards (simpleCost 4) state
+
+beggarTrigger :: CardLike -> Action
+beggarTrigger (Left card) p s = choose (ChooseToUse (EffectDiscard card (Hand p)))
+                                       (\b -> if b then discard card (Hand p) &&& gainTo silver (TopOfDeck p) &&& gainTo silver (TopOfDeck p)
+                                                   else pass)
+                                       p s
+beggarTrigger _ p s = pass p s
 
 count :: Action
 count player state=

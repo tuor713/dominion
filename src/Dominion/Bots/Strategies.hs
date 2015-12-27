@@ -1,5 +1,6 @@
 module Dominion.Bots.Strategies where
 
+import Dominion.Cards
 import Dominion.Bots.Default
 import Dominion.Bots.Util
 import Dominion.Model hiding (buys)
@@ -102,3 +103,12 @@ chapelWitch = partialBot $
   `alt` buys "Gold"
   `alt` buysIf "Chapel" (\s -> numInDeck "Chapel" s == 0)
   `alt` buys "Silver"
+
+-- Naive combo, no check if opponent is playing the mirror
+beggarGardens = partialBot $
+  buysIf "Gardens" (\s -> numInDeck "Beggar" s > 6 || numInSupply s cBeggar == 0)
+  `alt` buys "Beggar"
+  `alt` buys "Duchy"
+  `alt` buysIf "Estate" (\s -> numInDeck "Gardens" s == 8 || numInSupply s cGardens == 0)
+  `alt` buys "Silver"
+  `alt` buys "Copper"
