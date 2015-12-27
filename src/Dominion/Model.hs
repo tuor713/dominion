@@ -720,6 +720,16 @@ buysThisTurn state = Maybe.catMaybes $ map extract $ turnLog $ turn state
     extract (LogBuy c) = Just c
     extract _ = Nothing
 
+moneyValue :: CardDef -> Int
+moneyValue card
+  | card == platinum = 5
+  | card == gold = 3
+  | card == silver = 2
+  | card == copper = 1
+  | otherwise = 0
+
+moneySum :: [Card] -> Int
+moneySum = sum . map (moneyValue . typ)
 
 -- Removes invisble information from the state such as opponents hands
 -- It assumes some intelligent information retention such as about own deck content

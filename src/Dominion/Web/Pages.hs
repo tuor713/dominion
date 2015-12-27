@@ -443,6 +443,9 @@ htmlSimulation tableau stats players =
         H.h3 "Average Victory Points per Turn"
         svg H.! A.id "avgVictory" H.! A.class_ "chart" $ ""
 
+        H.h3 "Average Money Contents Points per Turn"
+        svg H.! A.id "avgMoney" H.! A.class_ "chart" $ ""
+
         H.script $ fromString
                    ("barChart(\"#winners\",300,200,percentageData(" ++
                     dataToJavaScriptArray (statWinRatio stats) ++
@@ -454,5 +457,9 @@ htmlSimulation tableau stats players =
 
                     "scatterPlot(\"#avgVictory\",600,400," ++
                     L.intercalate "," (map (\p -> "\"" ++ p ++ "\"," ++ dataToJavaScriptArray ((statAvgVictoryPerTurn stats) Map.! p)) players) ++
+                    ");\n" ++
+
+                    "scatterPlot(\"#avgMoney\",600,400," ++
+                    L.intercalate "," (map (\p -> "\"" ++ p ++ "\"," ++ dataToJavaScriptArray ((statAvgMoneyPerTurn stats) Map.! p)) players) ++
                     ");\n"
                     )

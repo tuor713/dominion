@@ -87,7 +87,7 @@ function scatterPlot(selector, width, height) {
       .attr("cx", function (d) { return x(d.name) + x.rangeBand()/2; })
       .attr("cy", function (d) { return y(d.value); })
       .attr("fill",colors[i])
-      .attr("r", 5);
+      .attr("r", 3);
   }
 
   // draw legend

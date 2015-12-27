@@ -63,17 +63,6 @@ buysIf cardName pred = buysC (lookupCard cardName) pred
 colonyGame :: GameState -> Bool
 colonyGame state = Map.member colony (piles state)
 
-moneyValue :: CardDef -> Int
-moneyValue card
-  | card == platinum = 5
-  | card == gold = 3
-  | card == silver = 2
-  | card == copper = 1
-  | otherwise = 0
-
-moneySum :: [Card] -> Int
-moneySum = sum . map (moneyValue . typ)
-
 moneyInHand :: PlayerId -> GameState -> Int
 moneyInHand id state = moneySum $ hand $ playerByName state id
 
