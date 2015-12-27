@@ -362,7 +362,8 @@ intrigueCards = map ($ Intrigue)
    action 214 "Ironworks" 4 ironworks,
    actionA 215 "Mining Village" 4 miningVillage,
    notImplemented "Scout", -- 216
-   carddef 217 "Duke" (simpleCost 5) [Victory] (\p -> length $ filter ((==duchy) . typ) (allCards p)) pass noTriggers,
+   withInitialSupply (carddef 217 "Duke" (simpleCost 5) [Victory] (\p -> length $ filter ((==duchy) . typ) (allCards p)) pass noTriggers)
+    stdVictorySupply,
    attack 218 "Minion" 5 (plusActions 1 &&& minionAttack),
    notImplemented "Saboteur", -- 219 saboteur
    action 220 "Torturer" 5 (plusCards 3 &&& playAttack torturerAttack),

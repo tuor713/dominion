@@ -30,6 +30,7 @@ multiStrategy id =
   altStrategy id (cardInTableau (lookupCard "Courtyard")) bmCourtyard $
   altStrategy id (cardInTableau cJackOfAllTrades) doubleJack $
   altStrategy id (\s -> cardInTableau cChapel s && cardInTableau cWitch s) chapelWitch $
+  altStrategy id (cardInTableau duchy) dukeDuchy $
   altStrategy id (cardInTableau cMilitia) doubleMilitia $
   altStrategy id (cardInTableau cSmithy) bigSmithy $
   altStrategy id (cardInTableau cLibrary) bigLibrary $
@@ -45,5 +46,6 @@ botLibrary =
    ("Double Militia", return . aiBot . doubleMilitia),
    ("Chapel Witch", return . aiBot . chapelWitch),
    ("Multi Strategy", stateBot Nothing . multiStrategy),
+   ("Duke Duchy", return . aiBot . dukeDuchy),
    ("BeggarGardens", return . aiBot . beggarGardens)]
 

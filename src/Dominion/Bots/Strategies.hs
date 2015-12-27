@@ -112,3 +112,12 @@ beggarGardens = partialBot $
   `alt` buysIf "Estate" (\s -> numInDeck "Gardens" s == 8 || numInSupply s cGardens == 0)
   `alt` buys "Silver"
   `alt` buys "Copper"
+
+-- Naive, non-contested duke/duchy player
+dukeDuchy = partialBot $
+  buysIf "Gold" ((<=1) . (numInDeck "Gold"))
+  `alt` buysIf "Duke" (\s -> (numInDeck "Duchy" s > 5 && numInDeck "Duke" s < numInDeck "Duchy" s)
+                             || numInSupply s duchy == 0)
+
+  `alt` buys "Duchy"
+  `alt` buys "Silver"
