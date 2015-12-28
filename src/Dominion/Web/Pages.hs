@@ -271,7 +271,7 @@ htmlFinished state stats infos =
         H.h3 "Average Victory Points per Turn"
         svg H.! A.id "avgVictory" H.! A.class_ "chart" $ ""
 
-        H.h3 "Average Money Contents Points per Turn"
+        H.h3 "Average Money Contents per Turn"
         svg H.! A.id "avgMoney" H.! A.class_ "chart" $ ""
 
     logsSidebar (map (\(vis,msg) -> (show vis, msg)) infos)
@@ -465,7 +465,7 @@ htmlSimulation tableau stats players =
       H.h3 "Average Victory Points per Turn"
       svg H.! A.id "avgVictory" H.! A.class_ "chart" $ ""
 
-      H.h3 "Average Money Contents Points per Turn"
+      H.h3 "Average Money Contents per Turn"
       svg H.! A.id "avgMoney" H.! A.class_ "chart" $ ""
 
     H.script $ fromString

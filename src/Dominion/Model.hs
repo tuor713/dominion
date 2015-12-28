@@ -1041,7 +1041,8 @@ playTreasures name state
     playTreasureDecision = optDecision (ChooseCards (EffectPlayTreasure unknown)
                                              treasures
                                              (0,length treasures)
-                                             (\cards -> playAll cards name state))
+                                             -- we cycle play treasures because cards like IGG might add new ones
+                                             (\cards -> playAll cards name state `andThen` playTreasures name))
                             name state
 
 useCoinTokens :: Action

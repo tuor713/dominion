@@ -49,5 +49,6 @@ botLibrary = L.sortOn fst $
    ("Chapel Witch", return . aiBot . chapelWitch),
    ("Multi Strategy", stateBot Nothing . multiStrategy),
    ("Duke Duchy", return . aiBot . dukeDuchy),
+   ("Ill-Gotten Gains Rush", return . aiBot . illGottenGainsRush),
    ("BeggarGardens", return . aiBot . beggarGardens)]
 

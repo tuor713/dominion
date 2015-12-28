@@ -113,6 +113,19 @@ beggarGardens = partialBot $
   `alt` buys "Silver"
   `alt` buys "Copper"
 
+alwaysGainCopper :: PartialBot
+alwaysGainCopper _ _ (ChooseToUse (EffectGain c (Hand _)) f) _
+  | c == copper = Just (f True)
+  | otherwise = Nothing
+alwaysGainCopper _ _ _ _ = Nothing
+
+illGottenGainsRush = partialBot $
+  alwaysGainCopper
+  `alt` buys "Province"
+  `alt` buys "Ill-Gotten Gains"
+  `alt` buys "Duchy"
+  `alt` buys "Silver"
+
 -- Naive, non-contested duke/duchy player
 dukeDuchy = partialBot $
   buysIf "Gold" ((<=1) . (numInDeck "Gold"))

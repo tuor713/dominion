@@ -950,7 +950,9 @@ hinterlandCards = map ($ Hinterlands)
     (onGainSelf (eachOtherPlayer (gain silver))),
    notImplemented "Haggler", -- 718 haggler
    actionA 719 "Highway" 5 highway,
-   notImplemented "Ill-gotten Gains", -- 720 ill-gotten gains
+   carddef 720 "Ill-gotten Gains" (simpleCost 5) [Treasure] noPoints
+    (\p s -> (plusMoney 1 &&& choose (ChooseToUse (EffectGain copper (Hand p))) (\b -> if b then gainTo copper (Hand p) else pass)) p s)
+    (onGainSelf (eachOtherPlayer (gain curse))),
    notImplemented "Inn", -- 721 inn
    withTrigger (action 722 "Mandarin" 5 (plusMoney 3 &&& mandarinAction)) (onGainSelf mandarinTrigger),
    attack 723 "Margrave" 5 (plusCards 3 &&& plusBuys 1 &&& playAttack (plusCards 1 &&& discardDownTo 3)),
@@ -1017,7 +1019,7 @@ mandarinTrigger player state = seqActions (\c -> put c InPlay (TopOfDeck player)
 stables :: Action
 stables p s
   | null ts = toSimulation s
-  | otherwise = optDecision (ChooseCard (EffectDiscard ts (Hand p)) ts (\card -> (discard card &&& plusCards 3 &&& plusActions 1) p s)) p s
+  | otherwise = optDecision (ChooseCard (EffectDiscard unknown (Hand p)) ts (\card -> (discard card (Hand p) &&& plusCards 3 &&& plusActions 1) p s)) p s
   where
     ts = filter isTreasure $ hand $ playerByName s p
 
