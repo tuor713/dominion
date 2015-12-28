@@ -935,7 +935,9 @@ hinterlandCards = map ($ Hinterlands)
    action 705 "Oasis" 3 (plusCards 1 &&& plusActions 1 &&& plusMoney 1 &&& discardNCards 1),
    notImplemented "Oracle", -- 706 oracle
    notImplemented "Scheme", -- 707 scheme
-   notImplemented "Tunnel", -- 708 tunnel
+   carddef 708 "Tunnel" (simpleCost 3) [Victory, Reaction] (const 2)
+    pass
+    (onDiscardSelf tunnelTrigger),
    action 709 "Jack of All Trades" 4 jackOfAllTrades,
    notImplemented "Noble Brigand", -- 710 noble brigand
    notImplemented "Nomad Camp", -- 711 nomad camp
@@ -1022,6 +1024,11 @@ stables p s
   | otherwise = optDecision (ChooseCard (EffectDiscard unknown (Hand p)) ts (\card -> (discard card (Hand p) &&& plusCards 3 &&& plusActions 1) p s)) p s
   where
     ts = filter isTreasure $ hand $ playerByName s p
+
+tunnelTrigger :: Card -> Action
+tunnelTrigger c p s
+  | phase (turn s) == CleanupPhase = toSimulation s
+  | otherwise = choose (ChooseToReact c DiscardTrigger) (\b -> if b then reveal [c] &&& gain gold else pass) p s
 
 -- Dark Ages 8xx
 

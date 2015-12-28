@@ -124,6 +124,10 @@ onDiscardFromPlay :: (Card -> Action -> Action) -> TriggerHandler
 onDiscardFromPlay act DiscardTrigger (EffectDiscard c1 InPlay) (Left c2) cont = if c1 == c2 then act c2 cont else cont
 onDiscardFromPlay _ _ _ _ cont = cont
 
+onDiscardSelf :: (Card -> Action) -> TriggerHandler
+onDiscardSelf action DiscardTrigger (EffectDiscard c1 _) (Left c2) cont = if c1 == c2 then action c2 &&& cont else cont
+onDiscardSelf _ _ _ _ cont = cont
+
 onBuy :: (CardDef -> Action) -> TriggerHandler
 onBuy action BuyTrigger (EffectBuy def) _ cont = (action def) &&& cont
 onBuy _ _ _ _ cont = cont
