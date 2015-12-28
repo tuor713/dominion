@@ -29,8 +29,10 @@ defaultStrategy bot Nothing state decision = (bot state decision, Just bot)
 multiStrategy :: PlayerId -> StateBot (Maybe AIBot)
 multiStrategy id =
   altStrategy id (\s -> cardInTableau (lookupCard "Beggar") s && cardInTableau (lookupCard "Gardens") s) beggarGardens $
+  altStrategy id (cardInTableau (lookupCard "Wharf")) bmWharf $
   altStrategy id (cardInTableau (lookupCard "Courtyard")) bmCourtyard $
   altStrategy id (cardInTableau cJackOfAllTrades) doubleJack $
+  altStrategy id (cardInTableau (lookupCard "Monument")) bmMonument $
   altStrategy id (\s -> cardInTableau cChapel s && cardInTableau cWitch s) chapelWitch $
   altStrategy id (\s -> cardInTableau duchy s && cardInTableau (lookupCard "Duke") s) dukeDuchy $
   altStrategy id (cardInTableau cMilitia) doubleMilitia $
@@ -44,6 +46,8 @@ botLibrary = L.sortOn fst $
    ("Big Smithy", return . aiBot . bigSmithy),
    ("Big Library", return . aiBot . bigLibrary),
    ("BM Courtyard", return . aiBot . bmCourtyard),
+   ("BM Monument", return . aiBot . bmMonument),
+   ("BM Wharf", return . aiBot . bmWharf),
    ("Double Jack", return . aiBot . doubleJack),
    ("Double Militia", return . aiBot . doubleMilitia),
    ("Chapel Witch", return . aiBot . chapelWitch),

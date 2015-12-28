@@ -67,6 +67,15 @@ bigLibrary = partialBot $
                                in num < 1 || (num < 2 && deckSize s >= 16))
   `alt` buys "Silver"
 
+bmMonument = partialBot $
+  buysIf "Province" (\s -> totalMoney s > 15 && checkPPR s)
+  `alt` buysIf "Duchy" ((<=5) . gainsToEndGame)
+  `alt` buysIf "Estate" ((<=2) . gainsToEndGame)
+  `alt` buys "Gold"
+  `alt` buysIf "Monument" (\s -> let num = numInDeck "Monument" s
+                                 in num < 1 || (num < 2 && deckSize s >= 16))
+  `alt` buys "Silver"
+
 bmCourtyard = partialBotConfig (emptyConfig { buyLevels = Set.fromList [2,3,6,8] }) $
   buysIf "Province" (\s -> totalMoney s > 15 && checkPPR s)
   `alt` buysIf "Duchy" ((<=4) . gainsToEndGame)
@@ -77,6 +86,15 @@ bmCourtyard = partialBotConfig (emptyConfig { buyLevels = Set.fromList [2,3,6,8]
   `alt` buysIf "Courtyard" ((==0) . numInDeck "Courtyard")
   `alt` buysIf "Courtyard" (\s -> (fromIntegral (numInDeck "Courtyard" s) :: Double)
                                   < (fromIntegral (numTypeInDeck Treasure s) / 8))
+  `alt` buys "Silver"
+
+bmWharf = partialBot $
+  buysIf "Province" (\s -> totalMoney s > 15 && checkPPR s)
+  `alt` buysIf "Duchy" ((<=5) . gainsToEndGame)
+  `alt` buysIf "Estate" ((<=2) . gainsToEndGame)
+  `alt` buys "Gold"
+  `alt` buysIf "Wharf" (\s -> (fromIntegral (numInDeck "Wharf" s) :: Double)
+                              < (fromIntegral (numTypeInDeck Treasure s) / 4))
   `alt` buys "Silver"
 
 doubleJack = partialBot $
