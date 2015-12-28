@@ -41,6 +41,12 @@ section {
   font-size: xx-large;
 }
 
+.centered {
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+}
+
 .player {
   font-weight: bold;
   color: steelblue;
@@ -72,6 +78,7 @@ section {
 .cardlink:hover img {
   display: block;
   position: fixed;
+  z-index: 900;
 }
 
 .action {

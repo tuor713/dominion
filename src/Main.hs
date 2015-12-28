@@ -192,18 +192,19 @@ nextDecision gamesRepository gameId player = do
 
   (_,games) <- liftIO $ IORef.readIORef gamesRepository
 
-  let (states,simState,stateLog) = games Map.! gameId
-  let mvar = externalDecision $ states Map.! player
+  case Map.lookup gameId games of
+    Just (states,simState,stateLog) -> do
+      let mvar = externalDecision $ states Map.! player
 
-  decision <- liftIO $ readMVar mvar
-  case decision of
-    (State state) -> if useHtml
-                     then writeHtml (htmlFinished state
-                                                  (collectStats (emptyStats (Map.keys (players state))) stateLog)
-                                                  (sim2Infos simState))
-                     else writeBS "{'status':'finished'}"
-    (Decision _ state dec) -> writeLBS $ formatHandler (visibleState player state, filter (canSee player) $ sim2Infos simState, dec)
-
+      decision <- liftIO $ readMVar mvar
+      case decision of
+        (State state) -> if useHtml
+                         then writeHtml (htmlFinished state
+                                                      (collectStats (emptyStats (Map.keys (players state))) stateLog)
+                                                      (sim2Infos simState))
+                         else writeBS "{'status':'finished'}"
+        (Decision _ state dec) -> writeLBS $ formatHandler (visibleState player state, filter (canSee player) $ sim2Infos simState, dec)
+    Nothing -> writeHtml $ htmlError "No such game."
 
 
 decisionHandler :: IORef.IORef GameRepository -> Snap ()

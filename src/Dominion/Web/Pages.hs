@@ -23,6 +23,8 @@ import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
 import Text.Blaze.Internal (MarkupM(Parent))
 
+import Text.Printf (printf)
+
 
 -- Utilities
 
@@ -86,78 +88,105 @@ template link inner =
 
 -- Pages
 
+numberToText :: Int -> String
+numberToText i =
+  (Map.fromList [(1,"one"), (2,"two"), (3,"three"), (4,"four"), (5,"five"), (6,"six"), (7,"seven"),
+                 (8,"eight"), (9,"nine"), (10, "ten"), (11, "eleven"), (12, "twelve"), (13, "thirteen"), (14, "fourteen"),
+                 (15,"fifteen"), (16,"sixteen")])
+  Map.! i
+
+column :: Int -> H.Html -> H.Html
+column n = H.div H.! A.class_ (fromString (numberToText n ++ " wide column"))
+
 htmlHomePage :: H.Html
 htmlHomePage =
   template "/" $ do
-    H.div H.! A.class_ "one wide column" $ ""
-    H.div H.! A.class_ "fourteen wide column" $ do
+    column 1 $ ""
+    column 14 $ do
       H.section $ do
         H.h3 "Dominion Play Server"
         H.p "A small experimental Dominion server for both bot and human play."
 
 
-decisionHtml :: Decision -> H.Html
-decisionHtml (Optional inner _) =
-  H.div $ do
-    decisionHtml inner
-    H.button H.! A.class_ "ui button" H.! A.onclick "pass();" $ "Pass"
+passButton = H.button H.! A.class_ "ui teal button" H.! A.onclick "pass();" $ "Pass"
 
-decisionHtml (ChooseNumber effect (lo,hi) _) =
+decisionHtml :: Bool -> Decision -> H.Html
+decisionHtml _ (Optional inner _) = decisionHtml True inner
+
+decisionHtml allowsPass (ChooseNumber effect (lo,hi) _) =
   H.div $ do
     toHtml $ "Choose how many to use for " ++ show effect
-    forM_ [lo..hi] $ \n ->
-      H.button H.! A.class_ "ui button" H.! A.onclick (fromString ("choose('" ++ show n ++ "');")) $ fromString (show n)
+    H.div H.! A.class_ "centered" $ do
+      forM_ [lo..hi] $ \n ->
+        H.button H.! A.class_ "ui primary button" H.! A.onclick (fromString ("choose('" ++ show n ++ "');")) $ fromString (show n)
+      when allowsPass $ passButton
 
-decisionHtml (ChooseToUse effect _) =
+decisionHtml allowsPass (ChooseToUse effect _) =
   H.div $ do
     toHtml $ "Use " ++ show effect
-    H.button H.! A.class_ "ui button" H.! A.onclick "choose('true');" $ "Yes"
-    H.button H.! A.class_ "ui button" H.! A.onclick "choose('false');" $ "No"
+    H.div H.! A.class_ "centered" $ do
+      H.button H.! A.class_ "ui button" H.! A.onclick "choose('true');" $ "Yes"
+      H.button H.! A.class_ "ui button" H.! A.onclick "choose('false');" $ "No"
+      when allowsPass $ passButton
 
-decisionHtml (ChooseToReact card trigger _) =
+decisionHtml allowsPass (ChooseToReact card trigger _) =
   H.div $ do
     toHtml $ "Use " ++ show card ++ "'s reaction to respond to " ++ show trigger
-    H.button H.! A.class_ "ui button" H.! A.onclick "choose('true');" $ "Yes"
-    H.button H.! A.class_ "ui button" H.! A.onclick "choose('false');" $ "No"
+    H.div H.! A.class_ "centered" $ do
+      H.button H.! A.class_ "ui button" H.! A.onclick "choose('true');" $ "Yes"
+      H.button H.! A.class_ "ui button" H.! A.onclick "choose('false');" $ "No"
+      when allowsPass $ passButton
 
-decisionHtml (ChooseCard effect choices _) =
+decisionHtml allowsPass (ChooseCard effect choices _) =
   H.div $ do
     toHtml $ "Choose a cards to " ++ show effect ++ ":"
-    H.div H.! A.id "choices" $ do
+
+    H.div H.! A.id "choices" H.! A.class_ "centered" $ do
       forM_ choices $ \card -> do
         H.input H.! A.type_ "image"
                 H.! A.onclick (fromString ("choose(\""++ cardName (typ card) ++ "\",1,1);"))
                 H.! A.style "margin: 5px; width: 100px; height: 159px"
                 H.! A.src (fromString (cardImagePath (typ card)))
 
-decisionHtml (ChooseCards effect choices (lo,hi) _) =
+    H.div H.! A.class_ "centered" $ do
+      when allowsPass $ passButton
+
+
+decisionHtml allowsPass (ChooseCards effect choices (lo,hi) _) =
   H.div $ do
     toHtml $ "Choose between " ++ show lo ++ " and " ++ show hi ++ " cards to " ++ show effect ++ ":"
-    H.div H.! A.id "choices" $ do
-      forM_ choices $ \card -> do
-        H.input H.! A.type_ "image"
-                H.! A.name (fromString (cardName (typ card)))
-                H.! A.class_ "cardbox"
-                H.! A.style "margin: 5px; width: 100px; height: 159px"
-                H.! A.src (fromString (cardImagePath (typ card)))
-    if length choices <= hi
-      then H.button H.! A.class_ "ui button"
-                    H.! A.onclick (fromString ("choose(\""++ L.intercalate "," (map (cardName . typ) choices) ++ "\");"))
-                    $ "All"
-      else return ()
-    H.button H.! A.class_ "ui button"
-             H.! A.onclick (fromString ("choices('choices'," ++ show lo ++ "," ++ show hi ++ ");")) $ "Go"
 
-decisionHtml (ChooseEffects no effects _) =
+    H.div H.! A.class_ "centered" $ do
+      H.div H.! A.id "choices" $ do
+        forM_ choices $ \card -> do
+          H.input H.! A.type_ "image"
+                  H.! A.name (fromString (cardName (typ card)))
+                  H.! A.class_ "cardbox"
+                  H.! A.style "margin: 5px; width: 100px; height: 159px"
+                  H.! A.src (fromString (cardImagePath (typ card)))
+
+    H.div H.! A.class_ "centered" $ do
+      if length choices <= hi
+        then H.button H.! A.class_ "ui primary button"
+                      H.! A.onclick (fromString ("choose(\""++ L.intercalate "," (map (cardName . typ) choices) ++ "\");"))
+                      $ "All"
+        else return ()
+      H.button H.! A.class_ "ui secondary button"
+               H.! A.onclick (fromString ("choices('choices'," ++ show lo ++ "," ++ show hi ++ ");")) $ "Go"
+      when allowsPass $ passButton
+
+decisionHtml allowsPass (ChooseEffects no effects _) =
   H.div $ do
     H.p $ toHtml $ "Choose " ++ show no ++ ":"
-    H.div H.! A.id "choices" $ do
+    H.div H.! A.class_ "centered" H.! A.id "choices" $ do
       forM_ (zip [0..] effects) $ \(no::Int,effect) ->
         H.div H.! A.class_ "ui checkbox" $ do
           H.input H.! A.type_ "checkbox" H.! A.name (fromString (show no))
           H.label $ toHtml (show effect)
-    H.button H.! A.class_ "ui button"
-             H.! A.onclick (fromString ("choices('choices'," ++ show no ++ "," ++ show no ++ ");")) $ "Go"
+    H.div H.! A.class_ "centered" $ do
+      H.button H.! A.class_ "ui primary button"
+               H.! A.onclick (fromString ("choices('choices'," ++ show no ++ "," ++ show no ++ ");")) $ "Go"
+      when allowsPass $ passButton
 
 
 compareCard :: CardDef -> CardDef -> Ordering
@@ -179,7 +208,7 @@ cardListToMap cards = Map.fromListWith (+) $ map ((,1) . typ) cards
 
 logsSidebar :: [(String,String)] -> H.Html
 logsSidebar infos =
-  H.div H.! A.class_ "six wide column" $ do
+  column 5 $ do
     H.section H.! A.class_ "logs" $ do
       H.h3 "Game Log"
       H.div $ do
@@ -192,11 +221,12 @@ logsSidebar infos =
 htmlDecision :: PlayerId -> (GameState,[Info],Decision) -> H.Html
 htmlDecision p (state,infos,decision) =
   template "/play" $ do
-    H.div H.! A.class_ "ten wide column" $ do
+    column 1 $ ""
+    column 10 $ do
       H.div H.! A.id "flash" $ ""
       H.section H.! A.class_ "decision" $ do
         H.h3 "Decision"
-        decisionHtml decision
+        decisionHtml False decision
 
       H.section H.! A.class_ "state" $ do
         H.p $ do
@@ -211,9 +241,9 @@ htmlDecision p (state,infos,decision) =
           H.h4 "Tableau:"
           showCards $ Map.map length (piles state)
 
-      forM_ (Map.toAscList (players state)) $ \(pid,player) ->
-        H.section $ do
-          H.h4 $ toHtml $ "Player - " ++ pid
+      forM_ (zip (Map.toAscList (players state)) [0..]) $ \((pid,player),no::Int) -> do
+        H.h4 H.! A.class_ (fromString (if no == 0 then "ui top attached header" else "ui attached header")) $ toHtml $ "Player - " ++ pid
+        H.div H.! A.class_ "ui attached segment" $ do
           when (not (Map.null (tokens player))) $ do
             H.h5 "Tokens: "
             H.p $
@@ -246,26 +276,66 @@ htmlDecision p (state,infos,decision) =
       then ("", "[...]"):map (\(vis,msg) -> (show vis, msg)) (drop (max 0 (length infos - 20)) infos)
       else map (\(vis,msg) -> (show vis, msg)) infos
 
+niceDouble :: Double -> String
+niceDouble d = printf "%.2f" d
+
+ratio :: Int -> Int -> Double
+ratio num denom = fromIntegral num / fromIntegral denom
+
+percentage :: Int -> Int -> Double
+percentage num total = 100 * ratio num total
+
+showDeckStats :: Player -> H.Html
+showDeckStats player =
+  H.table H.! A.class_ "ui very basic collapsing celled table" $ do
+    H.thead $
+      H.tr $ do
+        H.th $ "Cards"
+        H.th $ "Money/Card"
+        H.th $ "Points/Card"
+        H.th $ "% Victory"
+        H.th $ "% Treasure"
+        H.th $ "% Action"
+    H.tbody $
+      H.tr $ do
+        H.td $ toHtml $ show (length (allCards player))
+        H.td $ toHtml $ niceDouble (ratio (moneySum (allCards player)) numCards)
+        H.td $ toHtml $ niceDouble (ratio (points player) numCards)
+        H.td $ toHtml $ niceDouble (percentage (length (filter isVictory (allCards player))) numCards)
+        H.td $ toHtml $ niceDouble (percentage (length (filter isTreasure (allCards player))) numCards)
+        H.td $ toHtml $ niceDouble (percentage (length (filter isAction (allCards player))) numCards)
+  where
+    numCards = length (allCards player)
+
+
+htmlEndStateSummary :: GameState -> H.Html
+htmlEndStateSummary state = do
+  H.section H.! A.class_ "state" $ do
+    H.div $ do
+      H.h4 "Tableau:"
+      showCards $ Map.map length (piles state)
+
+  forM_ (zip (reverse $ L.sortOn (points . snd) $ Map.toList (players state)) [0..]) $ \((pid,player),no::Int) -> do
+    H.h4 H.! A.class_ (fromString (if no == 0 then "ui top attached header" else "ui attached header")) $
+      toHtml $ "Player - " ++ pid ++ ": " ++ show (points player)
+    H.div H.! A.class_ "ui attached segment" $ do
+      when (Map.findWithDefault 0 VictoryToken (tokens player) > 0) $ do
+        H.h5 $ "Victory tokens"
+        H.p $ toHtml (show (Map.findWithDefault 0 VictoryToken (tokens player)))
+
+      H.h5 $ "Cards"
+      H.p $ showCards (cardListToMap (allCards player))
+
+      H.h5 $ "Stats"
+      showDeckStats player
+
 
 htmlFinished :: GameState -> Stats -> [Info] -> H.Html
 htmlFinished state stats infos =
   template "/play" $ do
-    H.div H.! A.class_ "ten wide column" $ do
-      H.section H.! A.class_ "state" $ do
-        H.div $ do
-          H.h4 "Tableau:"
-          showCards $ Map.map length (piles state)
-
-      forM_ (reverse $ L.sortOn (points . snd) $ Map.toList (players state)) $ \(pid,player) ->
-        H.section $ do
-          H.h4 $ toHtml $ "Player - " ++ pid ++ ": " ++ show (points player)
-          when (Map.findWithDefault 0 VictoryToken (tokens player) > 0) $ do
-            H.p $ do
-              H.b $ "Victory tokens: "
-              toHtml (show (Map.findWithDefault 0 VictoryToken (tokens player)))
-          H.p $ do
-            H.b $ "Cards: "
-            showCards (cardListToMap (allCards player))
+    column 1 $ ""
+    column 10 $ do
+      htmlEndStateSummary state
 
       H.section $ do
         H.h3 "Average Victory Points per Turn"
@@ -289,8 +359,8 @@ htmlFinished state stats infos =
 htmlSetupGame :: H.Html
 htmlSetupGame =
   template "/game/play" $ do
-    H.div H.! A.class_ "one wide column" $ ""
-    H.div H.! A.class_ "fourteen wide column" $ do
+    column 1 $ ""
+    column 14 $ do
       H.div H.! A.id "flash" $ ""
 
       H.div H.! A.class_ "ui segment" $ do
@@ -355,9 +425,8 @@ htmlSetupGame =
 htmlSuggestedTableaus :: [(String, [String])] -> H.Html
 htmlSuggestedTableaus tableaus =
   template "/game/suggested" $ do
-    H.div H.! A.class_ "one wide column" $ ""
-
-    H.div H.! A.class_ "fourteen wide column" $ do
+    column 1 $ ""
+    column 14 $ do
       forM_ tableaus $ \(name, cards) -> do
         H.div H.! A.class_ "ui segment" $ do
           H.h3 $ toHtml name
@@ -406,22 +475,11 @@ htmlSimulationForm tableau numGames players =
 htmlSampleGame :: GameState -> [CardDef] -> [Info] -> [PlayerId] -> H.Html
 htmlSampleGame state tableau infos bots =
   template "/simulation" $ do
-    H.div H.! A.class_ "one wide column" $ ""
-    H.div H.! A.class_ "fourteen wide column" $ do
+    column 1 $ ""
+    column 14 $ do
       htmlSimulationForm tableau 1000 bots
 
-      H.section H.! A.class_ "state" $ do
-        H.div $ do
-          H.h4 "Tableau:"
-          showCards $ Map.map length (piles state)
-
-      forM_ (reverse $ L.sortOn (points . snd) $ Map.toList (players state)) $ \(pid,player) ->
-        H.section $ do
-          H.h4 $ toHtml $ "Player - " ++ pid ++ ": " ++ show (points player)
-          when (Map.findWithDefault 0 VictoryToken (tokens player) > 0) $ do
-            H.p $ toHtml ("Victory tokens: " ++ show (Map.findWithDefault 0 VictoryToken (tokens player)))
-          H.h5 "Cards: "
-          showCards (cardListToMap (allCards player))
+      htmlEndStateSummary state
 
       H.section $ do
         H.h3 "Log"
@@ -434,8 +492,8 @@ htmlSampleGame state tableau infos bots =
 htmlSimulation :: [CardDef] -> Stats -> [PlayerId] -> H.Html
 htmlSimulation tableau stats players =
   template "/simulation" $ do
-    H.div H.! A.class_ "one wide column" $ ""
-    H.div H.! A.class_ "fourteen wide column" $ do
+    column 1 $ ""
+    column 14 $ do
       htmlSimulationForm tableau (statNumberOfGames stats) players
 
       H.section $ do
@@ -451,17 +509,17 @@ htmlSimulation tableau stats players =
 
         H.h3 "Stats"
         H.pre $ toHtml $ showStats stats
-    H.div H.! A.class_ "one wide column" $ ""
+    column 1 $ ""
 
-    H.div H.! A.class_ "one wide column" $ ""
-    H.div H.! A.class_ "seven wide column" $ do
+    column 1 $ ""
+    column 7 $ do
       H.h3 "Winners"
       svg H.! A.id "winners" H.! A.class_ "chart" $ ""
 
       H.h3 "Turns per Game"
       svg H.! A.id "turns" H.! A.class_ "chart" $ ""
 
-    H.div H.! A.class_ "seven wide column" $ do
+    column 7 $ do
       H.h3 "Average Victory Points per Turn"
       svg H.! A.id "avgVictory" H.! A.class_ "chart" $ ""
 
@@ -484,3 +542,12 @@ htmlSimulation tableau stats players =
                 "linePlot(\"#avgMoney\",450,300," ++
                 L.intercalate "," (map (\p -> "\"" ++ p ++ "\"," ++ dataToJavaScriptArray ((statAvgMoneyPerTurn stats) Map.! p)) players) ++
                 ");\n")
+
+htmlError :: String -> H.Html
+htmlError error =
+  template "/error" $ do
+    column 1 $ ""
+    column 14 $ do
+      H.div H.! A.class_ "ui negative message" $ do
+        H.div H.! A.class_ "header" $ "Error"
+        toHtml error
