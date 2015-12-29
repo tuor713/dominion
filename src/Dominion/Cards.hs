@@ -10,12 +10,10 @@ import qualified Data.Map.Strict as Map
 kingdomCards :: [CardDef]
 kingdomCards = concat [baseCards, intrigueCards, seasideCards, alchemyCards,
                        prosperityCards, cornucopiaCards, hinterlandCards,
-                       darkAgesCards, guildsCards, adventuresCards,
-                       promoCards]
+                       darkAgesCards, guildsCards, adventuresCards, promoCards]
 
 cardData :: Map.Map String CardDef
-cardData = Map.fromList $ map (\c -> (map toLower $ cardName c, c))
-  (concat [basicCards, kingdomCards])
+cardData = Map.fromList $ map (\c -> (map toLower $ cardName c, c)) (concat [basicCards, kingdomCards, prizes])
 
 maybeCard :: String -> Maybe CardDef
 maybeCard name = Map.lookup (map toLower name) cardData
@@ -44,6 +42,8 @@ cJackOfAllTrades = cardData Map.! "jack of all trades"
 cGardens         = cardData Map.! "gardens"
 cWishingWell     = cardData Map.! "wishing well"
 cCrossroads      = cardData Map.! "crossroads"
+cTrustySteed     = cardData Map.! "trusty steed"
+cTournament      = cardData Map.! "tournament"
 
 -- Generic action elements (potentially move to model)
 
@@ -59,6 +59,9 @@ revealUntil pred cont player state =
       case s of
         Just ss -> if pred (take n $ deck $ playerByName ss player) then return (ss,n) else iter (n+1) ss
         Nothing -> return (state, n-1)
+
+revealUntilSelector :: (Card -> Bool) -> ([Card] -> [Card] -> Action) -> Action
+revealUntilSelector pred cont = revealUntil (any pred) (\cs -> cont (filter pred cs) (filter (not . pred) cs))
 
 eachOtherPlayer :: Action -> Action
 eachOtherPlayer action player state = seqSteps action (opponentNames state player) state
@@ -209,13 +212,14 @@ cellar = plusActions 1
 chapel :: Action
 chapel = trashNCards 0 4
 
+deckIntoDiscard :: Action
+deckIntoDiscard player state = toSimulation $ updatePlayer state player (\p -> p { deck = [], discardPile = deck p ++ discardPile p })
+
 chancellor :: Action
 chancellor player state = plusMoney 2 player state
   `andThen` \s2 -> decision (ChooseToUse (SpecialEffect cChancellor) (cont s2)) player s2
   where
-    cont state b = toSimulation $ if b then updatePlayer state player
-                                                (\p -> p { deck = [], discardPile = deck p ++ discardPile p })
-                                       else state
+    cont state b = if b then deckIntoDiscard player state else toSimulation state
 
 workshop :: Action
 workshop player state =
@@ -900,30 +904,141 @@ vault player state =
 -- Cornucopia 6xx
 
 cornucopiaCards = map ($ Cornucopia)
-  [notImplemented "Hamlet", -- 601 hamlet
-   notImplemented "Fortune Teller", -- 602 fortune teller
+  [action 601 "Hamlet" 2 (plusCards 1 &&& plusActions 1 &&& hamlet),
+   attack 602 "Fortune Teller" 3 (plusMoney 2 &&& playAttack fortuneTeller),
    action 603 "Menagerie" 3 (plusActions 1 &&& menagerie),
-   notImplemented "Farming Village", -- 604 farming village
+   action 604 "Farming Village" 4 (plusActions 2 &&& farmingVillage),
    notImplemented "Horse Traders", -- 605 horse traders
    -- TODO should probably be renamed and abstracted
    action 606 "Remake" 4 (trashForGain upgradeBenefit &&& trashForGain upgradeBenefit),
-   notImplemented "Tournament", -- 607 tournament
+   withTrigger (action 607 "Tournament" 4 (plusActions 1 &&& tournament))
+    (onStartOfGame (\_ state -> toSimulation $ state { nonSupplyPiles = Map.fromList (map (\p -> (p, [Card (10000 * (cardTypeId p)) p])) prizes) })),
    notImplemented "Young Witch", -- 608 young witch
-   notImplemented "Harvest", -- 609 harvest
-   notImplemented "Horn of Plenty", -- 610 horn of plenty
-   notImplemented "Hunting Party", -- 611 hunting party
-   notImplemented "Jester", -- 612 jester
+   action 609 "Harvest" 5 harvest,
+   carddefA 610 "Horn of Plenty" (simpleCost 5) [Treasure] noPoints hornOfPlenty noTriggers,
+   action 611 "Hunting Party" 5 (plusCards 1 &&& plusActions 1 &&& huntingParty),
+   attack 612 "Jester" 5 (plusMoney 2 &&& jester),
    withInitialSupply (carddef 613 "Fairgrounds" (simpleCost 6) [Victory] fairgroundsPoints pass noTriggers)
     stdVictorySupply
   ]
 
+prizes = map ($ Cornucopia)
+  [carddef 620 "Bag of Gold" (simpleCost 0) [Action, Prize] noPoints (\p s -> (plusActions 1 &&& gainTo gold (TopOfDeck p)) p s) noTriggers,
+   carddef 621 "Diadem" (simpleCost 0) [Treasure, Prize] noPoints (plusMoney 2 &&& (\p s -> plusMoney (actions (turn s)) p s)) noTriggers,
+   carddef 622 "Followers" (simpleCost 0) [Action, Attack, Prize] noPoints
+    (plusCards 2 &&& gain estate &&& playAttack (gain curse &&& discardDownTo 3))
+    noTriggers,
+   carddefA 623 "Princess" (simpleCost 0) [Action, Prize] noPoints princess noTriggers,
+   carddef 624 "Trusty Steed" (simpleCost 0) [Action, Prize] noPoints trustySteed noTriggers
+   ]
+
+princess :: Maybe Card -> Action
+princess Nothing = plusBuys 1
+princess (Just card) = plusBuys 1 &&& addModifier (ModCost Nothing) (ConditionalModifier ((card `elem`) . inPlay . activePlayer) (CappedDecModifier 2))
+
+fairgroundsPoints :: Player -> Int
 fairgroundsPoints p = 2 * ((length $ L.nub $ map typ $ allCards p) `quot` 5)
 
+farmingVillage :: Action
+farmingVillage = revealUntilSelector (\c -> isAction c || isTreasure c)
+                                     (\match other p s -> (discardAll other (TopOfDeck p) &&& putAll match (TopOfDeck p) (Hand p)) p s)
+
+fortuneTeller :: Action
+fortuneTeller = revealUntilSelector (\c -> typ c == curse || isVictory c) (\_ other p s -> discardAll other (TopOfDeck p) p s)
+
+hamlet :: Action
+hamlet = (\p s -> optDecision
+                    (ChooseCard (EffectDiscard unknown (Hand p)) (hand (playerByName s p)) (\c -> (discard c (Hand p) &&& plusActions 1) p s))
+                    p s)
+  &&& (\p s -> optDecision
+                (ChooseCard (EffectDiscard unknown (Hand p)) (hand (playerByName s p)) (\c -> (discard c (Hand p) &&& plusBuys 1) p s))
+                p s)
+
+harvest :: Action
+harvest = revealUntil ((==4) . length) (\cs p s -> (discardAll cs (TopOfDeck p) &&& plusMoney (length cs)) p s)
+
+hornOfPlenty :: Maybe Card -> Action
+hornOfPlenty source p s
+  | null candidates = toSimulation s
+  | otherwise = chooseOne
+                  (EffectGain unknownDef (Discard p))
+                  (map (`topOfSupply` s) candidates)
+                  (\c -> gain (typ c) &&& (if isVictory c then trashHorn source else pass))
+                  p s
+  where
+    candidates = affordableCards (simpleCost typesInPlay) s
+    typesInPlay = length $ L.nub $ map typ (inPlay player ++ Either.lefts (inPlayDuration player))
+    player = playerByName s p
+    trashHorn Nothing = pass
+    trashHorn (Just card) = trash card InPlay
+
+huntingParty :: Action
+huntingParty p s =
+  (reveal h &&&
+   revealUntilSelector (\c -> not ((typ c) `elem` htypes))
+                       (\match other p s -> (discardAll other (TopOfDeck p) &&& putAll match (TopOfDeck p) (Hand p)) p s))
+   p s
+  where
+    h = hand $ playerByName s p
+    htypes = L.nub $ map typ $ h
+
+jester :: Action
+jester attacker state = playAttack (reshuffleIfNeeded &&& attack) attacker state
+  where
+    attack op state
+      | null d = toSimulation state
+      | isVictory top = gain curse op state
+      | otherwise = chooseEffects 1 [EffectGain (typ top) (Discard op), EffectGain (typ top) (Discard attacker)]
+                      enact
+                      attacker state
+      where
+        d = deck (playerByName state op)
+        top = head d
+        enact [(EffectGain _ (Discard p))] _ s = gain (typ top) p s
+        enact _ _ _ = error "Unexpected choice from Jester"
+
+menagerie :: Action
 menagerie player state = (reveal h &&& (if unique then plusCards 3 else plusCards 1)) player state
   where
     h = hand $ playerByName state player
     cardTypes = map typ h
     unique = length cardTypes == length (L.nub cardTypes)
+
+tournament :: Action
+tournament playerId s = allDecisions Map.empty (playerNames s)
+  where
+    final :: Map.Map PlayerId Bool -> Simulation
+    final choices =
+      ((if Map.findWithDefault False playerId choices then discard (head (provinces playerId)) (Hand playerId) &&& gainPrize else pass)
+       &&& (if Map.size (Map.filterWithKey (\k v -> v && k /= playerId) choices) > 0 then pass else plusCards 1 &&& plusMoney 1))
+      playerId s
+
+    provinces player = filter ((==province) . typ) $ hand $ playerByName s player
+
+    gainPrize :: Action
+    gainPrize player state = chooseEffects 1 [SpecialEffect cTournament, EffectGain duchy (TopOfDeck player)] (enact . head) player state
+
+    enact :: Effect -> Action
+    enact (SpecialEffect _) p s
+      | null ps = toSimulation s
+      | otherwise = chooseOne (EffectGain unknownDef (TopOfDeck p)) ps (\c -> gainSpecial (typ c) (TopOfDeck p)) p s
+      where
+        ps = map head $ Map.elems $ Map.filter (not . null) (nonSupplyPiles s)
+    enact e p s = enactEffect e p s
+
+    allDecisions :: Map.Map PlayerId Bool -> [PlayerId] -> Simulation
+    allDecisions accu [] = final accu
+    allDecisions accu (p:ps)
+      | null (provinces p) = allDecisions (Map.insert p False accu) ps
+      | otherwise = decision (ChooseToUse (EffectReveal (head (provinces p))) (\b -> allDecisions (Map.insert p b accu) ps)) p s
+
+trustySteed :: Action
+trustySteed p s = chooseEffects 2 [EffectPlusCards 2, EffectPlusActions 2, EffectPlusMoney 2, SpecialEffect cTrustySteed] enactAll p s
+  where
+    enact (SpecialEffect _) = gain silver &&& gain silver &&& gain silver &&& gain silver &&& deckIntoDiscard
+    enact e = enactEffect e
+    enactAll = foldr (\e a -> enact e &&& a) pass
+
 
 -- Hinterlands 7xx
 
@@ -1003,8 +1118,7 @@ highway :: Maybe Card -> Action
 highway Nothing = plusCards 1 &&& plusActions 1
 highway (Just card) =
   plusCards 1 &&& plusActions 1 &&&
-  addModifier (ModCost (Just Action))
-              (ConditionalModifier (\state -> card `elem` (inPlay $ activePlayer state)) (CappedDecModifier 2))
+  addModifier (ModCost Nothing) (ConditionalModifier (\state -> card `elem` (inPlay $ activePlayer state)) (CappedDecModifier 1))
 
 mandarinAction :: Action
 mandarinAction player state

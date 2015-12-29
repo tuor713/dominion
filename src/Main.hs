@@ -25,6 +25,7 @@ import qualified Data.Maybe as Maybe
 import qualified Data.Map.Strict as Map
 import qualified Data.Map.Lazy as LMap
 import qualified System.Environment as Env
+import System.Log.FastLogger
 import System.Random (newStdGen)
 
 import Text.Blaze.Html.Renderer.Utf8 (renderHtml)
@@ -82,21 +83,22 @@ runTournament (n:bots) = roundRobin (read n) bots
 
 runWeb :: IO ()
 runWeb = do
+  logset <- newStdoutLoggerSet 1000
   gamesRepository <- IORef.newIORef (0,Map.empty)
-  quickHttpServe (site gamesRepository)
+  quickHttpServe (site logset gamesRepository)
 
 homePage :: Snap ()
 homePage = writeHtml htmlHomePage
 
-site :: IORef.IORef GameRepository -> Snap ()
-site gamesRepository =
+site :: LoggerSet -> IORef.IORef GameRepository -> Snap ()
+site logset gamesRepository =
     ifTop homePage <|>
     route [ ("simulation", method GET $ simulationHandler),
-            ("game/start", method POST $ startGameHandler gamesRepository),
+            ("game/start", method POST $ startGameHandler logset gamesRepository),
             ("game/play", method GET $ setupGameHandler),
             ("game/suggested", method GET $ suggestedTableauHandler),
-            ("game/:id/decision/:player", method GET $ decisionHandler gamesRepository),
-            ("game/:id/decision/:player", method POST $ makeDecisionHandler gamesRepository)
+            ("game/:id/decision/:player", method GET $ decisionHandler logset gamesRepository),
+            ("game/:id/decision/:player", method POST $ makeDecisionHandler logset gamesRepository)
           ] <|>
     dir "static" (serveDirectory "static")
 
@@ -109,6 +111,10 @@ writeHtml = writeLBS . renderHtml
 
 data PlayerState = Bot Bot | External (MVar GameStep)
 type Game = (Map.Map PlayerId PlayerState, SimulationState, [GameState])
+
+instance Show PlayerState where
+  show (Bot _) = "Bot"
+  show (External _) = "External"
 
 type GameRepository = (Int,Map.Map Int Game)
 
@@ -154,8 +160,8 @@ suggestedTableauHandler :: Snap ()
 suggestedTableauHandler = (writeHtml . htmlSuggestedTableaus) suggestedTableaus
 
 
-startGameHandler :: IORef.IORef GameRepository -> Snap ()
-startGameHandler gamesRepository = do
+startGameHandler :: LoggerSet -> IORef.IORef GameRepository -> Snap ()
+startGameHandler logset gamesRepository = do
   body <- readRequestBody 10000
   let req = J.decode body :: Maybe StartGameReq
   let (players,cards,gameTyp) = maybe ([HumanPlayer "Alice", BotPlayer "Bob" defaultBotId], defaultTableau, StandardGame)
@@ -171,7 +177,11 @@ startGameHandler gamesRepository = do
 
     game <- nextStep (Map.fromList mvars,simState,[]) (State newGame)
     IORef.writeIORef gamesRepository (nextId+1, Map.insert nextId game games)
+
+    pushLogStr logset (toLogStr ("Created new game: " ++ show nextId ++ "\n"))
+
     return nextId
+
   writeBS $ C8.pack $ show id
   where
     defaultTableau = ["market", "library", "smithy", "cellar", "chapel", "militia",
@@ -207,8 +217,8 @@ nextDecision gamesRepository gameId player = do
     Nothing -> writeHtml $ htmlError "No such game."
 
 
-decisionHandler :: IORef.IORef GameRepository -> Snap ()
-decisionHandler gamesRepository = do
+decisionHandler :: LoggerSet -> IORef.IORef GameRepository -> Snap ()
+decisionHandler _ gamesRepository = do
   id <- getParam "id"
   player <- getParam "player"
 
@@ -226,14 +236,18 @@ parseDecision (ChooseCards _ choices _ f) input = f $ Maybe.fromJust $ findCards
 parseDecision (ChooseEffects _ effects f) input = f (map ((effects!!) . read) (wordsBy (==',') input))
 parseDecision (Optional inner other) input      = if input == "" then other else parseDecision inner input
 
-makeDecisionHandler :: IORef.IORef GameRepository -> Snap ()
-makeDecisionHandler gamesRepository = do
+makeDecisionHandler :: LoggerSet -> IORef.IORef GameRepository -> Snap ()
+makeDecisionHandler logset gamesRepository = do
   id <- getParam "id"
   player <- getParam "player"
   (_,games) <- liftIO $ IORef.readIORef gamesRepository
 
+
   let gameId = fst $ Maybe.fromJust $ C8.readInt (Maybe.fromJust id)
   let playerId = C8.unpack (Maybe.fromJust player)
+
+  liftIO $ pushLogStr logset (toLogStr ("Player " ++ playerId ++ " making decision in game " ++ show gameId ++ "\n"))
+
   let (states,simState,stateLog) = games Map.! gameId
   let mvar = externalDecision $ states Map.! playerId
 
@@ -241,6 +255,7 @@ makeDecisionHandler gamesRepository = do
   let text = LBS.toStrict param
 
   decision <- liftIO $ takeMVar mvar
+
   case decision of
     (State _) -> writeBS "no decision to make, game has ended"
     (Decision _ _ dec) -> do
@@ -248,6 +263,7 @@ makeDecisionHandler gamesRepository = do
 
       liftIO $ do
         game' <- nextStep (states,combineSimStates simState simState',stateLog) next
+
         IORef.modifyIORef' gamesRepository (\(id,games) -> (id,Map.insert gameId game' games))
 
       nextDecision gamesRepository gameId playerId

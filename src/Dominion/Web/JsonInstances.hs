@@ -69,6 +69,7 @@ instance J.ToJSON Trigger where
 
 instance J.ToJSON Location where
   toJSON Supply           = J.toJSON [J.String "supply"]
+  toJSON NonSupply        = J.toJSON [J.String "specialSupply"]
   toJSON (Hand p)         = J.toJSON [J.String "hand" , jString p]
   toJSON (Discard p)      = J.toJSON [J.String "discardPile", jString p]
   toJSON Trash            = J.toJSON [J.String "trash"]

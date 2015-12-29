@@ -131,6 +131,15 @@ beggarGardens = partialBot $
   `alt` buys "Silver"
   `alt` buys "Copper"
 
+familiarOnly = partialBot $
+  buys "Province"
+  `alt` buysIf "Duchy" ((<=5) . gainsToEndGame)
+  `alt` buysIf "Estate" ((<=2) . gainsToEndGame)
+  `alt` buys "Gold"
+  `alt` buys "Familiar"
+  `alt` buysIf "Potion" ((<1) . (numInDeck "Potion"))
+  `alt` buys "Silver"
+
 alwaysGainCopper :: PartialBot
 alwaysGainCopper _ _ (ChooseToUse (EffectGain c (Hand _)) f) _
   | c == copper = Just (f True)

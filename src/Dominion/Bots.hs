@@ -38,6 +38,7 @@ multiStrategy id =
   altStrategy id (cardInTableau cMilitia) doubleMilitia $
   altStrategy id (cardInTableau cSmithy) bigSmithy $
   altStrategy id (cardInTableau cLibrary) bigLibrary $
+  altStrategy id (cardInTableau (lookupCard "Familiar")) familiarOnly $
   defaultStrategy (betterBigMoney id)
 
 botLibrary :: [(String, PlayerId -> IO Bot)]
@@ -51,6 +52,7 @@ botLibrary = L.sortOn fst $
    ("Double Jack", return . aiBot . doubleJack),
    ("Double Militia", return . aiBot . doubleMilitia),
    ("Chapel Witch", return . aiBot . chapelWitch),
+   ("Familiar Only", return . aiBot . familiarOnly),
    ("Multi Strategy", stateBot Nothing . multiStrategy),
    ("Duke Duchy", return . aiBot . dukeDuchy),
    ("Ill-Gotten Gains Rush", return . aiBot . illGottenGainsRush),

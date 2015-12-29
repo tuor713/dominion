@@ -20,7 +20,7 @@ data CardType = Action | Treasure | Victory | CurseType {- This is a bit of a ha
     deriving (Eq, Ord, Read, Show)
 
 data Location = Hand PlayerId | Discard PlayerId | TopOfDeck PlayerId | BottomOfDeck PlayerId |
-  InPlay | InPlayDuration | Trash | Supply | Mat PlayerId Mat
+  InPlay | InPlayDuration | Trash | Supply | NonSupply | Mat PlayerId Mat
   deriving (Eq, Show)
 
 data Edition = Base | Intrigue | Seaside | Alchemy | Prosperity | Cornucopia | Hinterlands | DarkAges | Guilds | Adventures | Promo
@@ -306,6 +306,7 @@ data GameState = GameState { players :: Map.Map PlayerId Player,
                              trashPile :: [Card],
                              turn :: TurnState,
                              piles :: Map.Map CardDef [Card],
+                             nonSupplyPiles :: Map.Map CardDef [Card],
                              ply :: Int,
                              finished :: Bool
                              }
@@ -389,6 +390,15 @@ data Decision =
   ChooseEffects Int [Effect] ([Effect] -> Simulation) |
   ChooseNumber Effect (Int,Int) (Int -> Simulation)
 
+instance Show Decision where
+  show (Optional dec _) = "Optional(" ++ show dec ++ ")"
+  show (ChooseCard effect cards _) = "ChooseCard(" ++ show effect ++ ", " ++ show cards ++ ")"
+  show (ChooseCards effect cards (lo,hi) _) = "ChooseCards(" ++ show effect ++ ", " ++ show cards ++ ", " ++ show lo ++ ", " ++ show hi ++ ")"
+  show (ChooseToUse effect _) = "ChooseToUse(" ++ show effect ++ ")"
+  show (ChooseToReact card trigger _) = "ChooseToReact(" ++ show card ++ ", " ++ show trigger ++ ")"
+  show (ChooseEffects num effects _) = "ChooseEffects(" ++ show num ++ ", " ++ show effects ++ ")"
+  show (ChooseNumber effect (lo,hi) _) = "ChooseNumber(" ++ show effect ++ ", " ++ show lo ++ ", " ++ show hi ++ ")"
+
 data DecisionSource = GameMechanics | CardDecision Card
 
 -- TODO add source of decision
@@ -419,6 +429,10 @@ instance Show GameState where
     "actions: " ++ show (actions (turn g)) ++ ", buys: " ++ show (buys (turn g)) ++ ", money: " ++ show (money (turn g)) ++
     " }\n" ++
     "}"
+
+instance Show GameStep where
+  show (State state) = "State(" ++ show state ++ ")"
+  show (Decision pid state decision) = "Decision(" ++ show pid ++ ", " ++ show state ++ ", " ++ show decision ++ ")"
 
 instance Show Effect where
   show (EffectPlusCards no) = "+" ++ show no ++ " card(s)"
@@ -468,6 +482,7 @@ nullState =
   GameState { players = Map.singleton "Alice" nullPlayer,
               turnOrder = ["Alice"],
               piles = Map.empty,
+              nonSupplyPiles = Map.empty,
               trashPile = [],
               turn = newTurn,
               ply = 1,
@@ -505,6 +520,7 @@ mkGame typ names kingdomCards =
     protoState players = GameState { players = Map.fromList $ zip names players,
                                      turnOrder = names,
                                      piles = pileMap,
+                                     nonSupplyPiles = Map.empty,
                                      trashPile = [],
                                      turn = newTurn,
                                      ply = 1,
@@ -599,6 +615,7 @@ moveTo c InPlay state                = updatePlayer state (name (activePlayer st
 moveTo c InPlayDuration state        = updatePlayer state (name (activePlayer state)) (\p -> p { inPlayDuration = (Left c) : inPlayDuration p })
 moveTo c Trash state                 = state { trashPile = c : trashPile state }
 moveTo c Supply state                = state { piles = Map.adjust (c:) (typ c) (piles state) }
+moveTo c NonSupply state             = state { nonSupplyPiles = Map.adjust (c:) (typ c) (nonSupplyPiles state) }
 moveTo c (Mat player mat) state      = updatePlayer state player (\p -> p { mats = Map.insertWith (++) mat [c] (mats p) })
 
 moveFrom :: Card -> Location -> GameState -> GameState
@@ -610,6 +627,7 @@ moveFrom c InPlay state                = updatePlayer state (name (activePlayer 
 moveFrom c InPlayDuration state        = updatePlayer state (name (activePlayer state)) (\p -> p { inPlayDuration = L.delete (Left c) $ inPlayDuration p })
 moveFrom c Trash state                 = state { trashPile = L.delete c $ trashPile state }
 moveFrom c Supply state                = state { piles = Map.adjust tail (typ c) (piles state) }
+moveFrom c NonSupply state             = state { nonSupplyPiles = Map.adjust tail (typ c) (nonSupplyPiles state) }
 moveFrom c (Mat player mat) state      = updatePlayer state player (\p -> p { mats = Map.adjust (L.delete c) mat (mats p) })
 
 getCards :: Location -> GameState -> [Card]
@@ -621,6 +639,7 @@ getCards InPlay state = inPlay $ activePlayer state
 getCards InPlayDuration state = Either.lefts $ inPlayDuration $ activePlayer state
 getCards Trash state = trashPile state
 getCards Supply state = concat $ Map.elems (piles state)
+getCards NonSupply state = concat $ Map.elems (nonSupplyPiles state)
 getCards (Mat player mat) state = Map.findWithDefault [] mat (mats $ playerByName state player)
 
 addDurationEffect :: CardDef -> GameState -> GameState
@@ -888,6 +907,9 @@ put card source target p state =
   info (VisibleToPlayer p) (p ++ " puts " ++ show card ++ " from " ++ show source ++ " to " ++ show target) >>
   move card source target p state
 
+putAll :: [Card] -> Location -> Location -> Action
+putAll cards source target = seqActions (\c -> put c source target) cards
+
 gainFrom :: Card -> Location -> Action
 gainFrom card source player state =
   info AllPlayers (player ++ " gains " ++ cardName (typ card)) >>
@@ -896,6 +918,19 @@ gainFrom card source player state =
     (EffectGainFrom card source (Discard player))
     (move card source (Discard player))
     player state
+
+gainSpecial :: CardDef -> Location -> Action
+gainSpecial card target player state
+  | null pile = toSimulation state
+  | otherwise = info AllPlayers (player ++ " gains " ++ cardName card) >>
+                handleAllTriggers GainTrigger
+                  ((Left c):(map Left (hand (playerByName state player)) ++ map Left (inPlay (playerByName state player))))
+                  (EffectGain card target)
+                  (move c NonSupply target)
+                  player state
+  where
+    pile = Map.findWithDefault [] card (nonSupplyPiles state)
+    c = head pile
 
 gainTo :: CardDef -> Location -> Action
 gainTo card target player state
