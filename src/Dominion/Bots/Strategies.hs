@@ -161,3 +161,12 @@ dukeDuchy = partialBot $
 
   `alt` buys "Duchy"
   `alt` buys "Silver"
+
+islandSilkRoad = partialBot $
+  buysIf "Silk Road" (\s -> numInDeckAndMats "Island" s >= 5 + numInDeckAndMats "Silk Road" s)
+  `alt` buys "Island"
+  `alt` buys "Silk Road"
+  `alt` buys "Duchy"
+  `alt` buysIf "Estate" ((<=4) . gainsToEndGame)
+  `alt` buys "Silver"
+  `alt` buys "Copper"

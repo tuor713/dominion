@@ -49,6 +49,7 @@ botLibrary = L.sortOn fst $
    ("BM Courtyard", return . aiBot . bmCourtyard),
    ("BM Monument", return . aiBot . bmMonument),
    ("BM Wharf", return . aiBot . bmWharf),
+   ("Island Silk Road", return . aiBot . islandSilkRoad),
    ("Double Jack", return . aiBot . doubleJack),
    ("Double Militia", return . aiBot . doubleMilitia),
    ("Chapel Witch", return . aiBot . chapelWitch),

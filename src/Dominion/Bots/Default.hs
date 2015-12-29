@@ -27,6 +27,15 @@ cardScore card
   | card == cSmithy = 60
   | otherwise = 40
 
+stashScore :: CardDef -> Int
+stashScore card
+  | types card == [Victory] = 100
+  | card == curse = 75
+  | card == copper = 60
+  | card == silver = 50
+  | card == gold = 0
+  | otherwise = 20
+
 defaultBot :: DefaultBotConfig -> SimpleBot
 defaultBot _ _ _ (ChooseCards (EffectPlayTreasure _) choices _ f) _ = f choices
 defaultBot _ _ _ (ChooseCard (EffectPlayAction _) actions f) _ = f (head actions)
@@ -60,6 +69,14 @@ defaultBot config ownId state (ChooseCard (EffectPut _ (Hand p) (TopOfDeck _)) c
   | otherwise = fallback
   where
     fallback = Maybe.fromMaybe (f (head cards)) alt
+
+defaultBot _ _ _ (ChooseCard (EffectPut _ (Hand _) (Mat _ IslandMat)) cards f) alt
+  | stashScore (typ bestStash) > 50 = f bestStash
+  | otherwise = case alt of
+                  Just next -> next
+                  Nothing -> f bestStash
+  where
+    bestStash = L.maximumBy (\c1 c2 -> compare (stashScore (typ c1)) (stashScore (typ c2))) cards
 
 defaultBot _ ownId _ (ChooseToUse (EffectDiscard card (TopOfDeck p)) f) _
   | ownId == p = f (not desirable)

@@ -94,5 +94,10 @@ numInDeck name = \state -> length $ filter ((==card) . typ) $ allCards $ activeP
   where
     card = lookupCard name
 
+numInDeckAndMats :: String -> GameState -> Int
+numInDeckAndMats name = \state -> length $ filter ((==card) . typ) (let p = activePlayer state in allCards p ++ concat (Map.elems (mats p)))
+  where
+    card = lookupCard name
+
 numTypeInDeck :: CardType -> GameState -> Int
 numTypeInDeck typ = \state -> length $ filter (`hasCardType` typ) $ allCards $ activePlayer state
