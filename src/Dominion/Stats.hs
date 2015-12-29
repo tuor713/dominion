@@ -2,6 +2,7 @@
 module Dominion.Stats where
 
 import Dominion.Model
+import qualified Data.List as L
 import qualified Data.Map.Strict as Map
 
 
@@ -11,8 +12,13 @@ data Stats = Stats { turnsPerGame :: !(Map.Map Int Int),
                      avgPointsPerTurn :: !(Map.Map PlayerId (Map.Map Int (Int,Int))),
                      winRatio :: !(Map.Map PlayerId Int),
                      totalGames :: !Int,
-                     avgMoneyPerTurn :: !(Map.Map PlayerId (Map.Map Int (Int,Int)))
+                     avgMoneyPerTurn :: !(Map.Map PlayerId (Map.Map Int (Int,Int))),
+                     maxPoints :: !Int,
+                     minPoints :: !Int
                      }
+
+pointProjection :: Player -> Int
+pointProjection p = points $ p { deck = deck p ++ Map.findWithDefault [] IslandMat (mats p) }
 
 collectStats :: StatsCollector Stats
 collectStats stats game =
@@ -20,7 +26,9 @@ collectStats stats game =
           turnsPerGame = Map.insertWith (+) (turnNo (last (init game))) 1 (turnsPerGame stats),
           winRatio = Map.insertWith (+) victor 1 (winRatio stats),
           avgPointsPerTurn = newAveragePoints,
-          avgMoneyPerTurn = newAverageMoney
+          avgMoneyPerTurn = newAverageMoney,
+          maxPoints = maxPoints stats + L.maximum (map points (Map.elems (players (last game)))),
+          minPoints = minPoints stats + L.minimum (map points (Map.elems (players (last game))))
           }
   where
     victor = winnerName $ winner (last game)
@@ -39,7 +47,7 @@ collectStats stats game =
     newAveragePoints =
       foldr (\state ->
               Map.adjust
-                (\m2 -> Map.insertWith (\(s1,n1) (s2,n2) -> (s1+s2,n1+n2)) (turnNo state) ((points (activePlayer state)),1) m2)
+                (\m2 -> Map.insertWith (\(s1,n1) (s2,n2) -> (s1+s2,n1+n2)) (turnNo state) ((pointProjection (activePlayer state)),1) m2)
                 (activePlayerId state))
             (avgPointsPerTurn stats)
             (init game)
@@ -49,7 +57,9 @@ emptyStats players = Stats { totalGames = 0,
                              avgPointsPerTurn = Map.fromList (map (,Map.empty) players),
                              avgMoneyPerTurn = Map.fromList (map (,Map.empty) players),
                              winRatio = Map.fromList (map (,0) players),
-                             turnsPerGame = Map.empty
+                             turnsPerGame = Map.empty,
+                             maxPoints = 0,
+                             minPoints = 0
                              }
 
 statWinRatio :: Stats -> [(PlayerId,Double)]
@@ -63,6 +73,17 @@ statTurnsPerGame :: Stats -> [(Int,Double)]
 statTurnsPerGame stats =
   Map.toAscList $ Map.map ((*100.0) . (/ fromIntegral (totalGames stats)) . fromIntegral) (turnsPerGame stats)
 
+statAvgTurnsPerGame :: Stats -> Double
+statAvgTurnsPerGame stats = fromIntegral (Map.foldrWithKey (\k num sum -> sum + k*num) 0 (turnsPerGame stats)) / fromIntegral (totalGames stats)
+
+statMedianTurnsPerGame :: Stats -> Double
+statMedianTurnsPerGame stats
+  | odd len = fromIntegral $ turns !! (len `quot` 2 + 1)
+  | otherwise = fromIntegral (turns !! (len `quot` 2) + turns !! (len `quot` 2 + 1)) / 2.0
+  where
+    turns = L.sort $ L.concat $ map (\(t,n) -> replicate n t) $ Map.toList $ turnsPerGame stats
+    len = length turns
+
 statAvgVictoryPerTurn :: Stats -> Map.Map PlayerId [(Int,Double)]
 statAvgVictoryPerTurn stats =
   Map.map
@@ -74,3 +95,9 @@ statAvgMoneyPerTurn stats =
   Map.map
     (\m -> Map.toAscList $ Map.map (\(s,n) -> fromIntegral s / fromIntegral n) m)
     (avgMoneyPerTurn stats)
+
+statAvgMaxPoints :: Stats -> Double
+statAvgMaxPoints stats = fromIntegral (maxPoints stats) / fromIntegral (totalGames stats)
+
+statAvgMinPoints :: Stats -> Double
+statAvgMinPoints stats = fromIntegral (minPoints stats) / fromIntegral (totalGames stats)

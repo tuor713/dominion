@@ -4,7 +4,6 @@ module Dominion.Web.Pages where
 import Dominion.Model
 import Dominion.Cards
 import Dominion.Stats
-import Dominion
 import Dominion.Bots (botLibrary)
 
 import Control.Monad (forM_, when)
@@ -496,7 +495,7 @@ htmlSimulation tableau stats players =
     column 14 $ do
       htmlSimulationForm tableau (statNumberOfGames stats) players
 
-      H.section $ do
+      H.div $ do
         H.h3 "Tableau"
         H.div $ do
           forM_ (take 5 $ L.sortBy compareCard tableau) $ \card ->
@@ -508,7 +507,22 @@ htmlSimulation tableau stats players =
                   H.! A.src (fromString (cardImagePath card))
 
         H.h3 "Stats"
-        H.pre $ toHtml $ showStats stats
+        H.table H.! A.class_ "ui very basic collapsing celled table" $ do
+          H.thead $
+            H.tr $ do
+              H.th $ "No Games"
+              H.th $ "Avg Turns"
+              H.th $ "Median Turns"
+              H.th $ "Avg Max Points"
+              H.th $ "Avg Min Points"
+          H.tbody $
+            H.tr $ do
+              H.td $ toHtml $ show (statNumberOfGames stats)
+              H.td $ toHtml $ niceDouble (statAvgTurnsPerGame stats)
+              H.td $ toHtml $ niceDouble (statMedianTurnsPerGame stats)
+              H.td $ toHtml $ niceDouble (statAvgMaxPoints stats)
+              H.td $ toHtml $ niceDouble (statAvgMinPoints stats)
+
     column 1 $ ""
 
     column 1 $ ""
