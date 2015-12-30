@@ -239,6 +239,9 @@ htmlDecision p (state,infos,decision) =
         H.p $ do
           H.h4 "Tableau:"
           showCards $ Map.map length (piles state)
+          when (not (null (trashPile state))) $ do
+            H.h4 "Trash"
+            showCards $ Map.fromListWith (+) $ map ((,1) . typ) (trashPile state)
 
       forM_ (zip (Map.toAscList (players state)) [0..]) $ \((pid,player),no::Int) -> do
         H.h4 H.! A.class_ (fromString (if no == 0 then "ui top attached header" else "ui attached header")) $ toHtml $ "Player - " ++ pid
@@ -311,8 +314,11 @@ htmlEndStateSummary :: GameState -> H.Html
 htmlEndStateSummary state = do
   H.section H.! A.class_ "state" $ do
     H.div $ do
-      H.h4 "Tableau:"
+      H.h4 "Tableau"
       showCards $ Map.map length (piles state)
+      when (not (null (trashPile state))) $ do
+        H.h4 "Trash"
+        showCards $ Map.fromListWith (+) $ map ((,1) . typ) (trashPile state)
 
   forM_ (zip (reverse $ L.sortOn (points . snd) $ Map.toList (players state)) [0..]) $ \((pid,player),no::Int) -> do
     H.h4 H.! A.class_ (fromString (if no == 0 then "ui top attached header" else "ui attached header")) $
