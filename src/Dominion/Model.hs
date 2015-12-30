@@ -16,7 +16,7 @@ import Data.STRef
 
 data CardType = Action | Treasure | Victory | CurseType {- This is a bit of a hack -} |
     Reaction | Attack | Duration |
-    Prize | Looter | Ruins | Knight | Reserve | Traveller
+    Prize | Looter | Ruins | Shelter | Knight | Reserve | Traveller
     deriving (Eq, Ord, Read, Show)
 
 data Location = Hand PlayerId | Discard PlayerId | TopOfDeck PlayerId | BottomOfDeck PlayerId |
@@ -128,9 +128,12 @@ onDiscardSelf :: (Card -> Action) -> TriggerHandler
 onDiscardSelf action DiscardTrigger (EffectDiscard c1 _) (Left c2) cont = if c1 == c2 then action c2 &&& cont else cont
 onDiscardSelf _ _ _ _ cont = cont
 
+onBuyA :: (CardLike -> CardDef -> Action) -> TriggerHandler
+onBuyA action BuyTrigger (EffectBuy def) source cont = (action source def) &&& cont
+onBuyA _ _ _ _ cont = cont
+
 onBuy :: (CardDef -> Action) -> TriggerHandler
-onBuy action BuyTrigger (EffectBuy def) _ cont = (action def) &&& cont
-onBuy _ _ _ _ cont = cont
+onBuy action = onBuyA (\_ -> action)
 
 onBuySelf :: Action -> TriggerHandler
 onBuySelf action BuyTrigger (EffectBuy c1) (Right c2) cont = if c1 == c2 then action &&& cont else cont
@@ -703,6 +706,9 @@ isTreasure card = hasCardType card Treasure
 isDuration card = hasCardType card Duration
 isVictory card = hasCardType card Victory
 isAttack card = hasCardType card Attack
+isRuins card = hasCardType card Ruins
+isShelter card = hasCardType card Shelter
+isCurse card = hasCardType card CurseType
 
 cardInTableau :: CardDef -> GameState -> Bool
 cardInTableau def = Map.member def . piles

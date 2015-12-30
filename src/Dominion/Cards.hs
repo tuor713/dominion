@@ -13,7 +13,7 @@ kingdomCards = concat [baseCards, intrigueCards, seasideCards, alchemyCards,
                        darkAgesCards, guildsCards, adventuresCards, promoCards]
 
 cardData :: Map.Map String CardDef
-cardData = Map.fromList $ map (\c -> (map toLower $ cardName c, c)) (concat [basicCards, kingdomCards, prizes])
+cardData = Map.fromList $ map (\c -> (map toLower $ cardName c, c)) (concat [basicCards, kingdomCards, prizes, shelters, ruins])
 
 maybeCard :: String -> Maybe CardDef
 maybeCard name = Map.lookup (map toLower name) cardData
@@ -44,6 +44,7 @@ cWishingWell     = cardData Map.! "wishing well"
 cCrossroads      = cardData Map.! "crossroads"
 cTrustySteed     = cardData Map.! "trusty steed"
 cTournament      = cardData Map.! "tournament"
+cTreasureMap     = cardData Map.! "treasure map"
 
 -- Generic action elements (potentially move to model)
 
@@ -521,7 +522,7 @@ seasideCards = map ($ Seaside)
    notImplemented "Pirate Ship", -- 315 Pirate Ship
    action 316 "Salvager" 4 (plusBuys 1 &&& trashForGain salvager),
    attack 317 "Sea Hag" 4 (playAttack (reshuffleIfNeeded &&& seaHag)),
-   notImplemented "Treasure Map", -- 318 Treasure Map
+   carddefA 318 "Treasure Map" (simpleCost 4) [Action] noPoints treasureMap noTriggers,
    action 319 "Bazaar" 5 (plusCards 1 &&& plusActions 2 &&& plusMoney 1),
    action 320 "Explorer" 5 explorer,
    attack 321 "Ghost Ship" 5 (plusCards 2 &&& playAttack ghostShip),
@@ -623,6 +624,22 @@ tactician source player state
   | otherwise = seqActions (\c -> discard c (Hand player)) h player state
   where
     h = hand $ playerByName state player
+
+treasureMap :: Maybe Card -> Action
+treasureMap Nothing p s
+  | null ts = toSimulation s
+  | otherwise = trash (head ts) (Hand p) p s
+  where
+    ts = filter ((==cTreasureMap) . typ) $ hand $ playerByName s p
+
+treasureMap (Just c) p s
+  | null ts = trash c InPlay p s
+  | otherwise = (trash c InPlay &&& trash (head ts) (Hand p)
+                 &&& gainTo gold (TopOfDeck p) &&& gainTo gold (TopOfDeck p) &&& gainTo gold (TopOfDeck p) &&& gainTo gold (TopOfDeck p))
+                  p s
+  where
+    ts = filter ((==cTreasureMap) . typ) $ hand $ playerByName s p
+
 
 treasuryTrigger :: Card -> Action -> Action
 treasuryTrigger card cont player state
@@ -1091,7 +1108,6 @@ crossRoads p s = (reveal h
     numVictory = length $ filter isVictory h
     numCrossroads = length $ filter (==cCrossroads) $ playsThisTurn s
 
-
 jackOfAllTrades :: Action
 jackOfAllTrades = gain silver &&& spyTop &&& drawTo5 &&& optTrash
   where
@@ -1116,9 +1132,8 @@ jackOfAllTrades = gain silver &&& spyTop &&& drawTo5 &&& optTrash
 
 highway :: Maybe Card -> Action
 highway Nothing = plusCards 1 &&& plusActions 1
-highway (Just card) =
-  plusCards 1 &&& plusActions 1 &&&
-  addModifier (ModCost Nothing) (ConditionalModifier (\state -> card `elem` (inPlay $ activePlayer state)) (CappedDecModifier 1))
+highway (Just card) = plusCards 1 &&& plusActions 1 &&&
+  addModifier (ModCost Nothing) (ConditionalModifier ((card `elem`) . inPlay . activePlayer) (CappedDecModifier 1))
 
 mandarinAction :: Action
 mandarinAction player state
@@ -1151,8 +1166,11 @@ darkAgesCards = map ($ DarkAges)
    carddef 802 "Beggar" (simpleCost 2) [Action, Reaction] noPoints
     (\p -> (gainTo copper (Hand p) &&& gainTo copper (Hand p) &&& gainTo copper (Hand p)) p)
     (whileInHand (onAttackA beggarTrigger)),
-   notImplemented "Squire", -- 803 Squire
-   notImplemented "Vagrant", -- 804 Vagrant
+   withTrigger
+    (action 803 "Squire" 2
+      (\p s -> (plusMoney 1 &&& chooseEffects 1 [EffectPlusActions 2, EffectPlusBuys 2, EffectGain silver (Discard p)] enactEffects) p s))
+    (onTrashSelf squireTrigger),
+   action 804 "Vagrant" 2 (plusCards 1 &&& plusActions 1 &&& reshuffleIfNeeded &&& vagrant),
    notImplemented "Forager", -- 805 Forager
    notImplemented "Hermit", -- 806 Hermit
    notImplemented "Market Square", -- 807 Market Square
@@ -1190,6 +1208,21 @@ darkAgesCards = map ($ DarkAges)
    notImplemented "Hunting Grounds" -- 835 Hunting Grounds
   ]
 
+ruins = map ($ DarkAges)
+  [carddef 840 "Abandoned Mine" (simpleCost 0) [Action, Ruins] noPoints (plusMoney 1) noTriggers,
+   carddef 841 "Ruined Library" (simpleCost 0) [Action, Ruins] noPoints (plusCards 1) noTriggers,
+   carddef 842 "Ruined Market" (simpleCost 0) [Action, Ruins] noPoints (plusBuys 1) noTriggers,
+   carddef 843 "Ruined Village" (simpleCost 0) [Action, Ruins] noPoints (plusActions 1) noTriggers,
+   carddef 844 "Survivors" (simpleCost 0) [Action, Ruins] noPoints (reshuffleIfNeededN 2 &&& survivors) noTriggers
+  ]
+
+shelters = map ($ DarkAges)
+  [carddef 850 "Hovel" (simpleCost 1) [Reaction, Shelter] noPoints pass (whileInHand (onBuyA hovelTrigger)),
+   carddef 851 "Necropolis" (simpleCost 1) [Action, Shelter] noPoints (plusActions 2) noTriggers,
+   carddef 852 "Overgrown Estate" (simpleCost 1) [Victory, Shelter] noPoints pass (onTrashSelf (plusCards 1))
+   ]
+
+
 armoryGain :: Action
 armoryGain player state = decision
         (ChooseCard (EffectGain unknownDef (TopOfDeck player))
@@ -1220,6 +1253,12 @@ fortressTrigger TrashTrigger (EffectTrash c1 _) (Left c2) cont player state =
               else cont player state
 fortressTrigger _ _ _ cont p s = cont p s
 
+hovelTrigger :: CardLike -> CardDef -> Action
+hovelTrigger (Left hovel) card p s
+  | hasType card Victory = choose (ChooseToReact hovel BuyTrigger) (\b -> if b then trash hovel (Hand p) else pass) p s
+  | otherwise = toSimulation s
+hovelTrigger _ _ _ s = toSimulation s
+
 ironmonger :: Action
 ironmonger player state
   | null top = toSimulation state
@@ -1240,6 +1279,38 @@ poorHouse = plusMoney 4 &&& \p s ->
   plusMoney (- (min (money (turn s))
                     (length (filter isTreasure (hand (playerByName s p))))))
     p s
+
+squireTrigger :: Action
+squireTrigger p s
+  | null attacks = toSimulation s
+  | otherwise = chooseOne (EffectGain unknownDef (Discard p)) attacks (\c -> gain (typ c)) p s
+  where
+    attacks = filter isAttack $ map (head . snd) $ Map.toList $ Map.filter (not . null) $ piles s
+
+survivors :: Action
+survivors p s
+  | null d = toSimulation s
+  | length d == 1 = choose (ChooseToUse (EffectDiscard (head d) (TopOfDeck p))) (\b -> if b then discard (head d) (TopOfDeck p) else pass) p s
+  | otherwise = info (VisibleToPlayer p) ("Two cards on top: " ++ show c1 ++ ", " ++ show c2) >>
+                chooseEffects 1 [EffectDiscard unknown (TopOfDeck p), EffectPut unknown (TopOfDeck p) (TopOfDeck p)] enact p s
+  where
+    d = deck $ playerByName s p
+    [c1,c2] = d
+    enact [(EffectDiscard _ _)] = discardAll [c1,c2] (TopOfDeck p)
+    enact _ = chooseMany (EffectPut unknown (TopOfDeck p) (TopOfDeck p))
+                         [c1,c2]
+                         (2,2)
+                         (\cs -> putAll (reverse cs) (TopOfDeck p) (TopOfDeck p))
+
+vagrant :: Action
+vagrant p s
+  | null d = toSimulation s
+  | isCurse top && isRuins top && isShelter top && isVictory top = (reveal [top] &&& put top (TopOfDeck p) (Hand p)) p s
+  | otherwise = reveal [top] p s
+  where
+    d = deck $ playerByName s p
+    top = head d
+
 
 -- Guilds 9xx
 
@@ -1278,7 +1349,7 @@ adventuresCards = map ($ Adventures) [
   notImplemented "Peasant", -- 1003
   notImplemented "Ratcatcher", -- 1004
   notImplemented "Raze", -- 1005
-  notImplemented "Amulet", -- 1006
+  duration 1006 "Amulet" 3 amulet amulet,
   notImplemented "Caravan Guard", -- 1007
   notImplemented "Dungeon", -- 1008
   notImplemented "Gear", -- 1009
@@ -1304,6 +1375,9 @@ adventuresCards = map ($ Adventures) [
   notImplemented "Wine Merchant", -- 1029
   notImplemented "Hireling" -- 1030
   ]
+
+amulet :: Action
+amulet p s = chooseEffects 1 [EffectPlusMoney 1, EffectTrashNo 1, EffectGain silver (Discard p)] enactEffects p s
 
 -- Promo 20xx
 
