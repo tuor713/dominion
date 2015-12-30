@@ -176,13 +176,15 @@ decisionHtml allowsPass (ChooseCards effect choices (lo,hi) _) =
 
 decisionHtml allowsPass (ChooseEffects no effects _) =
   H.div $ do
-    H.p $ toHtml $ "Choose " ++ show no ++ ":"
-    H.div H.! A.class_ "centered" H.! A.id "choices" $ do
-      forM_ (zip [0..] effects) $ \(no::Int,effect) ->
-        H.div H.! A.class_ "ui checkbox" $ do
-          H.input H.! A.type_ "checkbox" H.! A.name (fromString (show no))
-          H.label $ toHtml (show effect)
-    H.div H.! A.class_ "centered" $ do
+    H.div H.! A.id "choices" $ do
+      H.label $ toHtml $ "Choose " ++ show no ++ ":"
+      H.div H.! A.class_ "grouped fields" $ do
+        forM_ (zip [0..] effects) $ \(no::Int,effect) ->
+          H.div H.! A.class_ "field" $ do
+            H.div H.! A.class_ "ui checkbox" $ do
+              H.input H.! A.type_ "checkbox" H.! A.name (fromString (show no))
+              H.label $ toHtml (show effect)
+    H.div $ do
       H.button H.! A.class_ "ui primary button"
                H.! A.onclick (fromString ("choices('choices'," ++ show no ++ "," ++ show no ++ ");")) $ "Go"
       when allowsPass $ passButton
