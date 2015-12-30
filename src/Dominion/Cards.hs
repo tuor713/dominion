@@ -45,6 +45,7 @@ cCrossroads      = cardData Map.! "crossroads"
 cTrustySteed     = cardData Map.! "trusty steed"
 cTournament      = cardData Map.! "tournament"
 cTreasureMap     = cardData Map.! "treasure map"
+cDuchess         = cardData Map.! "duchess"
 
 -- Generic action elements (potentially move to model)
 
@@ -64,6 +65,9 @@ revealUntil pred cont player state =
 revealUntilSelector :: (Card -> Bool) -> ([Card] -> [Card] -> Action) -> Action
 revealUntilSelector pred cont = revealUntil (any pred) (\cs -> cont (filter pred cs) (filter (not . pred) cs))
 
+eachPlayer :: Action -> Action
+eachPlayer action _ state = seqSteps action (turnOrder state) state
+
 eachOtherPlayer :: Action -> Action
 eachOtherPlayer action player state = seqSteps action (opponentNames state player) state
 
@@ -80,10 +84,13 @@ playAttack attack attacker state = seqSteps checkAttack (opponentNames state att
         opponent = playerByName state op
         cont = handleAllTriggers
                 AttackTrigger
-                (map Left (hand opponent) ++ inPlayDuration opponent)
+                (map (`FromCard` (Hand op)) (hand opponent) ++ map triggerSource (inPlayDuration opponent))
                 NullEffect
                 attack op state
         moats = filter ((==cMoat) . typ) $ hand $ playerByName state op
+        triggerSource (Left card) = FromCard card InPlay
+        triggerSource (Right def) = FromCardEffect def
+
 
 trashNCards :: Int -> Int -> Action
 trashNCards inmin inmax player state =
@@ -813,9 +820,9 @@ watchtowerReplay def loc player state
     cands = filter ((==def) . typ) $ getCards loc state
 
 watchtowerTrigger :: TriggerHandler
-watchtowerTrigger GainTrigger (EffectGain def to) (Left w) cont =
+watchtowerTrigger GainTrigger (EffectGain def to) (FromCard w _) cont =
   cont &&& reveal [w] &&& \player state -> decision (ChooseToReact w GainTrigger (\b -> if b then watchtowerReplay def to player state else toSimulation state)) player state
-watchtowerTrigger GainTrigger (EffectGainFrom card _ to) (Left w) cont =
+watchtowerTrigger GainTrigger (EffectGainFrom card _ to) (FromCard w _) cont =
   cont &&& reveal [w] &&& \player state -> decision (ChooseToReact w GainTrigger (\b -> if b then watchtowerReplay (typ card) to player state else toSimulation state)) player state
 watchtowerTrigger _ _ _ cont = cont
 
@@ -1061,7 +1068,7 @@ trustySteed p s = chooseEffects 2 [EffectPlusCards 2, EffectPlusActions 2, Effec
 
 hinterlandCards = map ($ Hinterlands)
   [action 701 "Crossroads" 2 crossRoads,
-   notImplemented "Duchess", -- 702 duchess
+   withTrigger (action 702 "Duchess" 2 (plusMoney 2 &&& eachPlayer (reshuffleIfNeeded &&& duchess))) duchessTrigger,
    notImplemented "Fool's Gold", -- 703 fool's gold
    notImplemented "Develop", -- 704 develop
    action 705 "Oasis" 3 (plusCards 1 &&& plusActions 1 &&& plusMoney 1 &&& discardNCards 1),
@@ -1107,6 +1114,22 @@ crossRoads p s = (reveal h
     h = hand $ playerByName s p
     numVictory = length $ filter isVictory h
     numCrossroads = length $ filter (==cCrossroads) $ playsThisTurn s
+
+duchess :: Action
+duchess p s
+  | null d = toSimulation s
+  | otherwise = choose (ChooseToUse (EffectDiscard top (TopOfDeck p))) (\b -> if b then discard top (TopOfDeck p) else pass) p s
+  where
+    d = deck $ playerByName s p
+    top = head d
+
+optGainDuchess :: Action
+optGainDuchess p s = choose (ChooseToUse (EffectGain cDuchess (Discard p))) (\b -> if b then gain cDuchess else pass) p s
+
+duchessTrigger :: TriggerHandler
+duchessTrigger GainTrigger (EffectGainFrom c1 _ _) (FromSupply _) cont = if duchy == (typ c1) then optGainDuchess &&& cont else cont
+duchessTrigger GainTrigger (EffectGain d1 _) (FromSupply _) cont = if duchy == d1 then optGainDuchess &&& cont else cont
+duchessTrigger _ _ _ cont = cont
 
 jackOfAllTrades :: Action
 jackOfAllTrades = gain silver &&& spyTop &&& drawTo5 &&& optTrash
@@ -1232,8 +1255,8 @@ armoryGain player state = decision
   where
     candidates = affordableCards (simpleCost 4) state
 
-beggarTrigger :: CardLike -> Action
-beggarTrigger (Left card) p s = choose (ChooseToUse (EffectDiscard card (Hand p)))
+beggarTrigger :: TriggerSource -> Action
+beggarTrigger (FromCard card _) p s = choose (ChooseToUse (EffectDiscard card (Hand p)))
                                        (\b -> if b then discard card (Hand p) &&& gainTo silver (TopOfDeck p) &&& gainTo silver (TopOfDeck p)
                                                    else pass)
                                        p s
@@ -1246,15 +1269,14 @@ count player state=
                   enactEffects p s))
     player state
 
-
 fortressTrigger :: TriggerHandler
-fortressTrigger TrashTrigger (EffectTrash c1 _) (Left c2) cont player state =
+fortressTrigger TrashTrigger (EffectTrash c1 _) (FromCard c2 _) cont player state =
   if c1 == c2 then (cont &&& put c1 Trash (Hand player)) player state
               else cont player state
 fortressTrigger _ _ _ cont p s = cont p s
 
-hovelTrigger :: CardLike -> CardDef -> Action
-hovelTrigger (Left hovel) card p s
+hovelTrigger :: TriggerSource -> CardDef -> Action
+hovelTrigger (FromCard hovel _) card p s
   | hasType card Victory = choose (ChooseToReact hovel BuyTrigger) (\b -> if b then trash hovel (Hand p) else pass) p s
   | otherwise = toSimulation s
 hovelTrigger _ _ _ s = toSimulation s

@@ -74,7 +74,6 @@ implemented :: CardDef -> Bool
 implemented = (>=0) . cardTypeId
 
 data Card = Card { cardId :: !Int, typ :: !CardDef }
-
 type CardLike = Either Card CardDef
 
 instance Show CardDef where
@@ -95,23 +94,26 @@ instance Eq Card where
 instance Ord Card where
   c1 <= c2 = cardId c1 <= cardId c2
 
+data TriggerSource = FromCard Card Location |
+                     FromCardEffect CardDef |
+                     FromSupply CardDef
 
-type TriggerHandler = Trigger -> Effect -> CardLike -> Action -> Action
+type TriggerHandler = Trigger -> Effect -> TriggerSource -> Action -> Action
 
 nullHandler :: TriggerHandler
 nullHandler _ _ _ cont = cont
 
 whileInPlay :: TriggerHandler -> TriggerHandler
-whileInPlay inner trigger effect (Left card) cont player state
-  | card `elem` inp = inner trigger effect (Left card) cont player state
+whileInPlay inner trigger effect (FromCard card loc) cont player state
+  | card `elem` inp = inner trigger effect (FromCard card loc) cont player state
   | otherwise = cont player state
   where
     inp = inPlay $ playerByName state player
 whileInPlay _ _ _ _ cont player state = cont player state
 
 whileInHand :: TriggerHandler -> TriggerHandler
-whileInHand inner trigger effect (Left card) cont player state
-  | card `elem` inp = inner trigger effect (Left card) cont player state
+whileInHand inner trigger effect (FromCard card loc) cont player state
+  | card `elem` inp = inner trigger effect (FromCard card loc) cont player state
   | otherwise = cont player state
   where
     inp = hand $ playerByName state player
@@ -121,14 +123,14 @@ combineHandlers :: TriggerHandler -> TriggerHandler -> TriggerHandler
 combineHandlers h1 h2 trigger effect source cont = h1 trigger effect source (h2 trigger effect source cont)
 
 onDiscardFromPlay :: (Card -> Action -> Action) -> TriggerHandler
-onDiscardFromPlay act DiscardTrigger (EffectDiscard c1 InPlay) (Left c2) cont = if c1 == c2 then act c2 cont else cont
+onDiscardFromPlay act DiscardTrigger (EffectDiscard c1 InPlay) (FromCard c2 _) cont = if c1 == c2 then act c2 cont else cont
 onDiscardFromPlay _ _ _ _ cont = cont
 
 onDiscardSelf :: (Card -> Action) -> TriggerHandler
-onDiscardSelf action DiscardTrigger (EffectDiscard c1 _) (Left c2) cont = if c1 == c2 then action c2 &&& cont else cont
+onDiscardSelf action DiscardTrigger (EffectDiscard c1 _) (FromCard c2 _) cont = if c1 == c2 then action c2 &&& cont else cont
 onDiscardSelf _ _ _ _ cont = cont
 
-onBuyA :: (CardLike -> CardDef -> Action) -> TriggerHandler
+onBuyA :: (TriggerSource -> CardDef -> Action) -> TriggerHandler
 onBuyA action BuyTrigger (EffectBuy def) source cont = (action source def) &&& cont
 onBuyA _ _ _ _ cont = cont
 
@@ -136,16 +138,16 @@ onBuy :: (CardDef -> Action) -> TriggerHandler
 onBuy action = onBuyA (\_ -> action)
 
 onBuySelf :: Action -> TriggerHandler
-onBuySelf action BuyTrigger (EffectBuy c1) (Right c2) cont = if c1 == c2 then action &&& cont else cont
+onBuySelf action BuyTrigger (EffectBuy c1) (FromCardEffect c2) cont = if c1 == c2 then action &&& cont else cont
 onBuySelf _ _ _ _ cont = cont
 
 onGainSelf :: Action -> TriggerHandler
-onGainSelf action GainTrigger (EffectGainFrom c1 _ _) (Left c2) cont = if c1 == c2 then action &&& cont else cont
-onGainSelf action GainTrigger (EffectGain d1 _) (Right d2) cont = if d1 == d2 then action &&& cont else cont
+onGainSelf action GainTrigger (EffectGainFrom c1 _ _) (FromCard c2 _) cont = if c1 == c2 then action &&& cont else cont
+onGainSelf action GainTrigger (EffectGain d1 _) (FromCardEffect d2) cont = if d1 == d2 then action &&& cont else cont
 onGainSelf _ _ _ _ cont = cont
 
 onTrashSelf :: Action -> TriggerHandler
-onTrashSelf action TrashTrigger (EffectTrash c1 _) (Left c2) cont = if c1 == c2 then action &&& cont else cont
+onTrashSelf action TrashTrigger (EffectTrash c1 _) (FromCard c2 _) cont = if c1 == c2 then action &&& cont else cont
 onTrashSelf _ _ _ _ cont = cont
 
 onStartOfTurn :: Action -> TriggerHandler
@@ -160,7 +162,7 @@ onAttack :: Action -> TriggerHandler
 onAttack action AttackTrigger _ _ cont = action &&& cont
 onAttack _ _ _ _ cont = cont
 
-onAttackA :: (CardLike -> Action) -> TriggerHandler
+onAttackA :: (TriggerSource -> Action) -> TriggerHandler
 onAttackA action AttackTrigger _ source cont = (action source) &&& cont
 onAttackA _ _ _ _ cont = cont
 
@@ -501,7 +503,7 @@ mkGame typ names kingdomCards =
     fmap (Maybe.fromJust . toGameState) $
       handleAllTriggers
         StartOfGameTrigger
-        (map Right kingdomCards)
+        (map FromCardEffect kingdomCards)
         NullEffect
         pass
         (head names)
@@ -877,18 +879,19 @@ playAll :: [Card] -> Action
 playAll [] _ state = toSimulation state
 playAll (c:cs) player state = play c player state `andThen` playAll cs player
 
-getTrigger :: CardLike -> Trigger -> Effect -> Action -> Action
-getTrigger (Left card) trigger effect cont = (triggers (typ card)) trigger effect (Left card) cont
-getTrigger (Right def) trigger effect cont = (triggers def) trigger effect (Right def) cont
+getTrigger :: TriggerSource -> Trigger -> Effect -> Action -> Action
+getTrigger (FromCard card loc) trigger effect cont = (triggers (typ card)) trigger effect (FromCard card loc) cont
+getTrigger (FromCardEffect def) trigger effect cont = (triggers def) trigger effect (FromCardEffect def) cont
+getTrigger (FromSupply def) trigger effect cont = (triggers def) trigger effect (FromSupply def) cont
 
 -- partial function, check supply first!
 topOfSupply :: CardDef -> GameState -> Card
 topOfSupply card state = head $ (piles state) Map.! card
 
-handleTriggers :: Trigger -> CardLike -> Effect -> Action -> Action
+handleTriggers :: Trigger -> TriggerSource -> Effect -> Action -> Action
 handleTriggers trigger card = getTrigger card trigger
 
-handleAllTriggers :: Trigger -> [CardLike] -> Effect -> Action -> Action
+handleAllTriggers :: Trigger -> [TriggerSource] -> Effect -> Action -> Action
 handleAllTriggers trigger cards effect cont =
   foldr (\c cont -> getTrigger c trigger effect cont)
         cont
@@ -916,11 +919,17 @@ put card source target p state =
 putAll :: [Card] -> Location -> Location -> Action
 putAll cards source target = seqActions (\c -> put c source target) cards
 
+playerTriggers :: Player -> [TriggerSource]
+playerTriggers p = map (`FromCard` (Hand (name p))) (hand p) ++ map (`FromCard` InPlay) (inPlay p)
+
+supplyTriggers :: GameState -> [TriggerSource]
+supplyTriggers state = map FromSupply $ Map.keys (piles state)
+
 gainFrom :: Card -> Location -> Action
 gainFrom card source player state =
   info AllPlayers (player ++ " gains " ++ cardName (typ card)) >>
   handleAllTriggers GainTrigger
-    ((Left card):(map Left (hand (playerByName state player)) ++ map Left (inPlay (playerByName state player))))
+    ((FromCard card source):playerTriggers (playerByName state player) ++ supplyTriggers state)
     (EffectGainFrom card source (Discard player))
     (move card source (Discard player))
     player state
@@ -930,7 +939,7 @@ gainSpecial card target player state
   | null pile = toSimulation state
   | otherwise = info AllPlayers (player ++ " gains " ++ cardName card) >>
                 handleAllTriggers GainTrigger
-                  ((Left c):(map Left (hand (playerByName state player)) ++ map Left (inPlay (playerByName state player))))
+                  ((FromCardEffect card):playerTriggers (playerByName state player) ++ supplyTriggers state)
                   (EffectGain card target)
                   (move c NonSupply target)
                   player state
@@ -943,7 +952,7 @@ gainTo card target player state
   | inSupply state card =
     info AllPlayers (player ++ " gains " ++ cardName card) >>
     handleAllTriggers GainTrigger
-                      ((Right card):(map Left (hand (playerByName state player)) ++ map Left (inPlay (playerByName state player))))
+                      ((FromCardEffect card):playerTriggers (playerByName state player) ++ supplyTriggers state)
                       (EffectGain card target)
                       transferT
                       player state
@@ -960,26 +969,26 @@ reveal cards player state = info AllPlayers (player ++ " reveals " ++ summarizeC
 buy :: CardDef -> Action
 buy card player state =
   info AllPlayers (player ++ " buys " ++ cardName card) >>
-  handleAllTriggers BuyTrigger ((Right card):map Left (inPlay $ playerByName state player)) (EffectBuy card)
+  handleAllTriggers BuyTrigger ((FromCardEffect card):playerTriggers (playerByName state player)) (EffectBuy card)
     (addLog (LogBuy card) &&& gain card)
     player state
 
 trash :: Card -> Location -> Action
 trash card source player state =
   info AllPlayers (player ++ " trashes " ++ cardName (typ card)) >>
-  handleTriggers TrashTrigger (Left card) (EffectTrash card source) transferT player state
+  handleTriggers TrashTrigger (FromCard card source) (EffectTrash card source) transferT player state
   where
     transferT _ state = toSimulation $ transfer card source Trash state
 
 trashAll :: [Card] -> Location -> Action
 trashAll cards source player state =
   info AllPlayers (player ++ " trashes " ++ summarizeCards cards) >>
-  (foldr (\c cont -> (triggers (typ c)) TrashTrigger (EffectTrash c source) (Left c) cont) transferT cards) player state
+  (foldr (\c cont -> (triggers (typ c)) TrashTrigger (EffectTrash c source) (FromCard c source) cont) transferT cards) player state
   where
     transferT _ state = toSimulation $ foldr (\c s -> transfer c source Trash s) state cards
 
 doDiscard :: Card -> Location -> Action
-doDiscard card loc player state = handleTriggers DiscardTrigger (Left card) (EffectDiscard card loc) (move card loc (Discard player)) player state
+doDiscard card loc player state = handleTriggers DiscardTrigger (FromCard card loc) (EffectDiscard card loc) (move card loc (Discard player)) player state
 
 discard :: Card -> Location -> Action
 discard card loc player state = info AllPlayers (player ++ " discards " ++ cardName (typ card)) >> doDiscard card loc player state
@@ -1111,10 +1120,14 @@ startOfTurn player state
   | null durations = toSimulation state
   | otherwise = allTriggers player (updatePlayer state player (const p { inPlayDuration = [], inPlay = durationCards ++ inPlay p }))
   where
-    allTriggers = handleAllTriggers StartOfTurnTrigger durations NullEffect pass
+    allTriggers = handleAllTriggers StartOfTurnTrigger (map triggerSource durations) NullEffect pass
     p = playerByName state player
     durations = inPlayDuration p
     durationCards = Either.lefts durations
+    triggerSource (Left card) = FromCard card InPlay
+    triggerSource (Right def) = FromCardEffect def
+
+
 
 playTurn :: Action
 playTurn name state =
