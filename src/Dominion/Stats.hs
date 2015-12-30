@@ -20,6 +20,12 @@ data Stats = Stats { turnsPerGame :: !(Map.Map Int Int),
 pointProjection :: Player -> Int
 pointProjection p = points $ p { deck = deck p ++ Map.findWithDefault [] IslandMat (mats p) }
 
+finalStates :: GameState -> [GameState]
+finalStates state =
+  map
+    (\idx -> state { ply = (ply state) + idx, turnOrder = drop idx (turnOrder state) ++ take idx (turnOrder state) })
+    [0..(length (turnOrder state) - 1)]
+
 collectStats :: StatsCollector Stats
 collectStats stats game =
   stats { totalGames = totalGames stats + 1,
@@ -50,7 +56,7 @@ collectStats stats game =
                 (\m2 -> Map.insertWith (\(s1,n1) (s2,n2) -> (s1+s2,n1+n2)) (turnNo state) ((pointProjection (activePlayer state)),1) m2)
                 (activePlayerId state))
             (avgPointsPerTurn stats)
-            (init game)
+            ((init game) ++ finalStates (last game))
 
 emptyStats :: [PlayerId] -> Stats
 emptyStats players = Stats { totalGames = 0,

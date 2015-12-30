@@ -103,7 +103,7 @@ function linePlot(selector, width, height) {
     chart.append("svg:path")
       .attr("d", lineGen(data))
       .attr("stroke", dataSetColors[i])
-      .attr("stroke-width",1)
+      .attr("stroke-width",2)
       .attr("fill","none");
   }
 
