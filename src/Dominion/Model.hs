@@ -20,7 +20,7 @@ data CardType = Action | Treasure | Victory | CurseType {- This is a bit of a ha
     deriving (Eq, Ord, Read, Show)
 
 data Location = Hand PlayerId | Discard PlayerId | TopOfDeck PlayerId | BottomOfDeck PlayerId |
-  InPlay | InPlayDuration | Trash | Supply | NonSupply | Mat PlayerId Mat
+  InPlay | InPlayDuration | Trash | Supply | NonSupply | Mat PlayerId Mat | Aside
   deriving (Eq, Show)
 
 data Edition = Base | Intrigue | Seaside | Alchemy | Prosperity | Cornucopia | Hinterlands | DarkAges | Guilds | Adventures | Promo
@@ -244,6 +244,18 @@ colony   = withInitialSupply (victory 9 "Colony" 11 10) stdVictorySupply Prosper
 
 basicCards = [copper, silver, gold, estate, duchy, province, curse, potion, platinum, colony]
 
+cHovel = carddef 850 "Hovel" (simpleCost 1) [Reaction, Shelter] noPoints pass (whileInHand (onBuyA hovelTrigger)) DarkAges
+cNecropolis = carddef 851 "Necropolis" (simpleCost 1) [Action, Shelter] noPoints (plusActions 2) noTriggers DarkAges
+cOvergrownEstate = carddef 852 "Overgrown Estate" (simpleCost 1) [Victory, Shelter] noPoints pass (onTrashSelf (plusCards 1)) DarkAges
+
+hovelTrigger :: TriggerSource -> CardDef -> Action
+hovelTrigger (FromCard hovel _) card p s
+  | hasType card Victory = choose (ChooseToReact hovel BuyTrigger) (\b -> if b then trash hovel (Hand p) else pass) p s
+  | otherwise = toSimulation s
+hovelTrigger _ _ _ s = toSimulation s
+
+shelters = [cHovel, cNecropolis, cOvergrownEstate]
+
 unknownDef = CardDef (-1) "XXX" Base (const (simpleCost 0)) [Action] (\_ -> 0) (\_ -> pass) (const 0) noTriggers (const False)
 unknown = Card (-1) unknownDef
 
@@ -304,7 +316,8 @@ data TurnState = TurnState { money :: Int,
                              deriving (Show)
 
 
-data GameType = StandardGame | ColonyGame deriving (Eq, Read, Show)
+data GameType = StandardGame | ColonyGame | SheltersGame | ColonySheltersGame
+  deriving (Eq, Read, Show)
 
 data GameState = GameState { players :: Map.Map PlayerId Player,
                              turnOrder :: [PlayerId],
@@ -384,6 +397,7 @@ data Effect =
   EffectPlayTreasure Card |
   EffectUseTokens Token |
   SpecialEffect CardDef |
+  MultiEffect [Effect] |
   NullEffect
 
 data Decision =
@@ -459,6 +473,7 @@ instance Show Effect where
   show (EffectPlayTreasure card) = "play treasure " ++ show card
   show (EffectUseTokens token) = "use token(s) " ++ show token
   show (SpecialEffect card) = "use ability of " ++ show card
+  show (MultiEffect effects) = "all of " ++ show effects
   show NullEffect = "no effect"
 
 
@@ -474,6 +489,9 @@ mkPlayer deck name = draw Player { name = name, hand = [],
 
 initialDeck :: [CardDef]
 initialDeck = replicate 7 copper ++ replicate 3 estate
+
+sheltersDeck :: [CardDef]
+sheltersDeck = replicate 7 copper ++ [cHovel, cOvergrownEstate, cNecropolis]
 
 labelCards :: [CardDef] -> Int -> ([Card],Int)
 labelCards cards initialId = (zipWith Card [initialId..(initialId + length cards)] cards, initialId + length cards)
@@ -517,9 +535,10 @@ mkGame typ names kingdomCards =
     (decks,_) = foldr (\d (ds,id) -> let (d',id') = labelCards d id
                                      in (d':ds,id'))
                   ([],outId)
-                  (replicate playerNo initialDeck)
+                  (replicate playerNo (if useShelters then sheltersDeck else initialDeck))
+    useShelters = typ == SheltersGame || typ == ColonySheltersGame
     standardCards = colonyCards ++ potionCards ++ [estate,duchy,province,copper,silver,gold,curse]
-    colonyCards = if typ == ColonyGame then [platinum, colony] else []
+    colonyCards = if typ == ColonyGame || typ == ColonySheltersGame then [platinum, colony] else []
     potionCards = if any ((0<) . potionCost . cost nullState) kingdomCards then [potion] else []
     playerNo = length names
     protoState players = GameState { players = Map.fromList $ zip names players,
@@ -622,6 +641,8 @@ moveTo c Trash state                 = state { trashPile = c : trashPile state }
 moveTo c Supply state                = state { piles = Map.adjust (c:) (typ c) (piles state) }
 moveTo c NonSupply state             = state { nonSupplyPiles = Map.adjust (c:) (typ c) (nonSupplyPiles state) }
 moveTo c (Mat player mat) state      = updatePlayer state player (\p -> p { mats = Map.insertWith (++) mat [c] (mats p) })
+-- moving cards to aside puts them nowhere
+moveTo _ Aside state                 = state
 
 moveFrom :: Card -> Location -> GameState -> GameState
 moveFrom c (Hand player) state         = updatePlayer state player (\p -> p { hand = L.delete c $ hand p })
@@ -634,6 +655,8 @@ moveFrom c Trash state                 = state { trashPile = L.delete c $ trashP
 moveFrom c Supply state                = state { piles = Map.adjust tail (typ c) (piles state) }
 moveFrom c NonSupply state             = state { nonSupplyPiles = Map.adjust tail (typ c) (nonSupplyPiles state) }
 moveFrom c (Mat player mat) state      = updatePlayer state player (\p -> p { mats = Map.adjust (L.delete c) mat (mats p) })
+-- moving cards from aside does nothing
+moveFrom _ Aside state                 = state
 
 getCards :: Location -> GameState -> [Card]
 getCards (Hand player) state = hand $ playerByName state player
@@ -645,6 +668,7 @@ getCards InPlayDuration state = Either.lefts $ inPlayDuration $ activePlayer sta
 getCards Trash state = trashPile state
 getCards Supply state = concat $ Map.elems (piles state)
 getCards NonSupply state = concat $ Map.elems (nonSupplyPiles state)
+getCards Aside _ = []
 getCards (Mat player mat) state = Map.findWithDefault [] mat (mats $ playerByName state player)
 
 addDurationEffect :: CardDef -> GameState -> GameState
@@ -925,14 +949,17 @@ playerTriggers p = map (`FromCard` (Hand (name p))) (hand p) ++ map (`FromCard` 
 supplyTriggers :: GameState -> [TriggerSource]
 supplyTriggers state = map FromSupply $ Map.keys (piles state)
 
-gainFrom :: Card -> Location -> Action
-gainFrom card source player state =
+gainFromTo :: Card -> Location -> Location -> Action
+gainFromTo card source target player state =
   info AllPlayers (player ++ " gains " ++ cardName (typ card)) >>
   handleAllTriggers GainTrigger
     ((FromCard card source):playerTriggers (playerByName state player) ++ supplyTriggers state)
-    (EffectGainFrom card source (Discard player))
-    (move card source (Discard player))
+    (EffectGainFrom card source target)
+    (move card source target)
     player state
+
+gainFrom :: Card -> Location -> Action
+gainFrom card source player = gainFromTo card source (Discard player) player
 
 gainSpecial :: CardDef -> Location -> Action
 gainSpecial card target player state

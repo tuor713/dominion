@@ -381,6 +381,14 @@ htmlSetupGame =
               H.div H.! A.class_ "ui radio checkbox" $ do
                 H.input H.! A.type_ "radio" H.! A.name "gametype" H.! A.value "colony"
                 H.label "Colony"
+            H.div H.! A.class_ "field" $ do
+              H.div H.! A.class_ "ui radio checkbox" $ do
+                H.input H.! A.type_ "radio" H.! A.name "gametype" H.! A.value "shelters"
+                H.label "Shelters"
+            H.div H.! A.class_ "field" $ do
+              H.div H.! A.class_ "ui radio checkbox" $ do
+                H.input H.! A.type_ "radio" H.! A.name "gametype" H.! A.value "colonyShelters"
+                H.label "Colony & Shelters"
 
           forM_ (zip ["Alice", "Bob", "Carol", "Dave"] [1..4]) $ \(name,idx :: Int) -> do
             H.div H.! A.class_ "six wide field" $ do

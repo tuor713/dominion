@@ -65,6 +65,12 @@ revealUntil pred cont player state =
 revealUntilSelector :: (Card -> Bool) -> ([Card] -> [Card] -> Action) -> Action
 revealUntilSelector pred cont = revealUntil (any pred) (\cs -> cont (filter pred cs) (filter (not . pred) cs))
 
+-- reveals N cards (or as much as possible, puts them aside and then invokes X)
+revealNAndX :: Int -> ([Card] -> Action) -> Action
+revealNAndX num cont = reshuffleIfNeededN num
+  &&& (\p s -> let cs = take num (deck (playerByName s p))
+               in ((if null cs then pass else reveal cs) &&& putAll cs (TopOfDeck p) Aside &&& cont cs) p s)
+
 eachPlayer :: Action -> Action
 eachPlayer action _ state = seqSteps action (turnOrder state) state
 
@@ -135,6 +141,18 @@ gainUpto x player state
   where
     candidates = (affordableCards (simpleCost x) state)
 
+gainUpgradeTo :: Int -> Location -> Card -> Action
+gainUpgradeTo delta target trashed player state
+  | null candidates = toSimulation state
+  | otherwise = chooseOne (EffectGain unknownDef target) candidates (\c -> gainTo (typ c) target) player state
+  where
+    exactCost = addCost (cost state (typ trashed)) (simpleCost delta)
+    candidates = map (`topOfSupply` state)
+      $ filter ((==exactCost) . cost state)
+      $ availableCards state
+
+gainUpgrade :: Int -> Card -> Action
+gainUpgrade delta trashed player = gainUpgradeTo delta (Discard player) trashed player
 
 remodelX :: Int -> Action
 remodelX x = trashForGain chooseToGain
@@ -170,6 +188,7 @@ enactEffect (EffectPut card from to) =
   else put card from to
 enactEffect (EffectTrash card from) = trash card from
 enactEffect (EffectDiscard card from) = discard card from
+enactEffect (MultiEffect effects) = enactEffects effects
 enactEffect _ = error "Effect not implemented"
 
 enactEffects :: [Effect] -> Action
@@ -381,7 +400,7 @@ intrigueCards = map ($ Intrigue)
    notImplemented "Coppersmith", -- 213
    action 214 "Ironworks" 4 ironworks,
    actionA 215 "Mining Village" 4 miningVillage,
-   notImplemented "Scout", -- 216
+   action 216 "Scout" 4 (plusActions 1 &&& revealNAndX 4 scout),
    withInitialSupply (carddef 217 "Duke" (simpleCost 5) [Victory] (\p -> length $ filter ((==duchy) . typ) (allCards p)) pass noTriggers)
     stdVictorySupply,
    attack 218 "Minion" 5 (plusActions 1 &&& minionAttack),
@@ -389,7 +408,7 @@ intrigueCards = map ($ Intrigue)
    action 220 "Torturer" 5 (plusCards 3 &&& playAttack torturerAttack),
    action 221 "Trading Post" 5 tradingPost,
    notImplemented "Tribute", -- 222 tribute
-   action 223 "Upgrade" 5 (plusCards 1 &&& plusActions 1 &&& trashForGain upgradeBenefit),
+   action 223 "Upgrade" 5 (plusCards 1 &&& plusActions 1 &&& trashForGain (gainUpgrade 1)),
    withInitialSupply (carddef 224 "Harem" (simpleCost 6) [Treasure, Victory] (const 2) (plusMoney 2) noTriggers)
     stdVictorySupply,
    withInitialSupply (carddef 225 "Nobles" (simpleCost 6) [Action, Victory] (const 2)
@@ -474,6 +493,19 @@ minionAttack = chooseEffects 1 [EffectPlusMoney 2, SpecialEffect cMinion] act
       then (discardAll (hand $ playerByName state op) (Hand op) &&& (plusCards 4)) op state
       else toSimulation state
 
+scout :: [Card] -> Action
+scout cards p s =
+  (putAll vs Aside (Hand p)
+   &&& (case nonVs of
+        [] -> pass
+        [c] -> put c Aside (TopOfDeck p)
+        cs -> chooseMany (EffectPut unknown Aside (TopOfDeck p)) cs (length cs, length cs)
+                         (\order -> putAll (reverse order) Aside (TopOfDeck p))))
+    p s
+  where
+    vs = filter isVictory cards
+    nonVs = filter (not . isVictory) cards
+
 shantyDraw player state = (reveal h &&& if noActions then plusCards 2 else pass) player state
   where
     h = hand (playerByName state player)
@@ -487,15 +519,6 @@ tradingPost player state
   | otherwise = trashNCards 2 2 player state
   where
     h = hand (playerByName state player)
-
-upgradeBenefit trashed player state
-  | null candidates = toSimulation state
-  | otherwise = chooseOne (EffectGain unknownDef (Discard player)) candidates (gain . typ) player state
-  where
-    exactCost = addCost (cost state (typ trashed)) (simpleCost 1)
-    candidates = map (`topOfSupply` state)
-      $ filter ((==exactCost) . cost state)
-      $ availableCards state
 
 wishingWell :: CardDef -> Action
 wishingWell def p s
@@ -934,7 +957,7 @@ cornucopiaCards = map ($ Cornucopia)
    action 604 "Farming Village" 4 (plusActions 2 &&& farmingVillage),
    notImplemented "Horse Traders", -- 605 horse traders
    -- TODO should probably be renamed and abstracted
-   action 606 "Remake" 4 (trashForGain upgradeBenefit &&& trashForGain upgradeBenefit),
+   action 606 "Remake" 4 (trashForGain (gainUpgrade 1) &&& trashForGain (gainUpgrade 1)),
    withTrigger (action 607 "Tournament" 4 (plusActions 1 &&& tournament))
     (onStartOfGame (\_ state -> toSimulation $ state { nonSupplyPiles = Map.fromList (map (\p -> (p, [Card (10000 * (cardTypeId p)) p])) prizes) })),
    notImplemented "Young Witch", -- 608 young witch
@@ -1070,7 +1093,8 @@ hinterlandCards = map ($ Hinterlands)
   [action 701 "Crossroads" 2 crossRoads,
    withTrigger (action 702 "Duchess" 2 (plusMoney 2 &&& eachPlayer (reshuffleIfNeeded &&& duchess))) duchessTrigger,
    notImplemented "Fool's Gold", -- 703 fool's gold
-   notImplemented "Develop", -- 704 develop
+   -- TODO ordering ...
+   action 704 "Develop" 3 (trashForGain (\c p -> (gainUpgradeTo 1 (TopOfDeck p) c &&& gainUpgradeTo (-1) (TopOfDeck p) c) p)),
    action 705 "Oasis" 3 (plusCards 1 &&& plusActions 1 &&& plusMoney 1 &&& discardNCards 1),
    notImplemented "Oracle", -- 706 oracle
    notImplemented "Scheme", -- 707 scheme
@@ -1079,17 +1103,20 @@ hinterlandCards = map ($ Hinterlands)
     (onDiscardSelf tunnelTrigger),
    action 709 "Jack of All Trades" 4 jackOfAllTrades,
    notImplemented "Noble Brigand", -- 710 noble brigand
-   notImplemented "Nomad Camp", -- 711 nomad camp
+   withTrigger (action 711 "Nomad Camp" 4 (plusBuys 1 &&& plusMoney 2)) nomadCamp,
    withInitialSupply
     (carddef 712 "Silk Road" (simpleCost 4) [Victory] (\p -> length (filter isVictory (allCards p)) `quot` 4) pass noTriggers)
     stdVictorySupply,
-   notImplemented "Spice Merchant", -- 713 spice merchant
-   notImplemented "Trader", -- 714 trader
-   carddef 715 "Cache" (simpleCost 5) [Treasure] (const 0) (plusMoney 3) (onGainSelf (gain copper &&& gain copper)),
+   action 713 "Spice Merchant" 4 spiceMerchant,
+   carddef 714 "Trader" (simpleCost 4) [Action, Reaction] noPoints
+    (trashForGain (\c p s -> seqActions gain (replicate (moneyCost (cost s (typ c))) silver) p s))
+    (whileInHand traderTrigger),
+   carddef 715 "Cache" (simpleCost 5) [Treasure] noPoints (plusMoney 3) (onGainSelf (gain copper &&& gain copper)),
    notImplemented "Cartographer", -- 716 cartographer
    withTrigger (action 717 "Embassy" 5 (plusCards 5 &&& discardNCards 3))
     (onGainSelf (eachOtherPlayer (gain silver))),
-   notImplemented "Haggler", -- 718 haggler
+   withTrigger (action 718 "Haggler" 5 (plusMoney 2))
+    (whileInPlay (onBuy haggler)),
    actionA 719 "Highway" 5 highway,
    carddef 720 "Ill-gotten Gains" (simpleCost 5) [Treasure] noPoints
     (\p s -> (plusMoney 1 &&& choose (ChooseToUse (EffectGain copper (Hand p))) (\b -> if b then gainTo copper (Hand p) else pass)) p s)
@@ -1099,7 +1126,8 @@ hinterlandCards = map ($ Hinterlands)
    attack 723 "Margrave" 5 (plusCards 3 &&& plusBuys 1 &&& playAttack (plusCards 1 &&& discardDownTo 3)),
    action 724 "Stables" 5 stables,
    withTrigger (action 725 "Border Village" 6 (plusCards 1 &&& plusActions 2)) (onGainSelf borderVillageTrigger),
-   notImplemented "Farmland" -- 726 farmland
+   withTrigger (withInitialSupply (victory 726 "Farmland" 6 2) stdVictorySupply)
+    (onBuySelf (trashForGain (gainUpgrade 2)))
    ]
 
 borderVillageTrigger :: Action
@@ -1153,6 +1181,13 @@ jackOfAllTrades = gain silver &&& spyTop &&& drawTo5 &&& optTrash
         candidates = filter (not . isTreasure) $ hand $ playerByName state player
         cont card = trash card (Hand player) player state
 
+haggler :: CardDef -> Action
+haggler card p s
+  | null candidates = toSimulation s
+  | otherwise = chooseOne (EffectGain unknownDef (Discard p)) (map (`topOfSupply` s) candidates) (gain . typ) p s
+  where
+    candidates = filter (not . (`hasType` Victory)) $ affordableCards (subtractCost (cost s card) (simpleCost 1)) s
+
 highway :: Maybe Card -> Action
 highway Nothing = plusCards 1 &&& plusActions 1
 highway (Just card) = plusCards 1 &&& plusActions 1 &&&
@@ -1170,12 +1205,44 @@ mandarinTrigger player state = seqActions (\c -> put c InPlay (TopOfDeck player)
   where
     treasures = filter isTreasure $ inPlay (playerByName state player)
 
+nomadCamp :: TriggerHandler
+nomadCamp GainTrigger (EffectGainFrom c1 source target) (FromCard c2 _) cont
+  | c1 == c2 =
+    case target of
+      (TopOfDeck _) -> cont
+      _ -> \p -> gainFromTo c1 source (TopOfDeck p) p
+  | otherwise = cont
+nomadCamp GainTrigger (EffectGain d1 target) (FromCardEffect d2) cont
+  | d1 == d2 =
+    case target of
+      (TopOfDeck _) -> cont
+      _ -> \p -> gainTo d1 (TopOfDeck p) p
+  | otherwise = cont
+nomadCamp _ _ _ cont = cont
+
+spiceMerchant :: Action
+spiceMerchant p s
+  | null ts = toSimulation s
+  | otherwise = optDecision (ChooseCard (EffectDiscard unknown (Hand p)) ts (\card -> (trash card (Hand p) &&& benefit) p s)) p s
+  where
+    ts = filter isTreasure $ hand $ playerByName s p
+    benefit = chooseEffects 1 [MultiEffect [EffectPlusCards 2, EffectPlusActions 1], MultiEffect [EffectPlusMoney 2, EffectPlusBuys 1]] enactEffects
+
 stables :: Action
 stables p s
   | null ts = toSimulation s
   | otherwise = optDecision (ChooseCard (EffectDiscard unknown (Hand p)) ts (\card -> (discard card (Hand p) &&& plusCards 3 &&& plusActions 1) p s)) p s
   where
     ts = filter isTreasure $ hand $ playerByName s p
+
+traderTrigger :: TriggerHandler
+traderTrigger _ (EffectGainFrom c _ _) (FromCard trader (Hand _)) cont
+  | typ c == silver = cont
+  | otherwise = choose (ChooseToUse (EffectReveal trader)) (\b -> if b then reveal [trader] &&& gain silver else cont)
+traderTrigger _ (EffectGain c _) (FromCard trader (Hand _)) cont
+  | c == silver = cont
+  | otherwise = choose (ChooseToUse (EffectReveal trader)) (\b -> if b then reveal [trader] &&& gain silver else cont)
+traderTrigger _ _ _ cont = cont
 
 tunnelTrigger :: Card -> Action
 tunnelTrigger c p s
@@ -1194,7 +1261,7 @@ darkAgesCards = map ($ DarkAges)
       (\p s -> (plusMoney 1 &&& chooseEffects 1 [EffectPlusActions 2, EffectPlusBuys 2, EffectGain silver (Discard p)] enactEffects) p s))
     (onTrashSelf squireTrigger),
    action 804 "Vagrant" 2 (plusCards 1 &&& plusActions 1 &&& reshuffleIfNeeded &&& vagrant),
-   notImplemented "Forager", -- 805 Forager
+   action 805 "Forager" 3 (plusActions 1 &&& plusBuys 1 &&& trashForGain (\_ p s -> plusMoney (length $ L.nub $ map typ $ filter isTreasure $ trashPile s) p s)),
    notImplemented "Hermit", -- 806 Hermit
    notImplemented "Market Square", -- 807 Market Square
    notImplemented "Sage", -- 808 Sage
@@ -1231,6 +1298,7 @@ darkAgesCards = map ($ DarkAges)
    notImplemented "Hunting Grounds" -- 835 Hunting Grounds
   ]
 
+
 ruins = map ($ DarkAges)
   [carddef 840 "Abandoned Mine" (simpleCost 0) [Action, Ruins] noPoints (plusMoney 1) noTriggers,
    carddef 841 "Ruined Library" (simpleCost 0) [Action, Ruins] noPoints (plusCards 1) noTriggers,
@@ -1238,12 +1306,6 @@ ruins = map ($ DarkAges)
    carddef 843 "Ruined Village" (simpleCost 0) [Action, Ruins] noPoints (plusActions 1) noTriggers,
    carddef 844 "Survivors" (simpleCost 0) [Action, Ruins] noPoints (reshuffleIfNeededN 2 &&& survivors) noTriggers
   ]
-
-shelters = map ($ DarkAges)
-  [carddef 850 "Hovel" (simpleCost 1) [Reaction, Shelter] noPoints pass (whileInHand (onBuyA hovelTrigger)),
-   carddef 851 "Necropolis" (simpleCost 1) [Action, Shelter] noPoints (plusActions 2) noTriggers,
-   carddef 852 "Overgrown Estate" (simpleCost 1) [Victory, Shelter] noPoints pass (onTrashSelf (plusCards 1))
-   ]
 
 
 armoryGain :: Action
@@ -1274,12 +1336,6 @@ fortressTrigger TrashTrigger (EffectTrash c1 _) (FromCard c2 _) cont player stat
   if c1 == c2 then (cont &&& put c1 Trash (Hand player)) player state
               else cont player state
 fortressTrigger _ _ _ cont p s = cont p s
-
-hovelTrigger :: TriggerSource -> CardDef -> Action
-hovelTrigger (FromCard hovel _) card p s
-  | hasType card Victory = choose (ChooseToReact hovel BuyTrigger) (\b -> if b then trash hovel (Hand p) else pass) p s
-  | otherwise = toSimulation s
-hovelTrigger _ _ _ s = toSimulation s
 
 ironmonger :: Action
 ironmonger player state

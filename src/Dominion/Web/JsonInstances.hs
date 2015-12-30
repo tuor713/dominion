@@ -33,6 +33,8 @@ instance J.FromJSON PlayerDefinition where
 instance J.FromJSON GameType where
   parseJSON (J.String s)
     | s == "colony" = return ColonyGame
+    | s == "shelters" = return SheltersGame
+    | s == "colonyShelters" = return ColonySheltersGame
     | otherwise = return StandardGame
   parseJSON _ = return StandardGame
 
@@ -78,6 +80,7 @@ instance J.ToJSON Location where
   toJSON InPlay           = J.toJSON [J.String "inPlay"]
   toJSON InPlayDuration   = J.toJSON [J.String "inPlayDuration"]
   toJSON (Mat p mat)      = J.toJSON [J.String "mat", jString p, jString (show mat)]
+  toJSON Aside            = J.toJSON [J.String "aside"]
 
 instance J.ToJSON Effect where
   toJSON (EffectPlusCards no)          = J.toJSON [J.String "plusCards", J.toJSON no]
@@ -99,6 +102,7 @@ instance J.ToJSON Effect where
   toJSON (EffectPlayCopy card)         = J.toJSON [J.String "playCopy", J.toJSON card]
   toJSON (EffectPlayTreasure card)     = J.toJSON [J.String "playTreasure", J.toJSON card]
   toJSON (SpecialEffect card)          = J.toJSON [J.String "useAbility", J.toJSON card]
+  toJSON (MultiEffect effects)         = J.toJSON [J.String "multiEffect", J.toJSON effects]
   toJSON NullEffect                    = J.toJSON [J.String "nullEffect"]
 
 instance J.ToJSON Decision where
