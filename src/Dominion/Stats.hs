@@ -3,10 +3,11 @@ module Dominion.Stats where
 
 import Dominion.Model
 import qualified Data.List as L
+import qualified Data.Maybe as Maybe
 import qualified Data.Map.Strict as Map
 
 
-type StatsCollector a = a -> [GameState] -> a
+type StatsCollector a = a -> GameState -> a
 
 data Stats = Stats { turnsPerGame :: !(Map.Map Int Int),
                      avgPointsPerTurn :: !(Map.Map PlayerId (Map.Map Int (Int,Int))),
@@ -26,17 +27,22 @@ finalStates state =
     (\idx -> state { ply = (ply state) + idx, turnOrder = drop idx (turnOrder state) ++ take idx (turnOrder state) })
     [0..(length (turnOrder state) - 1)]
 
+extractStartOfTurn :: Log -> Maybe GameState
+extractStartOfTurn (LogTurn _ _ state) = Just state
+extractStartOfTurn _ = Nothing
+
 collectStats :: StatsCollector Stats
-collectStats stats game =
+collectStats stats finalState =
   stats { totalGames = totalGames stats + 1,
-          turnsPerGame = Map.insertWith (+) (turnNo (last (init game))) 1 (turnsPerGame stats),
+          turnsPerGame = Map.insertWith (+) (turnNo (last game)) 1 (turnsPerGame stats),
           winRatio = Map.insertWith (+) victor 1 (winRatio stats),
           avgPointsPerTurn = newAveragePoints,
           avgMoneyPerTurn = newAverageMoney,
-          maxPoints = maxPoints stats + L.maximum (map points (Map.elems (players (last game)))),
-          minPoints = minPoints stats + L.minimum (map points (Map.elems (players (last game))))
+          maxPoints = maxPoints stats + L.maximum (map points (Map.elems (players finalState))),
+          minPoints = minPoints stats + L.minimum (map points (Map.elems (players finalState)))
           }
   where
+    game = Maybe.catMaybes $ map extractStartOfTurn $ gameLogs finalState
     victor = winnerName $ winner (last game)
     winnerName (Win p) = p
     winnerName (Tie _) = "Tie"
@@ -49,14 +55,14 @@ collectStats stats game =
                                        m2)
                 (activePlayerId state))
             (avgMoneyPerTurn stats)
-            (init game)
+            game
     newAveragePoints =
       foldr (\state ->
               Map.adjust
                 (\m2 -> Map.insertWith (\(s1,n1) (s2,n2) -> (s1+s2,n1+n2)) (turnNo state) ((pointProjection (activePlayer state)),1) m2)
                 (activePlayerId state))
             (avgPointsPerTurn stats)
-            ((init game) ++ finalStates (last game))
+            (game ++ finalStates finalState)
 
 emptyStats :: [PlayerId] -> Stats
 emptyStats players = Stats { totalGames = 0,
