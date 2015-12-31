@@ -102,41 +102,32 @@ human :: PlayerId -> Bot
 human player _ = interact player
 
 
---
+-- Simulation running
 
-launchGame :: (PlayerId -> GameState -> Decision -> (Simulation -> IO ()) -> IO ())
-              -> (GameState -> IO ())
+launchGame :: (a -> PlayerId -> GameState -> Decision -> (a -> Simulation -> IO b) -> IO b)
+              -> (a -> GameState -> IO b)
               -> SimulationT GameState
               -> SimulationState
-              -> IO ()
-launchGame handler finished initial gen = iter gen' (playTurn (activePlayerId state) state)
+              -> a
+              -> IO b
+launchGame handler finishedHandler initial gen st = iter gen' st (playTurn (activePlayerId state) state)
   where
     (state,gen') = runSim initial gen
-    iter :: SimulationState -> Simulation -> IO ()
-    iter gen sim =
+    iter gen st sim =
       case step of
-        State state -> finished state
-        Decision pid state decision -> handler pid state decision (iter gen')
+        State state ->
+          if finished state
+          then finishedHandler st state
+          else iter gen st (playTurn (activePlayerId state) state)
+        Decision pid state decision -> handler st pid state decision (iter gen')
       where
         (step,gen') = runSim sim gen
 
-
-
--- Simulation running
-
-runSimulation :: Map.Map PlayerId Bot -> GameStep -> SimulationState -> IO GameState
-runSimulation bots (State state) gen
-  | finished state = return state
-  | otherwise =
-    do
-      let (next,gen') = runSim (playTurn (activePlayerId state) state) gen
-      runSimulation bots next gen'
-
-runSimulation bots (Decision player state decision) gen =
-  do
-    ioNext <- (bots Map.! player) (visibleState player state) decision
-    let (next,gen') = runSim ioNext gen
-    runSimulation bots next gen'
+runSimulation :: Map.Map PlayerId Bot -> SimulationT GameState -> SimulationState -> IO GameState
+runSimulation bots initial state = launchGame onDecision (\_ final -> return final) initial state ()
+  where
+    onDecision _ player state decision cont =
+      (bots Map.! player) (visibleState player state) decision >>= cont ()
 
 runSimulations :: [(PlayerId,Bot)] -> [CardDef] -> Stats -> Int -> IO Stats
 runSimulations _ _ stats 0 = return stats
@@ -144,8 +135,8 @@ runSimulations bots tableau stats num =
   do
     gen <- newStdGen
     let players = evalSim (shuffle (map fst bots)) (seedSim gen)
-    let initial = evalSim (mkGame StandardGame players tableau) (seedSim gen)
-    final <- runSimulation (Map.fromList bots) (State initial) (seedSim gen)
+    let initial = mkGame StandardGame players tableau
+    final <- runSimulation (Map.fromList bots) initial (seedSim gen)
     runSimulations bots tableau (collectStats stats final) (num-1)
 
 runSimulationsR :: [(PlayerId,Bot)] -> Stats -> Int -> IO Stats
@@ -155,8 +146,8 @@ runSimulationsR bots stats num =
     gen <- newStdGen
     let cardlist = evalSim (shuffle kingdomCards) (seedSim gen)
     let players = evalSim (shuffle (map fst bots)) (seedSim gen)
-    let initial = evalSim (mkGame StandardGame players (take 10 cardlist)) (seedSim gen)
-    final <- runSimulation (Map.fromList bots) (State initial) (seedSim gen)
+    let initial = mkGame StandardGame players (take 10 cardlist)
+    final <- runSimulation (Map.fromList bots) initial (seedSim gen)
     runSimulationsR bots (collectStats stats final) (num-1)
 
 runSampleGame :: [(PlayerId,Bot)] -> [CardDef] -> IO GameState
@@ -164,8 +155,8 @@ runSampleGame bots tableau =
   do
     gen <- newStdGen
     let players = evalSim (shuffle (map fst bots)) (seedSim gen)
-    let initial = evalSim (mkGame StandardGame players tableau) (seedSim gen)
-    runSimulation (Map.fromList bots) (State initial) (seedSim gen)
+    let initial = mkGame StandardGame players tableau
+    runSimulation (Map.fromList bots) initial (seedSim gen)
 
 -- Stats
 
@@ -178,11 +169,23 @@ showStats stats =
   "Wins ratios: " ++ show (statWinRatio stats) ++ "\n" ++
   "Length of games: " ++ show (statTurnsPerGame stats)
 
-runGameConsole :: Map.Map PlayerId Bot -> GameStep -> Int -> SimulationState -> IO ()
-runGameConsole bots (State state) num gen
-  | finished state =
-    do
+playOnConsole :: [(String,Bot)] -> [String] -> IO ()
+playOnConsole ps cards =
+  do
+    let initial = mkGame StandardGame (map fst ps) (map lookupCard cards)
+    gen <- newStdGen
+    launchGame decisionHandler finishHandler initial (seedSim gen) 0
+  where
+    bots = Map.fromList ps
+    decisionHandler num player state decision cont = do
       showLogs (drop num logs)
+      sim <- (bots Map.! player) (visibleState player state) decision
+      cont (length logs) sim
+      where
+        logs = gameLogs state
+
+    finishHandler num state = do
+      showLogs (drop num (gameLogs state))
       putStrLn "Game Finished!"
       putStrLn $ "Final score: " ++ (players state
                                       |> Map.elems
@@ -191,27 +194,4 @@ runGameConsole bots (State state) num gen
                                       |> map (\p -> name p ++ ": " ++ show (points p))
                                       |> L.intersperse ", "
                                       |> concat)
-  | otherwise =
-    do
-      showLogs (drop num logs)
-      let (next,gen') = runSim (playTurn (activePlayerId state) state) gen
-      runGameConsole bots next (length logs) gen'
-  where
-    logs = gameLogs state
 
-
-runGameConsole bots (Decision player state decision) num gen =
-  do
-    showLogs (drop num logs)
-    sim <- (bots Map.! player) (visibleState player state) decision
-    let (next,gen') = runSim sim gen
-    runGameConsole bots next (length logs) gen'
-  where
-    logs = gameLogs state
-
-playOnConsole :: [(String,Bot)] -> [String] -> IO ()
-playOnConsole players cards =
-  do
-    gen <- newStdGen
-    let (initial,gen') = runSim (mkGame StandardGame (map fst players) (map lookupCard cards)) (seedSim gen)
-    runGameConsole (Map.fromList players) (State initial) 0 gen'
