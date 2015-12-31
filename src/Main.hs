@@ -109,8 +109,10 @@ writeHtml = writeLBS . renderHtml
 
 -- Game API
 
-data PlayerState = Bot Bot | External (MVar GameStep)
-type Game = (Map.Map PlayerId PlayerState, SimulationState)
+data DecisionState = GameEnded GameState | DecisionPending GameState Decision (Simulation -> IO Game)
+
+data PlayerState = Bot Bot | External (MVar DecisionState)
+type Game = Map.Map PlayerId PlayerState
 
 instance Show PlayerState where
   show (Bot _) = "Bot"
@@ -118,39 +120,46 @@ instance Show PlayerState where
 
 type GameRepository = (Int,Map.Map Int Game)
 
-externalDecision :: PlayerState -> MVar GameStep
+externalDecision :: PlayerState -> MVar DecisionState
 externalDecision (External mvar) = mvar
 externalDecision (Bot _) = error "Called externalDecision on internal bot"
 
 playerUpdateState :: PlayerState -> GameState -> IO ()
 playerUpdateState (Bot _) _ = return ()
-playerUpdateState (External mvar) state = putMVar mvar (State state)
+playerUpdateState (External mvar) state = putMVar mvar (GameEnded state)
 
-playerDecision :: Game -> PlayerState -> PlayerId -> GameState -> Decision -> IO (Maybe (Game,GameStep))
-playerDecision (states,simState) (Bot bot) _ state decision = do
+playerDecision :: Game -> PlayerState -> PlayerId -> GameState -> Decision -> (Game -> Simulation -> IO Game) -> IO Game
+playerDecision game (Bot bot) _ state decision cont = do
   sim <- bot state decision
-  let (next,simState') = runSim sim simState
-  return $ Just ((states, simState'), next)
+  cont game sim
 
-playerDecision _ (External mvar) id state decision =
-  putMVar mvar (Decision id state decision) >> return Nothing
+playerDecision game (External mvar) _ state decision cont =
+  putMVar mvar (DecisionPending state decision (cont game)) >> return game
 
-playerStates :: Game -> Map.Map PlayerId PlayerState
-playerStates (states,_) = states
+launchWebGame :: StartGameReq -> IO Game
+launchWebGame req = do
+  let (players,cards,gameTyp) = (gamePlayers req, gameCards req, gameType req)
+  let tableau = map lookupCard cards
+  let initial = (mkGame gameTyp (map playerDefName players) tableau)
 
-nextStep :: Game -> GameStep -> IO Game
-nextStep game@(states,simState) (State state)
-  | finished state = sequence (map (\p -> playerUpdateState p state) $ Map.elems $ playerStates game)
-                     >> return (states, simState)
-  | otherwise = do
-    let (next,simState') = runSim (playTurn (activePlayerId state) state) simState
-    nextStep (states, simState') next
+  gen <- newStdGen
+  mvars <- sequence $ map mkMVar players
+  launchGame decisionHandler finishHandler initial (seedSim gen) (Map.fromList mvars)
 
-nextStep game (Decision p state dec) = do
-  next <- playerDecision game ((playerStates game) Map.! p) p state dec
-  case next of
-    Just (game',step) -> nextStep game' step
-    Nothing -> return game
+  where
+    mkMVar (HumanPlayer name) = newEmptyMVar >>= \mv -> return (name, External mv)
+    mkMVar (BotPlayer name botid) = do
+      bot <- maybe ((Maybe.fromJust $ lookup defaultBotId botLibrary) name)
+                   ($ name)
+                   (lookup botid botLibrary)
+      return (name, Bot bot)
+
+    decisionHandler game pid state dec cont =
+      playerDecision game (game Map.! pid) pid state dec cont
+
+    finishHandler game state = do
+      _ <- sequence (map (\p -> playerUpdateState p state) $ Map.elems game)
+      return game
 
 
 setupGameHandler :: Snap ()
@@ -159,23 +168,20 @@ setupGameHandler = writeHtml htmlSetupGame
 suggestedTableauHandler :: Snap ()
 suggestedTableauHandler = (writeHtml . htmlSuggestedTableaus) suggestedTableaus
 
-
 startGameHandler :: LoggerSet -> IORef.IORef GameRepository -> Snap ()
 startGameHandler logset gamesRepository = do
   body <- readRequestBody 10000
   let req = J.decode body :: Maybe StartGameReq
-  let (players,cards,gameTyp) = maybe ([HumanPlayer "Alice", BotPlayer "Bob" defaultBotId], defaultTableau, StandardGame)
-                                      (\req -> (gamePlayers req, gameCards req, gameType req)) req
-  let tableau = map lookupCard cards
+  let startGameReq = Maybe.fromMaybe
+                      StartGameReq { gamePlayers = [HumanPlayer "Alice", BotPlayer "Bob" defaultBotId],
+                                     gameCards = defaultTableau,
+                                     gameType = StandardGame }
+                      req
 
   id <- liftIO $ do
+    game <- launchWebGame startGameReq
+
     (nextId,games) <- IORef.readIORef gamesRepository
-    gen <- newStdGen
-    let (newGame,simState) = runSim (mkGame gameTyp (map playerDefName players) tableau) (seedSim gen)
-
-    mvars <- sequence $ map mkMVar players
-
-    game <- nextStep (Map.fromList mvars,simState) (State newGame)
     IORef.writeIORef gamesRepository (nextId+1, Map.insert nextId game games)
 
     pushLogStr logset (toLogStr ("Created new game: " ++ show nextId ++ "\n"))
@@ -186,12 +192,6 @@ startGameHandler logset gamesRepository = do
   where
     defaultTableau = ["market", "library", "smithy", "cellar", "chapel", "militia",
                       "village", "laboratory", "witch", "jack of all trades"]
-    mkMVar (HumanPlayer name) = newEmptyMVar >>= \mv -> return (name, External mv)
-    mkMVar (BotPlayer name botid) = do
-      bot <- maybe ((Maybe.fromJust $ lookup defaultBotId botLibrary) name)
-                   ($ name)
-                   (lookup botid botLibrary)
-      return (name, Bot bot)
 
 
 nextDecision :: IORef.IORef GameRepository -> Int -> PlayerId -> Snap ()
@@ -203,16 +203,16 @@ nextDecision gamesRepository gameId player = do
   (_,games) <- liftIO $ IORef.readIORef gamesRepository
 
   case Map.lookup gameId games of
-    Just (states,_) -> do
+    Just states -> do
       let mvar = externalDecision $ states Map.! player
 
       decision <- liftIO $ readMVar mvar
       case decision of
-        (State state) -> if useHtml
-                         then writeHtml (htmlFinished state
-                                                      (collectStats (emptyStats (Map.keys (players state))) state))
-                         else writeBS "{'status':'finished'}"
-        (Decision _ state dec) -> writeLBS $ formatHandler (visibleState player state, dec)
+        (GameEnded state) -> if useHtml
+                             then writeHtml (htmlFinished state
+                                                          (collectStats (emptyStats (Map.keys (players state))) state))
+                             else writeBS "{'status':'finished'}"
+        (DecisionPending state dec _) -> writeLBS $ formatHandler (visibleState player state, dec)
     Nothing -> writeHtml $ htmlError "No such game."
 
 
@@ -241,13 +241,12 @@ makeDecisionHandler logset gamesRepository = do
   player <- getParam "player"
   (_,games) <- liftIO $ IORef.readIORef gamesRepository
 
-
   let gameId = fst $ Maybe.fromJust $ C8.readInt (Maybe.fromJust id)
   let playerId = C8.unpack (Maybe.fromJust player)
 
   liftIO $ pushLogStr logset (toLogStr ("Player " ++ playerId ++ " making decision in game " ++ show gameId ++ "\n"))
 
-  let (states,simState) = games Map.! gameId
+  let states = games Map.! gameId
   let mvar = externalDecision $ states Map.! playerId
 
   param <- readRequestBody 1000
@@ -256,15 +255,10 @@ makeDecisionHandler logset gamesRepository = do
   decision <- liftIO $ takeMVar mvar
 
   case decision of
-    (State _) -> writeBS "no decision to make, game has ended"
-    (Decision _ _ dec) -> do
-      let (next,simState') = runSim (parseDecision dec $ C8.unpack text) simState
-
-      liftIO $ do
-        game' <- nextStep (states,simState') next
-
-        IORef.modifyIORef' gamesRepository (\(id,games) -> (id,Map.insert gameId game' games))
-
+    (GameEnded _) -> writeBS "no decision to make, game has ended"
+    (DecisionPending _ dec cont) -> do
+      let next = parseDecision dec $ C8.unpack text
+      _ <- liftIO $ cont next
       nextDecision gamesRepository gameId playerId
 
 
