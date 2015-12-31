@@ -26,4 +26,4 @@ stubSupply cardName num state =
     c = lookupCard cardName
 
 evalState :: Simulation -> GameState
-evalState sim = toState $ evalSim sim zGen
+evalState sim = toState $ evalSim sim (seedSim zGen)

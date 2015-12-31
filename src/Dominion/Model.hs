@@ -1,7 +1,6 @@
 {-# LANGUAGE TupleSections #-}
 module Dominion.Model where
 
-import qualified Control.Monad as M
 import qualified Control.Monad.Trans.State.Lazy as St
 import qualified Data.Either as Either
 import qualified Data.List as L
@@ -301,7 +300,42 @@ stackMod mod (StackedModifier xs) = StackedModifier (mod:xs)
 stackMod (StackedModifier xs) mod = StackedModifier (xs ++ [mod])
 stackMod m1 m2 = StackedModifier [m1,m2]
 
-data Log = LogBuy CardDef | LogPlay CardDef deriving (Eq, Show)
+data Visibility = AllPlayers | VisibleToPlayer PlayerId deriving (Eq)
+
+instance Show Visibility where
+  show AllPlayers = "All"
+  show (VisibleToPlayer player) = player
+
+data Log =
+  LogBuy PlayerId CardDef
+  | LogPlay PlayerId CardDef
+  | LogPut Visibility PlayerId Card Location Location
+  | LogTrash PlayerId Card
+  | LogDiscard PlayerId [Card]
+  | LogGain PlayerId Card Location Location
+  | LogReveal PlayerId [Card]
+  | LogPeek Visibility PlayerId [Card] Location
+  | LogDraw Visibility PlayerId [Card]
+  | LogTurn PlayerId Int GameState
+
+instance Show Log where
+  show (LogBuy p card) = "[All] " ++ p ++ " buys " ++ show card
+  show (LogPlay p card) = "[All] " ++ p ++ " plays " ++ show card
+  show (LogPut vis p card source target) = "[" ++ show vis ++ "] " ++ p ++ " puts " ++ show card ++ " from " ++ show source ++ " to " ++ show target
+  show (LogTrash p card) = "[All]" ++ p ++ " trashes " ++ show card
+  show (LogDiscard p cards) = "[All] " ++ p ++ " discards " ++ summarizeCards cards
+  show (LogGain p card source target) = "[All] " ++ p ++ " gains " ++ show card ++ " from " ++ show source ++ " to " ++ show target
+  show (LogReveal p cards) = "[All] " ++ p ++ " reveals " ++ summarizeCards cards
+  show (LogPeek vis p cards loc) = "[" ++ show vis ++ "] "++ p ++ " finds " ++ summarizeCards cards ++ " at " ++ show loc
+  show (LogDraw vis p cards) = "[" ++ show vis ++ "] " ++ p ++ " draws " ++ summarizeCards cards
+  show (LogTurn p no _) = "[All] Turn " ++ show no ++ " - " ++ p
+
+
+canSee :: PlayerId -> Log -> Bool
+canSee pid (LogPut (VisibleToPlayer p) _ _ _ _) = pid == p
+canSee pid (LogPeek (VisibleToPlayer p) _ _ _) = pid == p
+canSee pid (LogDraw (VisibleToPlayer p) _ _) = pid == p
+canSee _ _ = True
 
 data Phase = ActionPhase | BuyPhase | CleanupPhase deriving (Eq, Ord, Show)
 
@@ -326,19 +360,13 @@ data GameState = GameState { players :: Map.Map PlayerId Player,
                              piles :: Map.Map CardDef [Card],
                              nonSupplyPiles :: Map.Map CardDef [Card],
                              ply :: Int,
-                             finished :: Bool
+                             finished :: Bool,
+                             gameLog :: [Log]
                              }
 
 data Result = Tie [PlayerId] | Win PlayerId deriving (Eq, Read, Show)
 
-data Visibility = AllPlayers | VisibleToPlayer PlayerId deriving (Eq)
-
-instance Show Visibility where
-  show AllPlayers = "All"
-  show (VisibleToPlayer player) = player
-
-type Info = (Visibility, String)
-type SimulationState = (StdGen, [Info])
+newtype SimulationState = SimulationState { randomGenerator :: StdGen }
 
 type SimulationT a = St.State SimulationState a
 type Simulation = SimulationT GameStep
@@ -346,21 +374,10 @@ type Simulation = SimulationT GameStep
 -- Simulation primitives
 
 randomGen :: SimulationT StdGen
-randomGen = M.liftM fst St.get
+randomGen = fmap randomGenerator St.get
 
 setRandomGen :: StdGen -> SimulationT ()
-setRandomGen gen =
-  do
-    (_,infos) <- St.get
-    St.put (gen,infos)
-    return ()
-
-info :: Visibility -> String -> SimulationT ()
-info vis msg = St.get >>= \(gen,infos) -> St.put (gen,(vis,msg):infos) >> return ()
-
-canSee :: PlayerId -> Info -> Bool
-canSee _ (AllPlayers,_) = True
-canSee pid (VisibleToPlayer p,_) = pid == p
+setRandomGen gen = St.put (SimulationState gen) >> return ()
 
 -- TODO add source card
 data Trigger =
@@ -418,10 +435,8 @@ instance Show Decision where
   show (ChooseEffects num effects _) = "ChooseEffects(" ++ show num ++ ", " ++ show effects ++ ")"
   show (ChooseNumber effect (lo,hi) _) = "ChooseNumber(" ++ show effect ++ ", " ++ show lo ++ ", " ++ show hi ++ ")"
 
-data DecisionSource = GameMechanics | CardDecision Card
-
 -- TODO add source of decision
-data GameStep = State GameState | Decision PlayerId {- DecisionSource -} GameState Decision
+data GameStep = State GameState | Decision PlayerId GameState Decision
 
 type Action = PlayerId -> GameState -> Simulation
 
@@ -509,7 +524,8 @@ nullState =
               trashPile = [],
               turn = newTurn,
               ply = 1,
-              finished = False }
+              finished = False,
+              gameLog = [] }
 
 toGameState :: GameStep -> Maybe GameState
 toGameState (State state) = Just state
@@ -548,7 +564,8 @@ mkGame typ names kingdomCards =
                                      trashPile = [],
                                      turn = newTurn,
                                      ply = 1,
-                                     finished = False
+                                     finished = False,
+                                     gameLog = []
                                      }
 
 
@@ -772,14 +789,20 @@ turnNo g = ((ply g + 1) `div` length (players g))
 buysThisTurn :: GameState -> [CardDef]
 buysThisTurn state = Maybe.catMaybes $ map extract $ turnLog $ turn state
   where
-    extract (LogBuy c) = Just c
+    extract (LogBuy _ c) = Just c
     extract _ = Nothing
 
 playsThisTurn :: GameState -> [CardDef]
 playsThisTurn state = Maybe.catMaybes $ map extract $ turnLog $ turn state
   where
-    extract (LogPlay c) = Just c
+    extract (LogPlay _ c) = Just c
     extract _ = Nothing
+
+gameLogs :: GameState -> [Log]
+gameLogs = reverse . gameLog
+
+visibleGameLogs :: PlayerId -> GameState -> [Log]
+visibleGameLogs pid = reverse . filter (canSee pid) . gameLog
 
 moneyValue :: CardDef -> Int
 moneyValue card
@@ -877,16 +900,15 @@ addModifier attr mod _ state =
   toSimulation $ state { turn = (turn state) { modifiers = Map.insertWith stackMod attr mod (modifiers (turn state)) } }
 
 addLog :: Log -> Action
-addLog item _ state = toSimulation $ state { turn = (turn state) { turnLog = item : turnLog (turn state) }}
+addLog item _ state = toSimulation $ state { turn = (turn state) { turnLog = item : turnLog (turn state) }, gameLog = item : (gameLog state) }
 
 playEffect :: CardDef -> Maybe Card -> Action
 playEffect card source player state =
-  info AllPlayers (player ++ " plays " ++ cardName card)
-  >> (addLog (LogPlay card) &&& onPlay card source)
-     player
-     (if Maybe.isNothing source && hasType card Duration
-      then addDurationEffect card state
-      else state)
+  (addLog (LogPlay player card) &&& onPlay card source)
+  player
+  (if Maybe.isNothing source && hasType card Duration
+   then addDurationEffect card state
+   else state)
 
 playFrom :: Card -> Location -> Action
 playFrom card loc player state =
@@ -937,8 +959,7 @@ move card source target _ state = toSimulation $ transfer card source target sta
 
 put :: Card -> Location -> Location -> Action
 put card source target p state =
-  info (VisibleToPlayer p) (p ++ " puts " ++ show card ++ " from " ++ show source ++ " to " ++ show target) >>
-  move card source target p state
+  (addLog (LogPut (VisibleToPlayer p) p card source target) &&& move card source target) p state
 
 putAll :: [Card] -> Location -> Location -> Action
 putAll cards source target = seqActions (\c -> put c source target) cards
@@ -951,11 +972,11 @@ supplyTriggers state = map FromSupply $ Map.keys (piles state)
 
 gainFromTo :: Card -> Location -> Location -> Action
 gainFromTo card source target player state =
-  info AllPlayers (player ++ " gains " ++ cardName (typ card)) >>
-  handleAllTriggers GainTrigger
-    ((FromCard card source):playerTriggers (playerByName state player) ++ supplyTriggers state)
-    (EffectGainFrom card source target)
-    (move card source target)
+  (addLog (LogGain player card source target)
+   &&& handleAllTriggers GainTrigger
+        ((FromCard card source):playerTriggers (playerByName state player) ++ supplyTriggers state)
+        (EffectGainFrom card source target)
+        (move card source target))
     player state
 
 gainFrom :: Card -> Location -> Action
@@ -964,11 +985,11 @@ gainFrom card source player = gainFromTo card source (Discard player) player
 gainSpecial :: CardDef -> Location -> Action
 gainSpecial card target player state
   | null pile = toSimulation state
-  | otherwise = info AllPlayers (player ++ " gains " ++ cardName card) >>
-                handleAllTriggers GainTrigger
-                  ((FromCardEffect card):playerTriggers (playerByName state player) ++ supplyTriggers state)
-                  (EffectGain card target)
-                  (move c NonSupply target)
+  | otherwise = (addLog (LogGain player c NonSupply target) &&&
+                  handleAllTriggers GainTrigger
+                    ((FromCardEffect card):playerTriggers (playerByName state player) ++ supplyTriggers state)
+                    (EffectGain card target)
+                    (move c NonSupply target))
                   player state
   where
     pile = Map.findWithDefault [] card (nonSupplyPiles state)
@@ -977,40 +998,42 @@ gainSpecial card target player state
 gainTo :: CardDef -> Location -> Action
 gainTo card target player state
   | inSupply state card =
-    info AllPlayers (player ++ " gains " ++ cardName card) >>
-    handleAllTriggers GainTrigger
-                      ((FromCardEffect card):playerTriggers (playerByName state player) ++ supplyTriggers state)
-                      (EffectGain card target)
-                      transferT
+    (addLog (LogGain player top Supply target) &&&
+      handleAllTriggers GainTrigger
+                        ((FromCardEffect card):playerTriggers (playerByName state player) ++ supplyTriggers state)
+                        (EffectGain card target)
+                        transferT)
                       player state
   | otherwise = toSimulation state
   where
+    top = topOfSupply card state
     transferT _ state = toSimulation $ transfer (topOfSupply card state) Supply target state
 
 gain :: CardDef -> Action
 gain card player = gainTo card (Discard player) player
 
 reveal :: [Card] -> Action
-reveal cards player state = info AllPlayers (player ++ " reveals " ++ summarizeCards cards) >> return (State state)
+reveal cards player state = addLog (LogReveal player cards) player state
 
 buy :: CardDef -> Action
 buy card player state =
-  info AllPlayers (player ++ " buys " ++ cardName card) >>
-  handleAllTriggers BuyTrigger ((FromCardEffect card):playerTriggers (playerByName state player)) (EffectBuy card)
-    (addLog (LogBuy card) &&& gain card)
+  (addLog (LogBuy player card) &&&
+    handleAllTriggers BuyTrigger ((FromCardEffect card):playerTriggers (playerByName state player)) (EffectBuy card)
+      (gain card))
     player state
 
 trash :: Card -> Location -> Action
 trash card source player state =
-  info AllPlayers (player ++ " trashes " ++ cardName (typ card)) >>
-  handleTriggers TrashTrigger (FromCard card source) (EffectTrash card source) transferT player state
+  (addLog (LogTrash player card) &&& handleTriggers TrashTrigger (FromCard card source) (EffectTrash card source) transferT)
+    player state
   where
     transferT _ state = toSimulation $ transfer card source Trash state
 
 trashAll :: [Card] -> Location -> Action
 trashAll cards source player state =
-  info AllPlayers (player ++ " trashes " ++ summarizeCards cards) >>
-  (foldr (\c cont -> (triggers (typ c)) TrashTrigger (EffectTrash c source) (FromCard c source) cont) transferT cards) player state
+  (seqActions (\c -> addLog (LogTrash player c)) cards &&&
+    (foldr (\c cont -> (triggers (typ c)) TrashTrigger (EffectTrash c source) (FromCard c source) cont) transferT cards))
+    player state
   where
     transferT _ state = toSimulation $ foldr (\c s -> transfer c source Trash s) state cards
 
@@ -1018,13 +1041,11 @@ doDiscard :: Card -> Location -> Action
 doDiscard card loc player state = handleTriggers DiscardTrigger (FromCard card loc) (EffectDiscard card loc) (move card loc (Discard player)) player state
 
 discard :: Card -> Location -> Action
-discard card loc player state = info AllPlayers (player ++ " discards " ++ cardName (typ card)) >> doDiscard card loc player state
+discard card loc player state = (addLog (LogDiscard player [card]) &&& doDiscard card loc) player state
 
 -- TODO all triggers have to happen upfront
 discardAll :: [Card] -> Location -> Action
-discardAll cards loc player state =
-  info AllPlayers (player ++ " discards " ++ summarizeCards cards) >>
-  seqActions (\c -> doDiscard c loc) cards player state
+discardAll cards loc player state = (addLog (LogDiscard player cards) &&& seqActions (\c -> doDiscard c loc) cards) player state
 
 plusMoney :: Int -> Action
 plusMoney num _ state = toSimulation $ state { turn = (turn state) { money = num + money (turn state) } }
@@ -1038,8 +1059,7 @@ plusCards num player state =
     s2 <- updatePlayerR state player $ \p -> draw p num
     let newhand = hand (playerByName s2 player)
     let newcards = take (length newhand - length (hand (playerByName state player))) newhand
-    info (VisibleToPlayer player) ("Drew " ++ summarizeCards newcards)
-    toSimulation s2
+    addLog (LogDraw (VisibleToPlayer player) player newcards) player s2
 
 plusBuys :: Int -> Action
 plusBuys num _ state = toSimulation $ state { turn = (turn state) { buys = num + buys (turn state) } }
@@ -1158,11 +1178,10 @@ startOfTurn player state
 
 playTurn :: Action
 playTurn name state =
-  info AllPlayers ("Turn " ++ show (turnNo state) ++ " - " ++ name)
-  >> (goToPhase ActionPhase &&& startOfTurn &&& actionPhase &&&
-      goToPhase BuyPhase &&& useCoinTokens &&& playTreasures &&& buyPhase &&&
-      goToPhase CleanupPhase &&& cleanupPhase)
-      name state
+  (addLog (LogTurn name (turnNo state) state) &&& goToPhase ActionPhase &&& startOfTurn &&& actionPhase &&&
+   goToPhase BuyPhase &&& useCoinTokens &&& playTreasures &&& buyPhase &&&
+   goToPhase CleanupPhase &&& cleanupPhase)
+   name state
 
 winner :: GameState -> Result
 winner state
@@ -1184,19 +1203,16 @@ winner state
 
 -- Simulation Stepping
 
-evalSim :: SimulationT a -> StdGen -> a
-evalSim sim gen = St.evalState sim (gen,[])
+seedSim :: StdGen -> SimulationState
+seedSim = SimulationState
 
-runSim :: SimulationT a -> StdGen -> (a,SimulationState)
-runSim sim gen = (res,(resgen,reverse infos))
+evalSim :: SimulationT a -> SimulationState -> a
+evalSim sim st = St.evalState sim st
+
+runSim :: SimulationT a -> SimulationState -> (a,SimulationState)
+runSim sim st = (res,st')
   where
-    (res,(resgen,infos)) = St.runState sim (gen,[])
+    (res,st') = St.runState sim st
 
 sim2Gen :: SimulationState -> StdGen
-sim2Gen = fst
-
-sim2Infos :: SimulationState -> [Info]
-sim2Infos = snd
-
-combineSimStates :: SimulationState -> SimulationState -> SimulationState
-combineSimStates (_,infosA) (genB, infosB) = (genB, infosA ++ infosB)
+sim2Gen = randomGenerator

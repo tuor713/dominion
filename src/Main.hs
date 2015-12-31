@@ -129,8 +129,8 @@ playerUpdateState (External mvar) state = putMVar mvar (State state)
 playerDecision :: Game -> PlayerState -> PlayerId -> GameState -> Decision -> IO (Maybe (Game,GameStep))
 playerDecision (states,simState,stateLog) (Bot bot) _ state decision = do
   sim <- bot state decision
-  let (next,simState') = runSim sim (sim2Gen simState)
-  return $ Just ((states,combineSimStates simState simState', stateLog), next)
+  let (next,simState') = runSim sim simState
+  return $ Just ((states, simState', stateLog), next)
 
 playerDecision _ (External mvar) id state decision =
   putMVar mvar (Decision id state decision) >> return Nothing
@@ -143,8 +143,8 @@ nextStep game@(states,simState,stateLog) (State state)
   | finished state = sequence (map (\p -> playerUpdateState p state) $ Map.elems $ playerStates game)
                      >> return (states, simState, reverse (state:stateLog))
   | otherwise = do
-    let (next,simState') = runSim (playTurn (activePlayerId state) state) (sim2Gen simState)
-    nextStep (states, combineSimStates simState simState', state:stateLog) next
+    let (next,simState') = runSim (playTurn (activePlayerId state) state) simState
+    nextStep (states, simState', state:stateLog) next
 
 nextStep game (Decision p state dec) = do
   next <- playerDecision game ((playerStates game) Map.! p) p state dec
@@ -171,7 +171,7 @@ startGameHandler logset gamesRepository = do
   id <- liftIO $ do
     (nextId,games) <- IORef.readIORef gamesRepository
     gen <- newStdGen
-    let (newGame,simState) = runSim (mkGame gameTyp (map playerDefName players) tableau) gen
+    let (newGame,simState) = runSim (mkGame gameTyp (map playerDefName players) tableau) (seedSim gen)
 
     mvars <- sequence $ map mkMVar players
 
@@ -203,17 +203,16 @@ nextDecision gamesRepository gameId player = do
   (_,games) <- liftIO $ IORef.readIORef gamesRepository
 
   case Map.lookup gameId games of
-    Just (states,simState,stateLog) -> do
+    Just (states,_,stateLog) -> do
       let mvar = externalDecision $ states Map.! player
 
       decision <- liftIO $ readMVar mvar
       case decision of
         (State state) -> if useHtml
                          then writeHtml (htmlFinished state
-                                                      (collectStats (emptyStats (Map.keys (players state))) stateLog)
-                                                      (sim2Infos simState))
+                                                      (collectStats (emptyStats (Map.keys (players state))) stateLog))
                          else writeBS "{'status':'finished'}"
-        (Decision _ state dec) -> writeLBS $ formatHandler (visibleState player state, filter (canSee player) $ sim2Infos simState, dec)
+        (Decision _ state dec) -> writeLBS $ formatHandler (visibleState player state, dec)
     Nothing -> writeHtml $ htmlError "No such game."
 
 
@@ -259,10 +258,10 @@ makeDecisionHandler logset gamesRepository = do
   case decision of
     (State _) -> writeBS "no decision to make, game has ended"
     (Decision _ _ dec) -> do
-      let (next,simState') = runSim (parseDecision dec $ C8.unpack text) (sim2Gen simState)
+      let (next,simState') = runSim (parseDecision dec $ C8.unpack text) simState
 
       liftIO $ do
-        game' <- nextStep (states,combineSimStates simState simState',stateLog) next
+        game' <- nextStep (states,simState',stateLog) next
 
         IORef.modifyIORef' gamesRepository (\(id,games) -> (id,Map.insert gameId game' games))
 
@@ -299,8 +298,8 @@ simulationHandler =
 
     if sampleGame
       then do
-        (state,infos) <- liftIO $ runSampleGame [(p1, ai1), (p2, ai2)] tableau
-        writeHtml $ htmlSampleGame state tableau infos [bot1,bot2]
+        state <- liftIO $ runSampleGame [(p1, ai1), (p2, ai2)] tableau
+        writeHtml $ htmlSampleGame state tableau [bot1,bot2]
 
       else do
         stats <- liftIO $ runSimulations [(p1, ai1), (p2, ai2)]

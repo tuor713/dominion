@@ -50,8 +50,8 @@ initialStateTest = testGroup "Game creation"
     19 @=? Map.size (piles sutColony)
     ]
   where
-    [sut,sutColony] = map (\typ -> evalSim (mkGame typ ["Alice","Bob"] starterTableau) (mkStdGen 0)) [StandardGame, ColonyGame]
-    sutPotion = evalSim (mkGame StandardGame ["Alice","Bob"] (lookupCard "vineyard":tail starterTableau)) (mkStdGen 0)
+    [sut,sutColony] = map (\typ -> evalSim (mkGame typ ["Alice","Bob"] starterTableau) (seedSim zGen)) [StandardGame, ColonyGame]
+    sutPotion = evalSim (mkGame StandardGame ["Alice","Bob"] (lookupCard "vineyard":tail starterTableau)) (seedSim zGen)
 
 gameEndTest = testGroup "Game End"
   [ testCase "Tie at the start of the game" $
@@ -64,9 +64,9 @@ gameEndTest = testGroup "Game End"
     Win "Alice" @=? winner afterEstate
     ]
   where
-    sut = evalSim (mkGame StandardGame ["Alice","Bob"] starterTableau) (mkStdGen 0)
-    next = toState $ evalSim (nextTurn sut) (mkStdGen 0)
-    afterEstate = toState $ evalSim ((gain estate &&& cleanupPhase) "Alice" sut) (mkStdGen 0)
+    sut = evalSim (mkGame StandardGame ["Alice","Bob"] starterTableau) (seedSim zGen)
+    next = toState $ evalSim (nextTurn sut) (seedSim zGen)
+    afterEstate = toState $ evalSim ((gain estate &&& cleanupPhase) "Alice" sut) (seedSim zGen)
 
 
 

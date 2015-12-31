@@ -10,7 +10,7 @@ import qualified Control.Monad as M
 import Prelude hiding (interact)
 import qualified Data.ByteString.Char8 as C8
 import qualified Data.List as L
-import System.Random (StdGen, newStdGen)
+import System.Random (newStdGen)
 import Data.List.Split (wordsBy)
 import qualified Data.Map.Strict as Map
 
@@ -102,30 +102,50 @@ human :: PlayerId -> Bot
 human player _ = interact player
 
 
+--
+
+launchGame :: (PlayerId -> GameState -> Decision -> (Simulation -> IO ()) -> IO ())
+              -> (GameState -> IO ())
+              -> SimulationT GameState
+              -> SimulationState
+              -> IO ()
+launchGame handler finished initial gen = iter gen' (playTurn (activePlayerId state) state)
+  where
+    (state,gen') = runSim initial gen
+    iter :: SimulationState -> Simulation -> IO ()
+    iter gen sim =
+      case step of
+        State state -> finished state
+        Decision pid state decision -> handler pid state decision (iter gen')
+      where
+        (step,gen') = runSim sim gen
+
+
+
 -- Simulation running
 
-runSimulation :: Map.Map PlayerId Bot -> ([GameState],[Info]) -> GameStep -> StdGen -> IO ([GameState],[Info])
-runSimulation bots (accu,infos) (State state) gen
-  | finished state = return (reverse (state:accu), infos)
+runSimulation :: Map.Map PlayerId Bot -> [GameState] -> GameStep -> SimulationState -> IO [GameState]
+runSimulation bots accu (State state) gen
+  | finished state = return $ reverse (state:accu)
   | otherwise =
     do
-      let (next,(gen',infos')) = runSim (playTurn (activePlayerId state) state) gen
-      runSimulation bots ((state:accu), infos ++ infos') next gen'
+      let (next,gen') = runSim (playTurn (activePlayerId state) state) gen
+      runSimulation bots (state:accu) next gen'
 
-runSimulation bots (accu,infos) (Decision player state decision) gen =
+runSimulation bots accu (Decision player state decision) gen =
   do
     ioNext <- (bots Map.! player) (visibleState player state) decision
-    let (next,(gen',infos')) = runSim ioNext gen
-    runSimulation bots (accu,infos ++ infos') next gen'
+    let (next,gen') = runSim ioNext gen
+    runSimulation bots accu next gen'
 
 runSimulations :: [(PlayerId,Bot)] -> [CardDef] -> Stats -> Int -> IO Stats
 runSimulations _ _ stats 0 = return stats
 runSimulations bots tableau stats num =
   do
     gen <- newStdGen
-    let players = evalSim (shuffle (map fst bots)) gen
-    let initial = evalSim (mkGame StandardGame players tableau) gen
-    (states,_) <- runSimulation (Map.fromList bots) ([],[]) (State initial) gen
+    let players = evalSim (shuffle (map fst bots)) (seedSim gen)
+    let initial = evalSim (mkGame StandardGame players tableau) (seedSim gen)
+    states <- runSimulation (Map.fromList bots) [] (State initial) (seedSim gen)
     runSimulations bots tableau (collectStats stats states) (num-1)
 
 runSimulationsR :: [(PlayerId,Bot)] -> Stats -> Int -> IO Stats
@@ -133,22 +153,25 @@ runSimulationsR _ stats 0 = return stats
 runSimulationsR bots stats num =
   do
     gen <- newStdGen
-    let cardlist = evalSim (shuffle kingdomCards) gen
-    let players = evalSim (shuffle (map fst bots)) gen
-    let initial = evalSim (mkGame StandardGame players (take 10 cardlist)) gen
-    (states,_) <- runSimulation (Map.fromList bots) ([],[]) (State initial) gen
+    let cardlist = evalSim (shuffle kingdomCards) (seedSim gen)
+    let players = evalSim (shuffle (map fst bots)) (seedSim gen)
+    let initial = evalSim (mkGame StandardGame players (take 10 cardlist)) (seedSim gen)
+    states <- runSimulation (Map.fromList bots) [] (State initial) (seedSim gen)
     runSimulationsR bots (collectStats stats states) (num-1)
 
-runSampleGame :: [(PlayerId,Bot)] -> [CardDef] -> IO (GameState,[Info])
+runSampleGame :: [(PlayerId,Bot)] -> [CardDef] -> IO GameState
 runSampleGame bots tableau =
   do
     gen <- newStdGen
-    let players = evalSim (shuffle (map fst bots)) gen
-    let initial = evalSim (mkGame StandardGame players tableau) gen
-    (states,infos) <- runSimulation (Map.fromList bots) ([],[]) (State initial) gen
-    return (last states, infos)
+    let players = evalSim (shuffle (map fst bots)) (seedSim gen)
+    let initial = evalSim (mkGame StandardGame players tableau) (seedSim gen)
+    states <- runSimulation (Map.fromList bots) [] (State initial) (seedSim gen)
+    return $ last states
 
 -- Stats
+
+showLogs :: [Log] -> IO ()
+showLogs logs = M.forM_ logs (putStrLn . show)
 
 showStats :: Stats -> String
 showStats stats =
@@ -156,13 +179,11 @@ showStats stats =
   "Wins ratios: " ++ show (statWinRatio stats) ++ "\n" ++
   "Length of games: " ++ show (statTurnsPerGame stats)
 
-showInfos :: [Info] -> IO ()
-showInfos infos = M.mapM_ (\(vis,msg) -> putStrLn ("[" ++ show vis ++ "] " ++ msg)) infos
-
-runGameConsole :: Map.Map PlayerId Bot -> GameStep -> StdGen -> IO ()
-runGameConsole bots (State state) gen
+runGameConsole :: Map.Map PlayerId Bot -> GameStep -> Int -> SimulationState -> IO ()
+runGameConsole bots (State state) num gen
   | finished state =
     do
+      showLogs (drop num logs)
       putStrLn "Game Finished!"
       putStrLn $ "Final score: " ++ (players state
                                       |> Map.elems
@@ -173,26 +194,25 @@ runGameConsole bots (State state) gen
                                       |> concat)
   | otherwise =
     do
-      let (next,(gen',infos)) = runSim (playTurn (activePlayerId state) state) gen
-      showInfos infos
-      runGameConsole bots next gen'
+      showLogs (drop num logs)
+      let (next,gen') = runSim (playTurn (activePlayerId state) state) gen
+      runGameConsole bots next (length logs) gen'
+  where
+    logs = gameLogs state
 
-runGameConsole bots (Decision player state decision) gen =
+
+runGameConsole bots (Decision player state decision) num gen =
   do
+    showLogs (drop num logs)
     sim <- (bots Map.! player) (visibleState player state) decision
-    let (next,(gen',infos)) = runSim sim gen
-    showInfos infos
-    runGameConsole bots next gen'
+    let (next,gen') = runSim sim gen
+    runGameConsole bots next (length logs) gen'
+  where
+    logs = gameLogs state
 
-
-{- Sample invocation (ghci)
-   playOnConsole [("Alice",human "Alice"),("Bob",human "Bob")] ["cellar", "market", "militia", "mine", "moat", "remodel", "smithy", "village", "woodcutter", "workshop"]
-   playOnConsole [("Alice",human "Alice"), ("Bob",betterBigMoney)] ["market", "library", "smithy", "laboratory", "village", "witch", "thief", "bureaucrat", "militia", "chapel"]
-   playOnConsole [("Alice",basicBigMoney), ("Bob",betterBigMoney)] ["market", "library", "smithy"]
--}
 playOnConsole :: [(String,Bot)] -> [String] -> IO ()
 playOnConsole players cards =
   do
     gen <- newStdGen
-    let (initial,(gen',_)) = runSim (mkGame StandardGame (map fst players) (map lookupCard cards)) gen
-    runGameConsole (Map.fromList players) (State initial) gen'
+    let (initial,gen') = runSim (mkGame StandardGame (map fst players) (map lookupCard cards)) (seedSim gen)
+    runGameConsole (Map.fromList players) (State initial) 0 gen'

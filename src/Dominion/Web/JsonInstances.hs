@@ -152,8 +152,7 @@ instance J.ToJSON GameState where
 
 showInfo (vis,info) = "@" ++ show vis ++ " " ++ info
 
-instance J.ToJSON (GameState,[Info],Decision) where
-  toJSON (state,infos,decision) = J.object ["state"    J..= J.toJSON state,
-                                            "gameLog"  J..= J.Array (V.fromList $ map (J.toJSON . showInfo) infos),
+instance J.ToJSON (GameState,Decision) where
+  toJSON (state,decision) = J.object ["state"    J..= J.toJSON state,
                                             "decision" J..= J.toJSON decision
                                             ]

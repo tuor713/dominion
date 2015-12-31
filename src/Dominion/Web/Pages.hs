@@ -218,9 +218,20 @@ logsSidebar infos =
             H.span H.! A.class_ "player" $ toHtml ("@" ++ vis ++ " ")
             H.span $ toHtml msg
 
+logToMessage :: Log -> (String,String)
+logToMessage (LogBuy p card) = ("All", p ++ " buys " ++ show card)
+logToMessage (LogPlay p card) = ("All", p ++ " plays " ++ show card)
+logToMessage (LogPut vis p card source target) = (show vis, p ++ " puts " ++ show card ++ " from " ++ show source ++ " to " ++ show target)
+logToMessage (LogTrash p card) = ("All", p ++ " trashes " ++ show card)
+logToMessage (LogDiscard p cards) = ("All", p ++ " discards " ++ summarizeCards cards)
+logToMessage (LogGain p card source target) = ("All", p ++ " gains " ++ show card ++ " from " ++ show source ++ " to " ++ show target)
+logToMessage (LogReveal p cards) = ("All", p ++ " reveals " ++ summarizeCards cards)
+logToMessage (LogPeek vis p cards loc) = (show vis, p ++ " finds " ++ summarizeCards cards ++ " at " ++ show loc)
+logToMessage (LogDraw vis p cards) = (show vis, p ++ " draws " ++ summarizeCards cards)
+logToMessage (LogTurn p no _) = ("All", "Turn " ++ show no ++ " - " ++ p)
 
-htmlDecision :: PlayerId -> (GameState,[Info],Decision) -> H.Html
-htmlDecision p (state,infos,decision) =
+htmlDecision :: PlayerId -> (GameState, Decision) -> H.Html
+htmlDecision p (state, decision) =
   template "/play" $ do
     column 1 $ ""
     column 10 $ do
@@ -279,6 +290,9 @@ htmlDecision p (state,infos,decision) =
       if length infos > 20
       then ("", "[...]"):map (\(vis,msg) -> (show vis, msg)) (drop (max 0 (length infos - 20)) infos)
       else map (\(vis,msg) -> (show vis, msg)) infos
+  where
+    infos = map logToMessage (visibleGameLogs p state)
+
 
 niceDouble :: Double -> String
 niceDouble d = printf "%.2f" d
@@ -337,8 +351,8 @@ htmlEndStateSummary state = do
       showDeckStats player
 
 
-htmlFinished :: GameState -> Stats -> [Info] -> H.Html
-htmlFinished state stats infos =
+htmlFinished :: GameState -> Stats -> H.Html
+htmlFinished state stats =
   template "/play" $ do
     column 1 $ ""
     column 10 $ do
@@ -351,7 +365,7 @@ htmlFinished state stats infos =
         H.h3 "Average Money Contents per Turn"
         svg H.! A.id "avgMoney" H.! A.class_ "chart" $ ""
 
-    logsSidebar (map (\(vis,msg) -> (show vis, msg)) infos)
+    logsSidebar (map logToMessage (gameLogs state))
 
     let ps = Map.keys (players state) in
       H.script $ fromString
@@ -362,6 +376,7 @@ htmlFinished state stats infos =
                   "linePlot(\"#avgMoney\",600,400," ++
                   L.intercalate "," (map (\p -> "\"" ++ p ++ "\"," ++ dataToJavaScriptArray ((statAvgMoneyPerTurn stats) Map.! p)) ps) ++
                   ");\n")
+
 
 htmlSetupGame :: H.Html
 htmlSetupGame =
@@ -487,8 +502,8 @@ htmlSimulationForm tableau numGames players =
         H.input H.! A.type_ "submit" H.! A.class_ "ui button" H.! A.name "submit" H.! A.value "Sample Game"
 
 
-htmlSampleGame :: GameState -> [CardDef] -> [Info] -> [PlayerId] -> H.Html
-htmlSampleGame state tableau infos bots =
+htmlSampleGame :: GameState -> [CardDef] -> [PlayerId] -> H.Html
+htmlSampleGame state tableau bots =
   template "/simulation" $ do
     column 1 $ ""
     column 14 $ do
@@ -499,9 +514,9 @@ htmlSampleGame state tableau infos bots =
       H.section $ do
         H.h3 "Log"
         H.div $ do
-          forM_  infos $ \(vis,msg) ->
+          forM_  (map logToMessage (gameLogs state)) $ \(vis,msg) ->
             H.div H.! A.class_ (fromString (if L.isPrefixOf "Turn" msg then "log turn" else "log")) $ do
-              H.span H.! A.class_ "player" $ toHtml ("@" ++ show vis ++ " ")
+              H.span H.! A.class_ "player" $ toHtml ("@" ++ vis ++ " ")
               H.span $ toHtml msg
 
 htmlSimulation :: [CardDef] -> Stats -> [PlayerId] -> H.Html

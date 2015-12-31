@@ -291,8 +291,7 @@ spy player state = (plusCards 1 &&& plusActions 1 &&& spyAction &&& playAttack s
         maybeS2 <- ensureCanDraw 1 state attackee
         maybe (toSimulation state) (doSpy attackee) maybeS2
     doSpy attackee state =
-      info AllPlayers (attackee ++ " reveals " ++ cardName (typ top))
-      >> decision (ChooseToUse (EffectDiscard top (TopOfDeck player)) cont) player state
+      (addLog (LogReveal attackee [top]) &&& decision (ChooseToUse (EffectDiscard top (TopOfDeck player)) cont)) player state
       where
         cont b = if b then discard top (TopOfDeck attackee) attackee state else toSimulation state
         top = head $ deck $ playerByName state attackee
@@ -1164,8 +1163,9 @@ jackOfAllTrades = gain silver &&& spyTop &&& drawTo5 &&& optTrash
   where
     spyTop player state = ensureCanDraw 1 state player >>= \maybeS2 -> maybe (toSimulation state) (chooseKeepDiscard player) maybeS2
     chooseKeepDiscard player state =
-      info (VisibleToPlayer player) ("Top of deck is " ++ cardName (typ top))
-      >> decision (ChooseToUse (EffectDiscard top (TopOfDeck player)) cont) player state
+      (addLog (LogPeek (VisibleToPlayer player) player [top] (TopOfDeck player))
+       &&& decision (ChooseToUse (EffectDiscard top (TopOfDeck player)) cont))
+       player state
       where
         top = head $ deck $ playerByName state player
         cont b = if b then discard top (TopOfDeck player) player state else toSimulation state
@@ -1369,8 +1369,9 @@ survivors :: Action
 survivors p s
   | null d = toSimulation s
   | length d == 1 = choose (ChooseToUse (EffectDiscard (head d) (TopOfDeck p))) (\b -> if b then discard (head d) (TopOfDeck p) else pass) p s
-  | otherwise = info (VisibleToPlayer p) ("Two cards on top: " ++ show c1 ++ ", " ++ show c2) >>
-                chooseEffects 1 [EffectDiscard unknown (TopOfDeck p), EffectPut unknown (TopOfDeck p) (TopOfDeck p)] enact p s
+  | otherwise = (addLog (LogPeek (VisibleToPlayer p) p [c1,c2] (TopOfDeck p))
+                 &&& chooseEffects 1 [EffectDiscard unknown (TopOfDeck p), EffectPut unknown (TopOfDeck p) (TopOfDeck p)] enact)
+                  p s
   where
     d = deck $ playerByName s p
     [c1,c2] = d
