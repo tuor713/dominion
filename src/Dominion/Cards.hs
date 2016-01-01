@@ -13,7 +13,8 @@ kingdomCards = concat [baseCards, intrigueCards, seasideCards, alchemyCards,
                        darkAgesCards, guildsCards, adventuresCards, promoCards]
 
 cardData :: Map.Map String CardDef
-cardData = Map.fromList $ map (\c -> (map toLower $ cardName c, c)) (concat [basicCards, kingdomCards, prizes, shelters, ruins])
+cardData = Map.fromList $ map (\c -> (map toLower $ cardName c, c))
+            (concat [basicCards, kingdomCards, prizes, shelters, ruins, darkAgesExtra])
 
 maybeCard :: String -> Maybe CardDef
 maybeCard name = Map.lookup (map toLower name) cardData
@@ -46,6 +47,8 @@ cTrustySteed     = cardData Map.! "trusty steed"
 cTournament      = cardData Map.! "tournament"
 cTreasureMap     = cardData Map.! "treasure map"
 cDuchess         = cardData Map.! "duchess"
+cMystic          = cardData Map.! "mystic"
+cProcession      = cardData Map.! "procession"
 
 -- Generic action elements (potentially move to model)
 
@@ -1277,7 +1280,7 @@ darkAgesCards = map ($ DarkAges)
    withTrigger (action 814 "Fortress" 4 (plusCards 1 &&& plusActions 2)) fortressTrigger,
    action 815 "Ironmonger" 4 (plusCards 1 &&& plusActions 1 &&& reshuffleIfNeeded &&& ironmonger),
    notImplemented "Marauder", -- 816 Marauder
-   notImplemented "Procession", -- 817 Procession
+   action 817 "Procession" 4 procession,
    notImplemented "Rats", -- 818 Rats
    notImplemented "Scavenger", -- 819 Scavenger
    notImplemented "Wandering Minstrel", -- 820 Wandering Minstrel
@@ -1290,12 +1293,16 @@ darkAgesCards = map ($ DarkAges)
    notImplemented "Graverobber", -- 827 Graverobber
    action 828 "Junk Dealer" 5 (plusCards 1 &&& plusActions 1 &&& plusMoney 1 &&& trashNCards 1 1),
    notImplemented "Knights", -- 829 Knights
-   notImplemented "Mystic", -- 830 Mystic
+   -- TODO refactor wishing well into a better action
+   action 830 "Mystic" 5 (plusActions 1 &&& plusMoney 2 &&& reshuffleIfNeeded &&& nameACard (SpecialEffect cMystic) wishingWell),
    notImplemented "Pillage", -- 831 Pillage
    notImplemented "Rebuild", -- 832 Rebuild
    notImplemented "Rogue", -- 833 Rogue
    action 834 "Altar" 6 (trashForGain (\_ -> gainUpto 5)),
-   notImplemented "Hunting Grounds" -- 835 Hunting Grounds
+   withTrigger (action 835 "Hunting Grounds" 6 (plusCards 4))
+    (onTrashSelf (\p s -> chooseEffects 1
+                            [EffectGain duchy (Discard p), MultiEffect (replicate 3 (EffectGain estate (Discard p)))]
+                            enactEffects p s))
   ]
 
 
@@ -1307,6 +1314,17 @@ ruins = map ($ DarkAges)
    carddef 844 "Survivors" (simpleCost 0) [Action, Ruins] noPoints (reshuffleIfNeededN 2 &&& survivors) noTriggers
   ]
 
+darkAgesExtra = map ($ DarkAges)
+  [carddefA 860 "Madman" (simpleCost 0) [Action] noPoints madman noTriggers,
+   carddefA 861 "Spoils" (simpleCost 0) [Treasure] noPoints spoils noTriggers]
+
+madman :: Maybe Card -> Action
+madman Nothing = plusActions 2
+madman (Just card) = plusActions 2 &&& put card InPlay NonSupply &&& (\p s -> plusCards (length (hand (playerByName s p))) p s)
+
+spoils :: Maybe Card -> Action
+spoils Nothing = plusMoney 3
+spoils (Just card) = plusMoney 3 &&& put card InPlay NonSupply
 
 armoryGain :: Action
 armoryGain player state = decision
@@ -1357,6 +1375,21 @@ poorHouse = plusMoney 4 &&& \p s ->
   plusMoney (- (min (money (turn s))
                     (length (filter isTreasure (hand (playerByName s p))))))
     p s
+
+procession :: Action
+procession p s
+  | null actions = toSimulation s
+  | otherwise = optDecision
+                  (ChooseCard (SpecialEffect cProcession)
+                              actions
+                              (\card -> (play card
+                                         &&& playEffect (typ card) Nothing
+                                         &&& trash card InPlay
+                                         &&& gainUpgrade 1 card)
+                                          p s))
+                  p s
+  where
+    actions = filter isAction $ hand $ playerByName s p
 
 squireTrigger :: Action
 squireTrigger p s

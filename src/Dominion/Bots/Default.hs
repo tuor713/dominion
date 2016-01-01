@@ -89,7 +89,7 @@ defaultBot _ ownId state (ChooseCards (EffectTrash _ _) cards (lo,hi) f) _ = f c
   where
     money = moneyInDeck ownId state
     mHand = moneySum cards
-    wantsToTrash = filter (\c -> typ c == curse || (typ c == copper && (money - mHand <= 3)) || typ c == estate) cards
+    wantsToTrash = filter (\c -> typ c == curse || (typ c == copper && (money - mHand >= 3)) || typ c == estate) cards
     trashOrder = L.sortOn (cardScore . typ) cards
     choices = take (min (max lo (length wantsToTrash)) hi) trashOrder
 

@@ -557,17 +557,9 @@ mkGame typ names kingdomCards =
     colonyCards = if typ == ColonyGame || typ == ColonySheltersGame then [platinum, colony] else []
     potionCards = if any ((0<) . potionCost . cost nullState) kingdomCards then [potion] else []
     playerNo = length names
-    protoState players = GameState { players = Map.fromList $ zip names players,
+    protoState players = nullState { players = Map.fromList $ zip names players,
                                      turnOrder = names,
-                                     piles = pileMap,
-                                     nonSupplyPiles = Map.empty,
-                                     trashPile = [],
-                                     turn = newTurn,
-                                     ply = 1,
-                                     finished = False,
-                                     gameLog = []
-                                     }
-
+                                     piles = pileMap }
 
 -- Combinators
 
@@ -1007,7 +999,7 @@ gainTo card target player state
   | otherwise = toSimulation state
   where
     top = topOfSupply card state
-    transferT _ state = toSimulation $ transfer (topOfSupply card state) Supply target state
+    transferT player state = move (topOfSupply card state) Supply target player state
 
 gain :: CardDef -> Action
 gain card player = gainTo card (Discard player) player
