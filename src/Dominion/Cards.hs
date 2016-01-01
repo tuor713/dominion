@@ -1282,7 +1282,8 @@ darkAgesCards = map ($ DarkAges)
      stdVictorySupply,
    withTrigger (action 814 "Fortress" 4 (plusCards 1 &&& plusActions 2)) fortressTrigger,
    action 815 "Ironmonger" 4 (plusCards 1 &&& plusActions 1 &&& reshuffleIfNeeded &&& ironmonger),
-   notImplemented "Marauder", -- 816 Marauder
+   carddef 816 "Marauder" (simpleCost 4) [Action, Attack, Looter] noPoints (\p s -> (gainSpecial cSpoils (Discard p) &&& playAttack (gain ruinsPseudoDef)) p s)
+    (onStartOfGame (addNonSupplyPile cSpoils)),
    action 817 "Procession" 4 procession,
    notImplemented "Rats", -- 818 Rats
    notImplemented "Scavenger", -- 819 Scavenger
@@ -1307,15 +1308,6 @@ darkAgesCards = map ($ DarkAges)
     (onTrashSelf (\p s -> chooseEffects 1
                             [EffectGain duchy (Discard p), MultiEffect (replicate 3 (EffectGain estate (Discard p)))]
                             enactEffects p s))
-  ]
-
-
-ruins = map ($ DarkAges)
-  [carddef 840 "Abandoned Mine" (simpleCost 0) [Action, Ruins] noPoints (plusMoney 1) noTriggers,
-   carddef 841 "Ruined Library" (simpleCost 0) [Action, Ruins] noPoints (plusCards 1) noTriggers,
-   carddef 842 "Ruined Market" (simpleCost 0) [Action, Ruins] noPoints (plusBuys 1) noTriggers,
-   carddef 843 "Ruined Village" (simpleCost 0) [Action, Ruins] noPoints (plusActions 1) noTriggers,
-   carddef 844 "Survivors" (simpleCost 0) [Action, Ruins] noPoints (reshuffleIfNeededN 2 &&& survivors) noTriggers
   ]
 
 darkAgesExtra = map ($ DarkAges)
@@ -1417,22 +1409,6 @@ squireTrigger p s
   | otherwise = chooseOne (EffectGain unknownDef (Discard p)) attacks (\c -> gain (typ c)) p s
   where
     attacks = filter isAttack $ map (head . snd) $ Map.toList $ Map.filter (not . null) $ piles s
-
-survivors :: Action
-survivors p s
-  | null d = toSimulation s
-  | length d == 1 = choose (ChooseToUse (EffectDiscard (head d) (TopOfDeck p))) (\b -> if b then discard (head d) (TopOfDeck p) else pass) p s
-  | otherwise = (addLog (LogPeek (VisibleToPlayer p) p [c1,c2] (TopOfDeck p))
-                 &&& chooseEffects 1 [EffectDiscard unknown (TopOfDeck p), EffectPut unknown (TopOfDeck p) (TopOfDeck p)] enact)
-                  p s
-  where
-    d = deck $ playerByName s p
-    [c1,c2] = d
-    enact [(EffectDiscard _ _)] = discardAll [c1,c2] (TopOfDeck p)
-    enact _ = chooseMany (EffectPut unknown (TopOfDeck p) (TopOfDeck p))
-                         [c1,c2]
-                         (2,2)
-                         (\cs -> putAll (reverse cs) (TopOfDeck p) (TopOfDeck p))
 
 vagrant :: Action
 vagrant p s

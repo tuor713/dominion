@@ -255,6 +255,35 @@ hovelTrigger _ _ _ s = toSimulation s
 
 shelters = [cHovel, cNecropolis, cOvergrownEstate]
 
+ruinsPseudoDef = carddef (-1) "Ruins" (simpleCost 0) [Action, Ruins] noPoints pass noTriggers DarkAges
+ruinsPseudoCard = Card (-1) ruinsPseudoDef
+
+ruins = map ($ DarkAges)
+  [carddef 840 "Abandoned Mine" (simpleCost 0) [Action, Ruins] noPoints (plusMoney 1) noTriggers,
+   carddef 841 "Ruined Library" (simpleCost 0) [Action, Ruins] noPoints (plusCards 1) noTriggers,
+   carddef 842 "Ruined Market" (simpleCost 0) [Action, Ruins] noPoints (plusBuys 1) noTriggers,
+   carddef 843 "Ruined Village" (simpleCost 0) [Action, Ruins] noPoints (plusActions 1) noTriggers,
+   carddef 844 "Survivors" (simpleCost 0) [Action, Ruins] noPoints (reshuffleIfNeededN 2 &&& survivors) noTriggers
+  ]
+
+survivors :: Action
+survivors p s
+  | null d = toSimulation s
+  | length d == 1 = choose (ChooseToUse (EffectDiscard (head d) (TopOfDeck p))) (\b -> if b then discard (head d) (TopOfDeck p) else pass) p s
+  | otherwise = (addLog (LogPeek (VisibleToPlayer p) p [c1,c2] (TopOfDeck p))
+                 &&& chooseEffects 1 [EffectDiscard unknown (TopOfDeck p), EffectPut unknown (TopOfDeck p) (TopOfDeck p)] enact)
+                  p s
+  where
+    d = deck $ playerByName s p
+    [c1,c2] = d
+    enact [(EffectDiscard _ _)] = discardAll [c1,c2] (TopOfDeck p)
+    enact _ = chooseMany (EffectPut unknown (TopOfDeck p) (TopOfDeck p))
+                         [c1,c2]
+                         (2,2)
+                         (\cs -> putAll (reverse cs) (TopOfDeck p) (TopOfDeck p))
+
+
+
 unknownDef = CardDef (-1) "XXX" Base (const (simpleCost 0)) [Action] (\_ -> 0) (\_ -> pass) (const 0) noTriggers (const False)
 unknown = Card (-1) unknownDef
 
@@ -542,7 +571,7 @@ addNonSupplyPile card _ state =
 
 mkGame :: GameType -> [String] -> [CardDef] -> SimulationT GameState
 mkGame typ names kingdomCards =
-  (sequence $ zipWith mkPlayer decks names) >>= \players ->
+  (sequence $ zipWith mkPlayer decks names) >>= (\players ->
     fmap (Maybe.fromJust . toGameState) $
       handleAllTriggers
         StartOfGameTrigger
@@ -550,7 +579,14 @@ mkGame typ names kingdomCards =
         NullEffect
         pass
         (head names)
-        (protoState players)
+        (protoState players))
+  >>= \state ->
+    if useRuins
+      then do
+            shuffledRuins <- shuffle allRuins
+            return (state { piles = Map.insert ruinsPseudoDef (take (10 * (length names - 1)) shuffledRuins) (piles state) })
+      else return state
+
   where
     playerNo = length names
 
@@ -561,13 +597,14 @@ mkGame typ names kingdomCards =
     potionCards = if any ((0<) . potionCost . cost nullState) kingdomCards then [potion] else []
 
     useShelters = typ == SheltersGame || typ == ColonySheltersGame
+    useRuins = any (`hasType` Looter) kingdomCards
+    allRuins = concatMap (`mkPile` 10) ruins
 
     deckTemplate = if useShelters then sheltersDeck else initialDeck
     decks = map (mkPlayerPile deckTemplate) [0..(playerNo-1)]
 
-    protoState players = nullState { players = Map.fromList $ zip names players,
-                                     turnOrder = names,
-                                     piles = pileMap }
+    protoState players = nullState { players = Map.fromList $ zip names players, turnOrder = names, piles = pileMap }
+
 
 -- Combinators
 
@@ -655,7 +692,7 @@ moveTo c (BottomOfDeck player) state = updatePlayer state player (\p -> p { deck
 moveTo c InPlay state                = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = c : inPlay p })
 moveTo c InPlayDuration state        = updatePlayer state (name (activePlayer state)) (\p -> p { inPlayDuration = (Left c) : inPlayDuration p })
 moveTo c Trash state                 = state { trashPile = c : trashPile state }
-moveTo c Supply state                = state { piles = Map.adjust (c:) (typ c) (piles state) }
+moveTo c Supply state                = state { piles = Map.adjust (c:) (if isRuins c then ruinsPseudoDef else (typ c)) (piles state) }
 moveTo c NonSupply state             = state { nonSupplyPiles = Map.adjust (c:) (typ c) (nonSupplyPiles state) }
 moveTo c (Mat player mat) state      = updatePlayer state player (\p -> p { mats = Map.insertWith (++) mat [c] (mats p) })
 -- moving cards to aside puts them nowhere
@@ -669,7 +706,7 @@ moveFrom c (BottomOfDeck player) state = updatePlayer state player (\p -> p { de
 moveFrom c InPlay state                = updatePlayer state (name (activePlayer state)) (\p -> p { inPlay = L.delete c $ inPlay p })
 moveFrom c InPlayDuration state        = updatePlayer state (name (activePlayer state)) (\p -> p { inPlayDuration = L.delete (Left c) $ inPlayDuration p })
 moveFrom c Trash state                 = state { trashPile = L.delete c $ trashPile state }
-moveFrom c Supply state                = state { piles = Map.adjust tail (typ c) (piles state) }
+moveFrom c Supply state                = state { piles = Map.adjust tail (if isRuins c then ruinsPseudoDef else (typ c)) (piles state) }
 moveFrom c NonSupply state             = state { nonSupplyPiles = Map.adjust tail (typ c) (nonSupplyPiles state) }
 moveFrom c (Mat player mat) state      = updatePlayer state player (\p -> p { mats = Map.adjust (L.delete c) mat (mats p) })
 -- moving cards from aside does nothing
