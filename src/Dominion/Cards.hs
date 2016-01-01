@@ -49,6 +49,8 @@ cTreasureMap     = cardData Map.! "treasure map"
 cDuchess         = cardData Map.! "duchess"
 cMystic          = cardData Map.! "mystic"
 cProcession      = cardData Map.! "procession"
+cSpoils          = cardData Map.! "spoils"
+cCounterfeit     = cardData Map.! "counterfeit"
 
 -- Generic action elements (potentially move to model)
 
@@ -961,7 +963,7 @@ cornucopiaCards = map ($ Cornucopia)
    -- TODO should probably be renamed and abstracted
    action 606 "Remake" 4 (trashForGain (gainUpgrade 1) &&& trashForGain (gainUpgrade 1)),
    withTrigger (action 607 "Tournament" 4 (plusActions 1 &&& tournament))
-    (onStartOfGame (\_ state -> toSimulation $ state { nonSupplyPiles = Map.fromList (map (\p -> (p, [Card (10000 * (cardTypeId p)) p])) prizes) })),
+    (onStartOfGame (seqActions addNonSupplyPile prizes)),
    notImplemented "Young Witch", -- 608 young witch
    action 609 "Harvest" 5 harvest,
    carddefA 610 "Horn of Plenty" (simpleCost 5) [Treasure] noPoints hornOfPlenty noTriggers,
@@ -971,7 +973,7 @@ cornucopiaCards = map ($ Cornucopia)
     stdVictorySupply
   ]
 
-prizes = map ($ Cornucopia)
+prizes = map (($ Cornucopia) . (\gen -> withInitialSupply gen (const 1)))
   [carddef 620 "Bag of Gold" (simpleCost 0) [Action, Prize] noPoints (\p s -> (plusActions 1 &&& gainTo gold (TopOfDeck p)) p s) noTriggers,
    carddef 621 "Diadem" (simpleCost 0) [Treasure, Prize] noPoints (plusMoney 2 &&& (\p s -> plusMoney (actions (turn s)) p s)) noTriggers,
    carddef 622 "Followers" (simpleCost 0) [Action, Attack, Prize] noPoints
@@ -1058,7 +1060,8 @@ tournament playerId s = allDecisions Map.empty (playerNames s)
   where
     final :: Map.Map PlayerId Bool -> Simulation
     final choices =
-      ((if Map.findWithDefault False playerId choices then discard (head (provinces playerId)) (Hand playerId) &&& gainPrize else pass)
+      (seqActions (\p _ s -> reveal [(head (provinces p))] p s) (Map.keys $ Map.filter id choices)
+       &&& (if Map.findWithDefault False playerId choices then discard (head (provinces playerId)) (Hand playerId) &&& gainPrize else pass)
        &&& (if Map.size (Map.filterWithKey (\k v -> v && k /= playerId) choices) > 0 then pass else plusCards 1 &&& plusMoney 1))
       playerId s
 
@@ -1267,7 +1270,7 @@ darkAgesCards = map ($ DarkAges)
    action 805 "Forager" 3 (plusActions 1 &&& plusBuys 1 &&& trashForGain (\_ p s -> plusMoney (length $ L.nub $ map typ $ filter isTreasure $ trashPile s) p s)),
    notImplemented "Hermit", -- 806 Hermit
    notImplemented "Market Square", -- 807 Market Square
-   notImplemented "Sage", -- 808 Sage
+   action 808 "Sage" 3 (plusActions 1 &&& sage),
    notImplemented "Storeroom", -- 809 Storeroom
    notImplemented "Urchin", -- 810 Urchin
    action 811 "Armory" 4 armoryGain,
@@ -1285,10 +1288,11 @@ darkAgesCards = map ($ DarkAges)
    notImplemented "Scavenger", -- 819 Scavenger
    notImplemented "Wandering Minstrel", -- 820 Wandering Minstrel
    notImplemented "Band of Misfits", -- 821 Band of Misfits
-   notImplemented "Bandit Camp", -- 822 Bandit Camp
+   withTrigger (action 822 "Bandit Camp" 5 (plusCards 1 &&& plusActions 2 &&& (\p -> gainSpecial cSpoils (Discard p) p)))
+    (onStartOfGame (addNonSupplyPile cSpoils)),
    notImplemented "Catacombs", -- 823 Catacombs
    action 824 "Count" 5 count,
-   notImplemented "Counterfeit", -- 825 Counterfeit
+   carddef 825 "Counterfeit" (simpleCost 5) [Treasure] noPoints (plusMoney 1 &&& plusBuys 1 &&& counterfeit) noTriggers,
    notImplemented "Cultist", -- 826 Cultist
    notImplemented "Graverobber", -- 827 Graverobber
    action 828 "Junk Dealer" 5 (plusCards 1 &&& plusActions 1 &&& plusMoney 1 &&& trashNCards 1 1),
@@ -1316,7 +1320,7 @@ ruins = map ($ DarkAges)
 
 darkAgesExtra = map ($ DarkAges)
   [carddefA 860 "Madman" (simpleCost 0) [Action] noPoints madman noTriggers,
-   carddefA 861 "Spoils" (simpleCost 0) [Treasure] noPoints spoils noTriggers]
+   withInitialSupply (carddefA 861 "Spoils" (simpleCost 0) [Treasure] noPoints spoils noTriggers) (const 15)]
 
 madman :: Maybe Card -> Action
 madman Nothing = plusActions 2
@@ -1343,11 +1347,22 @@ beggarTrigger (FromCard card _) p s = choose (ChooseToUse (EffectDiscard card (H
 beggarTrigger _ p s = pass p s
 
 count :: Action
-count player state=
+count player state =
   (chooseEffects 1 [EffectDiscardNo 2, EffectPut unknown (Hand player) (TopOfDeck player), EffectGain copper (Discard player)] enactEffects
    &&& (\p s -> chooseEffects 1 [EffectPlusMoney 3, EffectTrashNo (length (hand (playerByName s p))), EffectGain duchy (Discard player)]
                   enactEffects p s))
     player state
+
+counterfeit :: Action
+counterfeit p s
+  | null ts = toSimulation s
+  | otherwise = choose (ChooseToUse (SpecialEffect cCounterfeit))
+                       (\b -> if b then cont else pass)
+                       p s
+  where
+    ts = filter isTreasure $ hand $ playerByName s p
+    cont = chooseOne (EffectPlayTreasure unknown) ts (\card -> play card &&& playEffect (typ card) Nothing &&& trash card InPlay)
+
 
 fortressTrigger :: TriggerHandler
 fortressTrigger TrashTrigger (EffectTrash c1 _) (FromCard c2 _) cont player state =
@@ -1390,6 +1405,11 @@ procession p s
                   p s
   where
     actions = filter isAction $ hand $ playerByName s p
+
+sage :: Action
+sage p s = revealUntilSelector (\card -> moneyCost (cost s (typ card)) >= 3)
+                               (\match other -> putAll match (TopOfDeck p) (Hand p) &&& discardAll other (TopOfDeck p))
+                               p s
 
 squireTrigger :: Action
 squireTrigger p s

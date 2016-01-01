@@ -252,6 +252,11 @@ htmlDecision p (state, decision) =
         H.p $ do
           H.h4 "Tableau:"
           showCards $ Map.map length (piles state)
+
+          when (not (Map.null (nonSupplyPiles state))) $ do
+            H.h4 "Other cards"
+            showCards $ Map.map length (nonSupplyPiles state)
+
           when (not (null (trashPile state))) $ do
             H.h4 "Trash"
             showCards $ Map.fromListWith (+) $ map ((,1) . typ) (trashPile state)
@@ -288,8 +293,8 @@ htmlDecision p (state, decision) =
 
     logsSidebar $
       if length infos > 20
-      then ("", "[...]"):map (\(vis,msg) -> (show vis, msg)) (drop (max 0 (length infos - 20)) infos)
-      else map (\(vis,msg) -> (show vis, msg)) infos
+      then ("", "[...]"):(drop (max 0 (length infos - 20)) infos)
+      else infos
   where
     infos = map logToMessage (visibleGameLogs p state)
 
@@ -332,6 +337,11 @@ htmlEndStateSummary state = do
     H.div $ do
       H.h4 "Tableau"
       showCards $ Map.map length (piles state)
+
+      when (not (Map.null (nonSupplyPiles state))) $ do
+        H.h4 "Other cards"
+        showCards $ Map.map length (nonSupplyPiles state)
+
       when (not (null (trashPile state))) $ do
         H.h4 "Trash"
         showCards $ Map.fromListWith (+) $ map ((,1) . typ) (trashPile state)

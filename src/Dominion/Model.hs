@@ -502,15 +502,6 @@ mkPlayer deck name = draw Player { name = name, hand = [],
                                    tokens = Map.empty }
                           5
 
-initialDeck :: [CardDef]
-initialDeck = replicate 7 copper ++ replicate 3 estate
-
-sheltersDeck :: [CardDef]
-sheltersDeck = replicate 7 copper ++ [cHovel, cOvergrownEstate, cNecropolis]
-
-labelCards :: [CardDef] -> Int -> ([Card],Int)
-labelCards cards initialId = (zipWith Card [initialId..(initialId + length cards)] cards, initialId + length cards)
-
 nullPlayer :: Player
 nullPlayer = Player { name = "Alice", hand = [], discardPile = [], deck = [], inPlay = [],
                       mats = Map.empty, inPlayDuration = [], tokens = Map.empty }
@@ -531,6 +522,24 @@ toGameState :: GameStep -> Maybe GameState
 toGameState (State state) = Just state
 toGameState _ = Nothing
 
+initialDeck :: [CardDef]
+initialDeck = replicate 7 copper ++ replicate 3 estate
+
+sheltersDeck :: [CardDef]
+sheltersDeck = replicate 7 copper ++ [cHovel, cOvergrownEstate, cNecropolis]
+
+mkPile :: CardDef -> Int -> [Card]
+mkPile card num = map ((`Card` card) . (+ (100 * cardTypeId card))) [0..(num-1)]
+
+mkPlayerPile :: [CardDef] -> Int -> [Card]
+mkPlayerPile cards playerNo = zipWith (\c seq -> Card (seq + (100*(20+playerNo))) c) cards [0..]
+
+addNonSupplyPile :: CardDef -> Action
+addNonSupplyPile card _ state =
+  toSimulation $ state { nonSupplyPiles = Map.insert card
+                                                     (mkPile card (initialSupply card (length (turnOrder state))))
+                                                     (nonSupplyPiles state) }
+
 mkGame :: GameType -> [String] -> [CardDef] -> SimulationT GameState
 mkGame typ names kingdomCards =
   (sequence $ zipWith mkPlayer decks names) >>= \players ->
@@ -543,20 +552,19 @@ mkGame typ names kingdomCards =
         (head names)
         (protoState players)
   where
-    (pileMap,outId) = foldr
-                        (\c (m,id) -> let (cs,id2) = labelCards (replicate (initialSupply c playerNo) c) id
-                                      in (Map.insert c cs m, id2))
-                        (Map.empty,0)
-                        (standardCards ++ kingdomCards)
-    (decks,_) = foldr (\d (ds,id) -> let (d',id') = labelCards d id
-                                     in (d':ds,id'))
-                  ([],outId)
-                  (replicate playerNo (if useShelters then sheltersDeck else initialDeck))
-    useShelters = typ == SheltersGame || typ == ColonySheltersGame
+    playerNo = length names
+
+    pileMap = Map.fromList $ map (\c -> (c, mkPile c (initialSupply c playerNo))) $ standardCards ++ kingdomCards
+
     standardCards = colonyCards ++ potionCards ++ [estate,duchy,province,copper,silver,gold,curse]
     colonyCards = if typ == ColonyGame || typ == ColonySheltersGame then [platinum, colony] else []
     potionCards = if any ((0<) . potionCost . cost nullState) kingdomCards then [potion] else []
-    playerNo = length names
+
+    useShelters = typ == SheltersGame || typ == ColonySheltersGame
+
+    deckTemplate = if useShelters then sheltersDeck else initialDeck
+    decks = map (mkPlayerPile deckTemplate) [0..(playerNo-1)]
+
     protoState players = nullState { players = Map.fromList $ zip names players,
                                      turnOrder = names,
                                      piles = pileMap }
