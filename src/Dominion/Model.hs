@@ -149,6 +149,10 @@ onTrashSelf :: Action -> TriggerHandler
 onTrashSelf action TrashTrigger (EffectTrash c1 _) (FromCard c2 _) cont = if c1 == c2 then action &&& cont else cont
 onTrashSelf _ _ _ _ cont = cont
 
+onTrash :: Action -> TriggerHandler
+onTrash action TrashTrigger _ _ cont = cont &&& action
+onTrash _ _ _ _ cont = cont
+
 onStartOfTurn :: Action -> TriggerHandler
 onStartOfTurn action StartOfTurnTrigger _ _ cont = action &&& cont
 onStartOfTurn _ _ _ _ cont = cont
@@ -175,6 +179,12 @@ noTriggers :: TriggerHandler
 noTriggers = nullHandler
 
 -- TODO refactor these to use carddef* instead
+carddef :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> Action -> TriggerHandler -> Edition -> CardDef
+carddef id name cost types points effect triggers edition = CardDef id name edition (const cost) types points (\_ -> effect) (const 10) triggers (const True)
+
+carddefA :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> (Maybe Card -> Action) -> TriggerHandler -> Edition -> CardDef
+carddefA id name cost types points effect triggers edition = CardDef id name edition (const cost) types points effect (const 10) triggers (const True)
+
 treasure :: Int -> String -> Int -> Int -> Edition -> CardDef
 treasure id name cost money edition = CardDef id name edition (const (simpleCost cost)) [Treasure] noPoints (\_ -> plusMoney money) (const 10) noTriggers (const True)
 
@@ -192,18 +202,11 @@ durationA :: Int -> String -> Int -> (Maybe Card -> Action) -> Action -> Edition
 durationA id name cost effect startOfTurn edition =
   CardDef id name edition (const (simpleCost cost)) [Action, Duration] noPoints  effect (const 10) (onStartOfTurn startOfTurn) (const True)
 
-
 attack :: Int -> String -> Int -> Action -> Edition -> CardDef
 attack id name cost effect edition = CardDef id name edition (const (simpleCost cost)) [Action, Attack] noPoints (\_ -> effect) (const 10) noTriggers (const True)
 
 victory :: Int -> String -> Int -> Int -> Edition -> CardDef
 victory id name cost points edition = CardDef id name edition (const (simpleCost cost)) [Victory] (const points) (\_ -> pass) (const 10) noTriggers (const True)
-
-carddef :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> Action -> TriggerHandler -> Edition -> CardDef
-carddef id name cost types points effect triggers edition = CardDef id name edition (const cost) types points (\_ -> effect) (const 10) triggers (const True)
-
-carddefA :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> (Maybe Card -> Action) -> TriggerHandler -> Edition -> CardDef
-carddefA id name cost types points effect triggers edition = CardDef id name edition (const cost) types points effect (const 10) triggers (const True)
 
 notImplemented name edition = CardDef (-1) name edition (const (simpleCost 0)) [] (\_ -> 0) (\_ -> pass) (const 0) noTriggers (const False)
 
@@ -712,6 +715,9 @@ moveFrom c (Mat player mat) state      = updatePlayer state player (\p -> p { ma
 -- moving cards from aside does nothing
 moveFrom _ Aside state                 = state
 
+transfer :: Card -> Location -> Location -> GameState -> GameState
+transfer c from to state = moveTo c to (moveFrom c from state)
+
 getCards :: Location -> GameState -> [Card]
 getCards (Hand player) state = hand $ playerByName state player
 getCards (Discard player) state = discardPile $ playerByName state player
@@ -728,9 +734,6 @@ getCards (Mat player mat) state = Map.findWithDefault [] mat (mats $ playerByNam
 addDurationEffect :: CardDef -> GameState -> GameState
 addDurationEffect def state =
   updatePlayer state (name (activePlayer state)) (\p -> p { inPlayDuration = (Right def) : inPlayDuration p })
-
-transfer :: Card -> Location -> Location -> GameState -> GameState
-transfer c from to state = moveTo c to (moveFrom c from state)
 
 updatePlayer :: GameState -> String -> (Player -> Player) -> GameState
 updatePlayer state pname f = state { players = Map.adjust f pname (players state) }
@@ -1061,7 +1064,7 @@ buy card player state =
 
 trash :: Card -> Location -> Action
 trash card source player state =
-  (addLog (LogTrash player card) &&& handleTriggers TrashTrigger (FromCard card source) (EffectTrash card source) transferT)
+  (addLog (LogTrash player card) &&& handleAllTriggers TrashTrigger ((FromCard card source):playerTriggers (playerByName state player)) (EffectTrash card source) transferT)
     player state
   where
     transferT _ state = toSimulation $ transfer card source Trash state
@@ -1069,7 +1072,7 @@ trash card source player state =
 trashAll :: [Card] -> Location -> Action
 trashAll cards source player state =
   (seqActions (\c -> addLog (LogTrash player c)) cards &&&
-    (foldr (\c cont -> (triggers (typ c)) TrashTrigger (EffectTrash c source) (FromCard c source) cont) transferT cards))
+    (foldr (\c cont -> handleAllTriggers TrashTrigger ((FromCard c source):playerTriggers (playerByName state player)) (EffectTrash c source) cont) transferT cards))
     player state
   where
     transferT _ state = toSimulation $ foldr (\c s -> transfer c source Trash s) state cards

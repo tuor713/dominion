@@ -51,6 +51,9 @@ cMystic          = cardData Map.! "mystic"
 cProcession      = cardData Map.! "procession"
 cSpoils          = cardData Map.! "spoils"
 cCounterfeit     = cardData Map.! "counterfeit"
+cMarketSquare    = cardData Map.! "market square"
+cCultist         = cardData Map.! "cultist"
+cRebuild         = cardData Map.! "rebuild"
 
 -- Generic action elements (potentially move to model)
 
@@ -134,8 +137,8 @@ trashForGain gain player state
     h = hand $ playerByName state player
     cont card = (trash card (Hand player) &&& gain card) player state
 
-gainUpto :: Int -> Action
-gainUpto x player state
+gainUptoFiltered :: Int -> (CardDef -> Bool) -> Action
+gainUptoFiltered x pred player state
   | null candidates = toSimulation state
   | otherwise =
     decision
@@ -144,7 +147,10 @@ gainUpto x player state
         (\c -> gain (typ c) player state))
       player state
   where
-    candidates = (affordableCards (simpleCost x) state)
+    candidates = filter pred $ (affordableCards (simpleCost x) state)
+
+gainUpto :: Int -> Action
+gainUpto x = gainUptoFiltered x (const True)
 
 gainUpgradeTo :: Int -> Location -> Card -> Action
 gainUpgradeTo delta target trashed player state
@@ -1269,7 +1275,8 @@ darkAgesCards = map ($ DarkAges)
    action 804 "Vagrant" 2 (plusCards 1 &&& plusActions 1 &&& reshuffleIfNeeded &&& vagrant),
    action 805 "Forager" 3 (plusActions 1 &&& plusBuys 1 &&& trashForGain (\_ p s -> plusMoney (length $ L.nub $ map typ $ filter isTreasure $ trashPile s) p s)),
    notImplemented "Hermit", -- 806 Hermit
-   notImplemented "Market Square", -- 807 Market Square
+   carddef 807 "Market Square" (simpleCost 3) [Action, Reaction] noPoints (plusCards 1 &&& plusActions 1 &&& plusBuys 1)
+    (whileInHand (onTrash marketSquareTrigger)),
    action 808 "Sage" 3 (plusActions 1 &&& sage),
    notImplemented "Storeroom", -- 809 Storeroom
    notImplemented "Urchin", -- 810 Urchin
@@ -1294,14 +1301,15 @@ darkAgesCards = map ($ DarkAges)
    notImplemented "Catacombs", -- 823 Catacombs
    action 824 "Count" 5 count,
    carddef 825 "Counterfeit" (simpleCost 5) [Treasure] noPoints (plusMoney 1 &&& plusBuys 1 &&& counterfeit) noTriggers,
-   notImplemented "Cultist", -- 826 Cultist
+   carddef 826 "Cultist" (simpleCost 5) [Action, Attack, Looter] noPoints (plusCards 2 &&& playAttack (gain ruinsPseudoDef) &&& cultistCascade)
+    (onTrashSelf (plusCards 3)),
    notImplemented "Graverobber", -- 827 Graverobber
    action 828 "Junk Dealer" 5 (plusCards 1 &&& plusActions 1 &&& plusMoney 1 &&& trashNCards 1 1),
    notImplemented "Knights", -- 829 Knights
    -- TODO refactor wishing well into a better action
    action 830 "Mystic" 5 (plusActions 1 &&& plusMoney 2 &&& reshuffleIfNeeded &&& nameACard (SpecialEffect cMystic) wishingWell),
    notImplemented "Pillage", -- 831 Pillage
-   notImplemented "Rebuild", -- 832 Rebuild
+   action 832 "Rebuild" 5 (plusActions 1 &&& rebuild),
    notImplemented "Rogue", -- 833 Rogue
    action 834 "Altar" 6 (trashForGain (\_ -> gainUpto 5)),
    withTrigger (action 835 "Hunting Grounds" 6 (plusCards 4))
@@ -1317,6 +1325,11 @@ darkAgesExtra = map ($ DarkAges)
 madman :: Maybe Card -> Action
 madman Nothing = plusActions 2
 madman (Just card) = plusActions 2 &&& put card InPlay NonSupply &&& (\p s -> plusCards (length (hand (playerByName s p))) p s)
+
+marketSquareTrigger :: Action
+marketSquareTrigger p s = choose (ChooseToReact msq TrashTrigger) (\b -> if b then discard msq (Hand p) &&& gain gold else pass) p s
+  where
+    msq = head $ filter ((==cMarketSquare) . typ) $ hand $ playerByName s p
 
 spoils :: Maybe Card -> Action
 spoils Nothing = plusMoney 3
@@ -1354,6 +1367,15 @@ counterfeit p s
   where
     ts = filter isTreasure $ hand $ playerByName s p
     cont = chooseOne (EffectPlayTreasure unknown) ts (\card -> play card &&& playEffect (typ card) Nothing &&& trash card InPlay)
+
+cultistCascade :: Action
+cultistCascade p s
+  | null cultists = toSimulation s
+  | otherwise = choose (ChooseToUse (EffectPlayAction (head cultists)))
+                       (\b -> if b then play (head cultists) else pass)
+                       p s
+  where
+    cultists = filter ((==cCultist) . typ) $ hand $ playerByName s p
 
 
 fortressTrigger :: TriggerHandler
@@ -1397,6 +1419,19 @@ procession p s
                   p s
   where
     actions = filter isAction $ hand $ playerByName s p
+
+rebuild :: Action
+rebuild = nameACard (SpecialEffect cRebuild)
+                    (\card -> revealUntilSelector
+                                (\c -> isVictory c && not (typ c == card))
+                                (\matches others p s -> (discardAll others (TopOfDeck p)
+                                                         &&& trashAll matches (TopOfDeck p)
+                                                         &&& gainUpgrade matches)
+                                                         p s))
+  where
+    gainUpgrade [c] p s = gainUptoFiltered (3 + moneyCost (cost s (typ c))) (`hasType` Victory) p s
+    gainUpgrade _ _ s = toSimulation s
+
 
 sage :: Action
 sage p s = revealUntilSelector (\card -> moneyCost (cost s (typ card)) >= 3)
