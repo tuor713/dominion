@@ -11,7 +11,7 @@ Build-type:          Simple
 Cabal-version:       >= 1.9.2
 
 Executable dominion
-  hs-source-dirs: src
+  hs-source-dirs: src/hs
   main-is: Main.hs
 
   Build-depends:
@@ -50,7 +50,7 @@ Executable dominion
 Test-Suite dominion-tests
   type: exitcode-stdio-1.0
   main-is: TestMain.hs
-  hs-source-dirs: src, test
+  hs-source-dirs: src/hs, test
   ghc-options: -fno-warn-missing-fields
   build-depends: base,
     tasty >= 0.11.0,
