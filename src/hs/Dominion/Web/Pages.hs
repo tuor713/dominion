@@ -20,7 +20,7 @@ import Snap.Http.Server (snapServerVersion)
 import Text.Blaze.Html (toHtml)
 import qualified Text.Blaze.Html5 as H
 import qualified Text.Blaze.Html5.Attributes as A
-import Text.Blaze.Internal (MarkupM(Parent))
+import Text.Blaze.Internal (MarkupM(Parent), Attribute, AttributeValue, attribute)
 
 import Text.Printf (printf)
 
@@ -55,7 +55,7 @@ htmlHeader = H.head $ do
   H.link H.! A.href "/static/libs/semanticui/semantic.min.css" H.! A.rel "stylesheet" H.! A.type_ "text/css"
   H.script H.! A.src "/static/libs/semanticui/semantic.min.js" $ ""
 
-  H.script H.! A.src "/static/js/play.js" $ ""
+  H.script H.! A.src "/static/js/app.js" $ ""
   H.script H.! A.src "/static/js/d3.v3.min.js" H.! A.charset "utf-8" $ ""
   H.script H.! A.src "/static/js/graph.js" H.! A.charset "utf-8" $ ""
 
@@ -107,7 +107,25 @@ htmlHomePage =
         H.p "A small experimental Dominion server for both bot and human play."
 
 
-passButton = H.button H.! A.class_ "ui teal button" H.! A.onclick "pass();" $ "Pass"
+dataChoice :: AttributeValue -> Attribute
+dataChoice = attribute "data-choice" " data-choice=\""
+
+dataChoiceId :: AttributeValue -> Attribute
+dataChoiceId = attribute "data-choice-id" " data-choice-id=\""
+
+dataChoiceMin :: AttributeValue -> Attribute
+dataChoiceMin = attribute "data-choice-min" " data-choice-min=\""
+
+dataChoiceMax :: AttributeValue -> Attribute
+dataChoiceMax = attribute "data-choice-max" " data-choice-max=\""
+
+dataTableau :: AttributeValue -> Attribute
+dataTableau = attribute "data-tableau" " data-tableau=\""
+
+dataAttr :: AttributeValue -> Attribute
+dataAttr = attribute "data" " data=\""
+
+passButton = H.button H.! A.class_ "ui teal button" H.! dataChoice "" $ "Pass"
 
 decisionHtml :: Bool -> Decision -> H.Html
 decisionHtml _ (Optional inner _) = decisionHtml True inner
@@ -117,23 +135,25 @@ decisionHtml allowsPass (ChooseNumber effect (lo,hi) _) =
     toHtml $ "Choose how many to use for " ++ show effect
     H.div H.! A.class_ "centered" $ do
       forM_ [lo..hi] $ \n ->
-        H.button H.! A.class_ "ui primary button" H.! A.onclick (fromString ("choose('" ++ show n ++ "');")) $ fromString (show n)
+        H.button H.! A.class_ "ui primary button"
+                 H.! dataChoice (fromString (show n))
+                 $ fromString (show n)
       when allowsPass $ passButton
 
 decisionHtml allowsPass (ChooseToUse effect _) =
   H.div $ do
     toHtml $ "Use " ++ show effect
     H.div H.! A.class_ "centered" $ do
-      H.button H.! A.class_ "ui button" H.! A.onclick "choose('true');" $ "Yes"
-      H.button H.! A.class_ "ui button" H.! A.onclick "choose('false');" $ "No"
+      H.button H.! A.class_ "ui button" H.! dataChoice "true" $ "Yes"
+      H.button H.! A.class_ "ui button" H.! dataChoice "false" $ "No"
       when allowsPass $ passButton
 
 decisionHtml allowsPass (ChooseToReact card trigger _) =
   H.div $ do
     toHtml $ "Use " ++ show card ++ "'s reaction to respond to " ++ show trigger
     H.div H.! A.class_ "centered" $ do
-      H.button H.! A.class_ "ui button" H.! A.onclick "choose('true');" $ "Yes"
-      H.button H.! A.class_ "ui button" H.! A.onclick "choose('false');" $ "No"
+      H.button H.! A.class_ "ui button" H.! dataChoice "true" $ "Yes"
+      H.button H.! A.class_ "ui button" H.! dataChoice "false" $ "No"
       when allowsPass $ passButton
 
 decisionHtml allowsPass (ChooseCard effect choices _) =
@@ -143,7 +163,7 @@ decisionHtml allowsPass (ChooseCard effect choices _) =
     H.div H.! A.id "choices" H.! A.class_ "centered" $ do
       forM_ choices $ \card -> do
         H.input H.! A.type_ "image"
-                H.! A.onclick (fromString ("choose(\""++ cardName (typ card) ++ "\",1,1);"))
+                H.! dataChoice (fromString (cardName (typ card)))
                 H.! A.style "margin: 5px; width: 100px; height: 159px"
                 H.! A.src (fromString (cardImagePath (typ card)))
 
@@ -167,11 +187,14 @@ decisionHtml allowsPass (ChooseCards effect choices (lo,hi) _) =
     H.div H.! A.class_ "centered" $ do
       if length choices <= hi
         then H.button H.! A.class_ "ui primary button"
-                      H.! A.onclick (fromString ("choose(\""++ L.intercalate "," (map (cardName . typ) choices) ++ "\");"))
+                      H.! dataChoice (fromString (L.intercalate "," (map (cardName . typ) choices)))
                       $ "All"
         else return ()
       H.button H.! A.class_ "ui secondary button"
-               H.! A.onclick (fromString ("choices('choices'," ++ show lo ++ "," ++ show hi ++ ");")) $ "Go"
+               H.! dataChoiceId "choices"
+               H.! dataChoiceMin (fromString (show lo))
+               H.! dataChoiceMax (fromString (show hi))
+               $ "Go"
       when allowsPass $ passButton
 
 decisionHtml allowsPass (ChooseEffects no effects _) =
@@ -186,7 +209,10 @@ decisionHtml allowsPass (ChooseEffects no effects _) =
               H.label $ toHtml (show effect)
     H.div $ do
       H.button H.! A.class_ "ui primary button"
-               H.! A.onclick (fromString ("choices('choices'," ++ show no ++ "," ++ show no ++ ");")) $ "Go"
+               H.! dataChoiceId "choices"
+               H.! dataChoiceMin (fromString (show no))
+               H.! dataChoiceMax (fromString (show no))
+               $ "Go"
       when allowsPass $ passButton
 
 
@@ -435,10 +461,10 @@ htmlSetupGame =
                                  else H.option H.! A.value "bot" $ "Bot")
 
           H.div $ do
-            H.button H.! A.class_ "ui button"
-                     H.! A.onclick (fromString ("start();")) $ "Go"
-            H.button H.! A.class_ "ui button"
-                     H.! A.onclick (fromString ("randomStart([\"" ++ L.intercalate "\",\"" (map cardName $ filter implemented kingdomCards) ++ "\"]);")) $ "Random"
+            H.button H.! A.class_ "ui button" H.! A.id "startGame" $ "Go"
+            H.button H.! A.class_ "ui button" H.! A.id "randomStart"
+              H.! dataAttr (fromString ("[\"" ++ L.intercalate "\",\"" (map cardName $ filter implemented kingdomCards) ++ "\"]"))
+              $ "Random"
 
 
       H.h3 "Choose tableau"
@@ -456,7 +482,7 @@ htmlSetupGame =
                     H.img H.! A.style "width: 100px; height: 159px;" H.! A.src (fromString (cardImagePath card))
                     H.div H.! A.class_ "content" $ toHtml (cardName card)
                 else
-                  H.div H.! A.class_ "cardselection item" H.! A.onclick "$(this).toggleClass('selected');"
+                  H.div H.! A.class_ "cardselection item"
                         H.! A.id (fromString (cardName card)) $ do
                     H.img H.! A.style "width: 100px; height: 159px;" H.! A.src (fromString (cardImagePath card))
                     H.div H.! A.class_ "content" $ toHtml (cardName card)
@@ -479,7 +505,8 @@ htmlSuggestedTableaus tableaus =
           when (all implemented $ map lookupCard cards) $ do
             H.div $ do
               H.button H.! A.class_ "ui button"
-                       H.! A.onclick (fromString ("startGame('standard',[\"" ++ L.intercalate "\",\"" cards ++ "\"]);")) $ "Go"
+                       H.! dataTableau (fromString (L.intercalate "," cards))
+                       $ "Go"
 
 htmlSimulationForm :: [CardDef] -> Int -> [PlayerId] -> H.Html
 htmlSimulationForm tableau numGames players =
