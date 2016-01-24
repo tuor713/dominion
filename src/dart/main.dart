@@ -57,7 +57,8 @@ startGame(type, players, cards) {
 getStartGamePlayer() {
   var players = [];
   [1,2,3,4].forEach((i) {
-    var typ = querySelector('#playerType${i} option[selected]').getAttribute('value');
+    var typ = (querySelector('#playerType${i}') as SelectElement).selectedOptions[0].value;
+
     if (typ != 'none') {
       var name = querySelector('#playerName${i}').getAttribute('value');
       players.add({'name':name, 'type':typ});
