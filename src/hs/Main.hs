@@ -13,12 +13,15 @@ import Control.Applicative
 import Control.Concurrent
 import qualified Control.Monad as M
 import Control.Monad.IO.Class
+import qualified Control.Concurrent.STM as STM
 import Snap.Core
 import Snap.Util.FileServe
 import Snap.Http.Server
 import qualified Data.Aeson as J
 import qualified Data.ByteString.Char8 as C8
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.ByteString.Lazy.Char8 as LC8
+import qualified Data.Either as Either
 import qualified Data.IORef as IORef
 import Data.List.Split (wordsBy)
 import qualified Data.Maybe as Maybe
@@ -96,6 +99,8 @@ site logset gamesRepository =
     route [ ("simulation", method GET $ simulationHandler),
             ("game/start", method POST $ startGameHandler logset gamesRepository),
             ("game/play", method GET $ setupGameHandler),
+            ("game/join", method GET $ joinGameHandler gamesRepository),
+            ("game/:id/join", method POST $ doJoinGameHandler logset gamesRepository),
             ("game/suggested", method GET $ suggestedTableauHandler),
             ("game/:id/decision/:player", method GET $ decisionHandler logset gamesRepository),
             ("game/:id/decision/:player", method POST $ makeDecisionHandler logset gamesRepository)
@@ -118,7 +123,18 @@ instance Show PlayerState where
   show (Bot _) = "Bot"
   show (External _) = "External"
 
-type GameRepository = (Int,Map.Map Int Game)
+type GameRepository = (Int,Map.Map Int (Either (STM.TVar StartGameReq) Game))
+
+
+gameReadyToStart :: StartGameReq -> Bool
+gameReadyToStart = not . any (==OpenSlot) . gamePlayers
+
+addPlayerInSlot :: String -> StartGameReq -> StartGameReq
+addPlayerInSlot name req = req { gamePlayers = iter (gamePlayers req) }
+  where
+    iter [] = []
+    iter (OpenSlot:xs) = (HumanPlayer name):xs
+    iter (x:xs) = x:iter xs
 
 externalDecision :: PlayerState -> MVar DecisionState
 externalDecision (External mvar) = mvar
@@ -147,6 +163,7 @@ launchWebGame req = do
   launchGame decisionHandler finishHandler initial (seedSim gen) (Map.fromList mvars)
 
   where
+    mkMVar OpenSlot = undefined
     mkMVar (HumanPlayer name) = newEmptyMVar >>= \mv -> return (name, External mv)
     mkMVar (BotPlayer name botid) = do
       bot <- maybe ((Maybe.fromJust $ lookup defaultBotId botLibrary) name)
@@ -179,12 +196,17 @@ startGameHandler logset gamesRepository = do
                       req
 
   id <- liftIO $ do
-    game <- launchWebGame startGameReq
-
     (nextId,games) <- IORef.readIORef gamesRepository
-    IORef.writeIORef gamesRepository (nextId+1, Map.insert nextId game games)
 
-    pushLogStr logset (toLogStr ("Created new game: " ++ show nextId ++ "\n"))
+    if gameReadyToStart startGameReq
+      then do
+        game <- launchWebGame startGameReq
+        IORef.writeIORef gamesRepository (nextId+1, Map.insert nextId (Right game) games)
+        pushLogStr logset (toLogStr ("Created & started new game: " ++ show nextId ++ "\n"))
+      else do
+        tvar <- STM.newTVarIO startGameReq
+        IORef.writeIORef gamesRepository (nextId+1, Map.insert nextId (Left tvar) games)
+        pushLogStr logset (toLogStr ("Created new game: " ++ show nextId ++ ", waiting for additional players\n"))
 
     return nextId
 
@@ -192,6 +214,40 @@ startGameHandler logset gamesRepository = do
   where
     defaultTableau = ["market", "library", "smithy", "cellar", "chapel", "militia",
                       "village", "laboratory", "witch", "jack of all trades"]
+
+joinGameHandler :: IORef.IORef GameRepository -> Snap ()
+joinGameHandler repo = do
+  open <- liftIO $ do
+    (_,games) <- IORef.readIORef repo
+    let reqs = Either.lefts $ map (\(id,v) -> either (Left . (id,)) Right v) $ Map.toList games
+    STM.atomically $ sequence $ map (\(id,v) -> STM.readTVar v >>= \req -> return (id,req)) reqs
+
+  writeHtml $ htmlJoinGame open
+
+doJoinGameHandler :: LoggerSet -> IORef.IORef GameRepository -> Snap ()
+doJoinGameHandler logset repo = do
+  id <- getParam "id"
+  let gameId = fst $ Maybe.fromJust $ C8.readInt (Maybe.fromJust id)
+
+  player <- readRequestBody 100
+  let playerId = LC8.unpack player
+
+  (nextId,games) <- liftIO $ IORef.readIORef repo
+
+  case Map.lookup gameId games of
+    Just (Left tvar) -> do
+      req <- liftIO $ STM.atomically (STM.readTVar tvar
+                                      >>= (STM.writeTVar tvar . addPlayerInSlot playerId)
+                                      >> STM.readTVar tvar)
+
+      M.when (gameReadyToStart req) $ liftIO $ do
+        game <- launchWebGame req
+        IORef.writeIORef repo (nextId, Map.insert gameId (Right game) games)
+        pushLogStr logset (toLogStr ("Started new game: " ++ show gameId ++ "\n"))
+
+      writeBS "{'status':'success'}"
+
+    _ -> writeBS "{'status':'failed'}"
 
 
 nextDecision :: IORef.IORef GameRepository -> Int -> PlayerId -> Snap ()
@@ -203,7 +259,7 @@ nextDecision gamesRepository gameId player = do
   (_,games) <- liftIO $ IORef.readIORef gamesRepository
 
   case Map.lookup gameId games of
-    Just states -> do
+    Just (Right states) -> do
       let mvar = externalDecision $ states Map.! player
 
       decision <- liftIO $ readMVar mvar
@@ -213,7 +269,10 @@ nextDecision gamesRepository gameId player = do
                                                           (collectStats (emptyStats (Map.keys (players state))) state))
                              else writeBS "{'status':'finished'}"
         (DecisionPending state dec _) -> writeLBS $ formatHandler (visibleState player state, dec)
-    Nothing -> writeHtml $ htmlError "No such game."
+
+    Just (Left _) -> writeHtml $ htmlWaitingForPlayers
+
+    _ -> writeHtml $ htmlError "No such game."
 
 
 decisionHandler :: LoggerSet -> IORef.IORef GameRepository -> Snap ()
@@ -246,7 +305,7 @@ makeDecisionHandler logset gamesRepository = do
 
   liftIO $ pushLogStr logset (toLogStr ("Player " ++ playerId ++ " making decision in game " ++ show gameId ++ "\n"))
 
-  let states = games Map.! gameId
+  let states = either undefined Prelude.id $ games Map.! gameId
   let mvar = externalDecision $ states Map.! playerId
 
   param <- readRequestBody 1000

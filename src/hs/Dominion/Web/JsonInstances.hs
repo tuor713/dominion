@@ -12,11 +12,12 @@ import qualified Data.Vector as V
 
 -- JSON --> Haskell
 
-data PlayerDefinition = HumanPlayer PlayerId | BotPlayer PlayerId String
+data PlayerDefinition = HumanPlayer PlayerId | BotPlayer PlayerId String | OpenSlot
   deriving (Eq, Ord, Read, Show)
 
 playerDefName (HumanPlayer id) = id
 playerDefName (BotPlayer id _) = id
+playerDefName OpenSlot = undefined
 
 data StartGameReq = StartGameReq { gamePlayers :: [PlayerDefinition],
                                    gameCards :: [String],
@@ -25,8 +26,10 @@ data StartGameReq = StartGameReq { gamePlayers :: [PlayerDefinition],
 
 instance J.FromJSON PlayerDefinition where
   parseJSON (J.Object v) = v J..: "type" >>= \(typ::String) ->
-    if typ == "human" then HumanPlayer <$> v J..: "name"
-                      else BotPlayer <$> v J..: "name" <*> (v J..:? "bot" J..!= defaultBotId)
+    case typ of
+      "human" -> HumanPlayer <$> v J..: "name"
+      "open" -> return OpenSlot
+      _ -> BotPlayer <$> v J..: "name" <*> (v J..:? "bot" J..!= defaultBotId)
 
   parseJSON _ = Ap.empty
 

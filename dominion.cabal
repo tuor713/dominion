@@ -34,6 +34,7 @@ Executable dominion
     parsec                    >= 3.1.9,
     blaze-markup              >= 0.7.0,
     blaze-html                >= 0.8.1.1,
+    stm                       >= 2.4,
     scientific                >= 0.3.3,
     unordered-containers      >= 0.2.5,
     vector                    >= 0.11.0,

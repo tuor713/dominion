@@ -43,14 +43,30 @@ chooseSelected(id,min,max) {
 
 // Game functions
 
+getPlayerName() {
+  return (querySelector('#playerName') as InputElement).value;
+}
+
 startGame(type, players, cards) {
+  var myid = getPlayerName();
   HttpRequest.request('/game/start',
       method: 'POST',
       sendData: JSON.encode({'players':players, 'cards':cards, 'type':type}))
   .then((req) {
     var id = req.responseText;
     logToConsole("Started game: ${id}");
-    window.location.href = '/game/${id}/decision/Alice?format=html';
+    window.location.href = '/game/${id}/decision/${myid}?format=html';
+  });
+}
+
+joinGame(id) {
+  var myid = getPlayerName();
+  HttpRequest.request('/game/${id}/join',
+      method: 'POST',
+      sendData: myid)
+  .then((req) {
+    logToConsole("Joined game: ${id}");
+    window.location.href = '/game/${id}/decision/${myid}?format=html';
   });
 }
 
@@ -59,9 +75,13 @@ getStartGamePlayer() {
   [1,2,3,4].forEach((i) {
     var typ = (querySelector('#playerType${i}') as SelectElement).selectedOptions[0].value;
 
-    if (typ != 'none') {
-      var name = querySelector('#playerName${i}').getAttribute('value');
-      players.add({'name':name, 'type':typ});
+    if (typ == 'myself') {
+      var name = getPlayerName();
+      players.add({'name':name, 'type':'human'});
+    } else if (typ == 'bot') {
+      players.add({'name':'Player${i}', 'type':typ});
+    } else if (typ == 'human') {
+      players.add({'type':'open'});
     }
   });
 
@@ -73,7 +93,9 @@ List<String> getSelectedCards() {
 }
 
 getGameType() {
-  return querySelector('input[name="gametype"][checked]').getAttribute('value');
+  return querySelectorAll('input[name="gametype"]')
+      .firstWhere((e) => (e as RadioButtonInputElement).checked)
+      .getAttribute('value');
 }
 
 start() {
@@ -134,6 +156,11 @@ initHtml() {
     var choices = JSON.decode(rElem.getAttribute('data'));
     rElem.onClick.listen((e) => randomStart(choices));
   }
+
+  querySelectorAll("button[name='joinGame']").forEach((elem) {
+    var gameId = elem.getAttribute('data');
+    elem.onClick.listen((e) => joinGame(gameId));
+  });
 
   querySelectorAll('[data-tableau]').forEach((elem) {
     var cards = elem.getAttribute('data-tableau').split(',');

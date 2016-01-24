@@ -5,6 +5,7 @@ import Dominion.Model
 import Dominion.Cards
 import Dominion.Stats
 import Dominion.Bots (botLibrary)
+import Dominion.Web.JsonInstances
 
 import Control.Monad (forM_, when)
 
@@ -72,7 +73,8 @@ template link inner =
             _ <- "Play"
             H.i H.! A.class_ "dropdown icon" $ ""
             H.div H.! A.class_ "menu" $ do
-              H.a H.! A.class_ "item" H.! A.href "/game/play" $ "Choose tableau"
+              H.a H.! A.class_ "item" H.! A.href "/game/play" $ "Create Game"
+              H.a H.! A.class_ "item" H.! A.href "/game/join" $ "Join Game"
               H.a H.! A.class_ "item" H.! A.href "/game/suggested" $ "Pick pre-made tableau"
 
           H.a H.! A.class_ (if "/simulation" == link then "active item" else "item") H.! A.href "/simulation" $ "Simulation"
@@ -413,6 +415,46 @@ htmlFinished state stats =
                   L.intercalate "," (map (\p -> "\"" ++ p ++ "\"," ++ dataToJavaScriptArray ((statAvgMoneyPerTurn stats) Map.! p)) ps) ++
                   ");\n")
 
+htmlWaitingForPlayers :: H.Html
+htmlWaitingForPlayers =
+  template "/play" $ do
+    column 1 $ ""
+    column 14 $ do
+      H.section $ do
+        H.p "Waiting for other players to join ..."
+
+htmlJoinGame :: [(Int,StartGameReq)] -> H.Html
+htmlJoinGame games =
+  template "/play" $ do
+    column 1 $ ""
+    column 14 $ do
+      H.div H.! A.id "flash" $ ""
+
+      H.div H.! A.class_ "ui form" $ do
+        H.div H.! A.class_ "four wide field" $ do
+          H.label $ "Your name"
+          H.input H.! A.type_ "text" H.! A.id "playerName"
+                  H.! A.name "playerName" H.! A.value ""
+
+        H.table H.! A.class_ "ui very basic table" $ do
+          H.thead $ do
+            H.tr $ do
+              H.th "Game No"
+              H.th "Players"
+              H.th "Game Type"
+              H.th "Link"
+          H.tbody $ do
+            forM_ games $ \(id,req) ->
+              H.tr $ do
+                H.td $ fromString (show id)
+                H.td $ fromString (show (length (gamePlayers req)))
+                H.td $ case gameType req of
+                        StandardGame -> "Standard"
+                        ColonyGame -> "Colonies"
+                        SheltersGame -> "Shelters"
+                        ColonySheltersGame -> "Colonies, Shelters"
+                H.td $ H.button H.! A.class_ "ui button" H.! A.name "joinGame" H.! dataAttr (fromString (show id)) $ "Join"
+
 
 htmlSetupGame :: H.Html
 htmlSetupGame =
@@ -443,22 +485,25 @@ htmlSetupGame =
                 H.input H.! A.type_ "radio" H.! A.name "gametype" H.! A.value "colonyShelters"
                 H.label "Colony & Shelters"
 
-          forM_ (zip ["Alice", "Bob", "Carol", "Dave"] [1..4]) $ \(name,idx :: Int) -> do
-            H.div H.! A.class_ "six wide field" $ do
-              H.label $ toHtml ("Player " ++ show idx)
-              H.div H.! A.class_ "two fields" $ do
-                H.div H.! A.class_ "field" $ do
-                  H.input H.! A.type_ "text" H.! A.id (fromString ("playerName" ++ show idx))
-                          H.! A.name (fromString ("playerName" ++ show idx)) H.! A.value name
-                H.div H.! A.class_ "field" $ do
-                  H.select H.! A.class_ "ui dropdown" H.! A.id (fromString ("playerType" ++ show idx))
-                           H.! A.name (fromString ("playerType" ++ show idx)) $ do
-                    when (idx > 2) $ do
-                      H.option H.! A.value "none" H.! A.selected "selected" $ "None"
-                    (if idx == 1 then H.option H.! A.value "human" H.! A.selected "selected" $ "Human"
-                                 else H.option H.! A.value "human" $ "Human")
-                    (if idx == 2 then H.option H.! A.value "bot" H.! A.selected "selected" $ "Bot"
-                                 else H.option H.! A.value "bot" $ "Bot")
+          H.div H.! A.class_ "four wide field" $ do
+            H.label $ "Your name"
+            H.input H.! A.type_ "text" H.! A.id "playerName"
+                    H.! A.name "playerName" H.! A.value "Player1"
+
+          H.div H.! A.class_ "inline fields" $ do
+            forM_ [1..4] $ \(idx :: Int) -> do
+              H.div H.! A.class_ "field" $ do
+                H.label $ toHtml ("Player " ++ show idx)
+                H.select H.! A.class_ "ui dropdown"
+                         H.! A.id (fromString ("playerType" ++ show idx))
+                         H.! A.name (fromString ("playerType" ++ show idx)) $ do
+                  when (idx > 2) $ do
+                    H.option H.! A.value "none" H.! A.selected "selected" $ "None"
+                  (if idx == 1 then H.option H.! A.value "myself" H.! A.selected "selected" $ "Myself"
+                               else H.option H.! A.value "myself" $ "Myself")
+                  H.option H.! A.value "human" H.! A.value "human" $ "Human"
+                  (if idx == 2 then H.option H.! A.value "bot" H.! A.selected "selected" $ "Bot"
+                               else H.option H.! A.value "bot" $ "Bot")
 
           H.div $ do
             H.button H.! A.class_ "ui button" H.! A.id "startGame" $ "Go"
