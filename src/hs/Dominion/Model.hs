@@ -1159,7 +1159,9 @@ discard card loc player = (addLog (LogDiscard player [card]) &&& doDiscard card 
 
 -- TODO all triggers have to happen upfront
 discardAll :: [Card] -> Location -> ActionTemplate
-discardAll cards loc player = (addLog (LogDiscard player cards) &&& seqActions (\c -> doDiscard c loc) cards) player
+discardAll cards loc player
+  | null cards = noOpSimulation
+  | otherwise = (addLog (LogDiscard player cards) &&& seqActions (\c -> doDiscard c loc) cards) player
 
 plusMoney :: Int -> ActionTemplate
 plusMoney num _ = modGameState' $ \state -> state { turn = (turn state) { money = num + money (turn state) } }
