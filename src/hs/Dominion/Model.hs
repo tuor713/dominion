@@ -458,6 +458,15 @@ optDecision :: Decision (SimulationT ()) -> ActionTemplate
 optDecision decision player = gameState' >>= \state ->
     SimulationT $ return $ Decision player state (Optional decision noOpSimulation)
 
+qDecision :: Decision (SimulationT a) -> PlayerId -> SimulationT a
+qDecision decision player = gameState' >>= \state -> SimulationT $ return $ Decision player state decision
+
+qOptDecision :: ((a -> SimulationT (Maybe a)) -> Decision (SimulationT (Maybe a))) -> PlayerId -> SimulationT (Maybe a)
+qOptDecision decision player = gameState' >>= \state ->
+    SimulationT $ return $ Decision player state (Optional (decision (return . Just)) (return Nothing))
+
+qWhenJust :: Maybe a -> (a -> SimulationT ()) -> SimulationT ()
+qWhenJust m f = maybe noOpSimulation f m
 
 -- Simulation primitives
 
@@ -716,13 +725,22 @@ seqActions f (x:xs) p = f x p >> seqActions f xs p
 choose :: ((a -> SimulationT ()) -> Decision (SimulationT ())) -> (a -> ActionTemplate) -> ActionTemplate
 choose dec cont player = decision (dec (\input -> cont input player)) player
 
+qChoose :: ((a -> SimulationT a) -> Decision (SimulationT a)) -> PlayerId -> SimulationT a
+qChoose dec player = qDecision (dec return) player
+
 chooseOne :: Effect -> [Card] -> (Card -> ActionTemplate) -> ActionTemplate
 chooseOne typ choices cont player =
   decision (ChooseCard typ choices (\card -> cont card player)) player
 
+qChooseOne :: Effect -> [Card] -> PlayerId -> SimulationT Card
+qChooseOne typ choices player = qDecision (ChooseCard typ choices return) player
+
 chooseMany :: Effect -> [Card] -> (Int,Int) -> ([Card] -> ActionTemplate) -> ActionTemplate
 chooseMany typ choices lohi cont player =
   decision (ChooseCards typ choices lohi (\chosen -> cont chosen player)) player
+
+qChooseMany :: Effect -> [Card] -> (Int,Int) -> PlayerId -> SimulationT [Card]
+qChooseMany typ choices lohi player = qDecision (ChooseCards typ choices lohi return) player
 
 chooseEffects :: Int -> [Effect] -> ([Effect] -> ActionTemplate) -> ActionTemplate
 chooseEffects num effects cont player =
@@ -924,8 +942,6 @@ visibleState id state = state { players = Map.map anonymize (players state) }
                         deck = replicate (length (deck p)) unknown }
 
 
-
-
 -- Utilities
 
 -- TODO surprisingly shuffling is one of the most time-intensive bits and the libraries
@@ -970,7 +986,6 @@ summarizeCards cards =
   L.intersperse ", " |>
   concat
 
-
 reshuffleDiscard :: Player -> GameT Player
 reshuffleDiscard p =
   do
@@ -987,12 +1002,18 @@ draw p num
   where
     (!!!) p num = p { hand = take num (deck p) ++ hand p, deck = drop num (deck p)}
 
-ensureCanDraw :: Int -> GameState -> PlayerId -> GameT (Maybe GameState)
-ensureCanDraw num state name
-  | length (deck (playerByName state name)) >= num = return $ Just state
-  | otherwise =
-    updatePlayerR state name reshuffleDiscard >>= \s2 ->
-    return (if length (deck (playerByName s2 name)) >= num then Just s2 else Nothing)
+
+
+-- Monadic queries
+
+qPlayer :: PlayerId -> SimulationT Player
+qPlayer id = gameState' >>= (return . (`playerByName` id))
+
+qHand :: PlayerId -> SimulationT [Card]
+qHand = fmap hand . qPlayer
+
+qDeck :: PlayerId -> SimulationT [Card]
+qDeck = fmap deck . qPlayer
 
 -- Game action
 
@@ -1016,7 +1037,6 @@ playFrom card loc player =
   playEffect (typ card)
              (Just card)
              player
-
 
 play :: Card -> ActionTemplate
 play card player = playFrom card (Hand player) player
