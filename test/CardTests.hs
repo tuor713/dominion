@@ -42,7 +42,7 @@ villageTests = testGroup "[Village]"
     v = Card 1 (lookupCard "village")
     [e1,e2] = map (\i -> Card i estate) [2,3]
     state = updatePlayer nullState "Alice" (\p -> p { hand = [v], deck = [e1,e2] })
-    res = evalState $ play v "Alice" state
+    res = evalState $ (putGameState' state >> play v "Alice")
 
 portTests = testGroup "[Port]"
   [testCase "Gets two ports on buy" $
@@ -53,5 +53,5 @@ portTests = testGroup "[Port]"
   where
     port = lookupCard "port"
     state = stubSupply "port" 10 nullState
-    sut = evalState $ buy port "Alice" state
-    sut2 = evalState $ gain port "Alice" state
+    sut = evalState $ putGameState' state >> buy port "Alice"
+    sut2 = evalState $ putGameState' state >> gain port "Alice"

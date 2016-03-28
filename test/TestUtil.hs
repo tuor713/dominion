@@ -9,8 +9,8 @@ import System.Random (StdGen, mkStdGen)
 fakeCard :: CardDef -> Card
 fakeCard typ = Card (-1) typ
 
-toState :: GameStep -> GameState
-toState (State state) = state
+toState :: MaybeDecision GameState (SimulationT GameState) -> GameState
+toState (Result state) = state
 toState (Decision _ state _) = state
 
 mkPiles :: [(CardDef,Int)] -> Map.Map CardDef [Card]
@@ -25,5 +25,10 @@ stubSupply cardName num state =
   where
     c = lookupCard cardName
 
-evalState :: Simulation -> GameState
-evalState sim = toState $ evalSim sim (seedSim zGen)
+evalState :: SimulationT a -> GameState
+evalState sim = toState $ evalSim (sim >> gameState') (seedSim zGen)
+
+eval :: SimulationT a -> a
+eval sim = unwrap $ evalSim sim (seedSim zGen)
+  where
+    unwrap (Result a) = a
