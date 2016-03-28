@@ -11,10 +11,10 @@ import qualified Data.Maybe as Maybe
 
 
 
-partialBotConfig :: DefaultBotConfig -> PartialBot -> PlayerId -> AIBot
+partialBotConfig :: DefaultBotConfig -> PartialBot a -> PlayerId -> AIBot a
 partialBotConfig config bot id = simpleBot (\id state decision option -> Maybe.fromMaybe (defaultBot config id state decision option) $ bot id state decision option) id
 
-partialBot :: PartialBot -> PlayerId -> AIBot
+partialBot :: PartialBot a -> PlayerId -> AIBot a
 partialBot bot id = partialBotConfig emptyConfig bot id
 
 
@@ -140,7 +140,7 @@ familiarOnly = partialBot $
   `alt` buysIf "Potion" ((<1) . (numInDeck "Potion"))
   `alt` buys "Silver"
 
-alwaysGainCopper :: PartialBot
+alwaysGainCopper :: PartialBot a
 alwaysGainCopper _ _ (ChooseToUse (EffectGain c (Hand _)) f) _
   | c == copper = Just (f True)
   | otherwise = Nothing

@@ -36,7 +36,7 @@ stashScore card
   | card == gold = 0
   | otherwise = 20
 
-defaultBot :: DefaultBotConfig -> SimpleBot
+defaultBot :: DefaultBotConfig -> SimpleBot a
 defaultBot _ _ _ (ChooseCards (EffectPlayTreasure _) choices _ f) _ = f choices
 defaultBot _ _ _ (ChooseCard (EffectPlayAction _) actions f) _ = f (head actions)
 defaultBot _ _ state (ChooseCard (EffectTrash _ _) cards f) alt

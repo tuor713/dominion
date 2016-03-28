@@ -12,23 +12,23 @@ import qualified Data.IORef as IORef
 -- => the bot returning a GameStep directly is not a very safe pattern
 --    it presupposes bots are correctly implemented and not malicious
 -- => should we include bot state or is this covered by IO monad ?
-type Bot = GameState -> Decision -> IO Simulation
-type AIBot = GameState -> Decision -> Simulation
-type StateBot a = a -> GameState -> Decision -> (Simulation,a)
+type Bot a = GameState -> (Decision (SimulationT a)) -> IO (SimulationT a)
+type AIBot a = GameState -> (Decision (SimulationT a)) -> SimulationT a
+type StateBot a b = a -> GameState -> (Decision (SimulationT b)) -> (SimulationT b,a)
 
 -- Utilities for defining bots
 
-type SimpleBot = PlayerId -> GameState -> Decision -> Maybe Simulation -> Simulation
-type PartialBot = PlayerId -> GameState -> Decision -> Maybe Simulation -> Maybe Simulation
+type SimpleBot a = PlayerId -> GameState -> (Decision (SimulationT a)) -> Maybe (SimulationT a) -> SimulationT a
+type PartialBot a = PlayerId -> GameState -> (Decision (SimulationT a)) -> Maybe (SimulationT a) -> Maybe (SimulationT a)
 
-simpleBot :: SimpleBot -> PlayerId -> AIBot
+simpleBot :: SimpleBot a -> PlayerId -> AIBot a
 simpleBot bot id state (Optional inner next) = bot id state inner (Just next)
 simpleBot bot id state decision = bot id state decision Nothing
 
-aiBot :: AIBot -> Bot
+aiBot :: AIBot a -> Bot a
 aiBot bot state int = return $ bot state int
 
-stateBot :: a -> StateBot a -> IO Bot
+stateBot :: a -> StateBot a b -> IO (Bot b)
 stateBot initial bot = do
   ref <- IORef.newIORef initial
   return $ \state decision -> do
@@ -40,10 +40,10 @@ stateBot initial bot = do
 -- Behavioural traits
 
 
-alt :: PartialBot -> PartialBot -> PartialBot
+alt :: PartialBot a -> PartialBot a -> PartialBot a
 alt bot1 bot2 id state decision opt = bot1 id state decision opt `M.mplus` bot2 id state decision opt
 
-buysC :: CardDef -> (GameState -> Bool) -> PartialBot
+buysC :: CardDef -> (GameState -> Bool) -> PartialBot a
 buysC card pred _ state (ChooseCard (EffectBuy _) choices f) _
   | null cs || not (pred state) = Nothing
   | otherwise = Just $ f (head cs)
@@ -51,10 +51,10 @@ buysC card pred _ state (ChooseCard (EffectBuy _) choices f) _
     cs = filter ((==card) . typ) choices
 buysC _ _ _ _ _ _ = Nothing
 
-buys :: String -> PartialBot
+buys :: String -> PartialBot a
 buys cardName = buysC (lookupCard cardName) (const True)
 
-buysIf :: String -> (GameState -> Bool) -> PartialBot
+buysIf :: String -> (GameState -> Bool) -> PartialBot a
 buysIf cardName pred = buysC (lookupCard cardName) pred
 
 

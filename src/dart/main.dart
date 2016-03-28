@@ -31,6 +31,7 @@ choose(val) {
 chooseSelected(id,min,max) {
   var choices = querySelectorAll('#${id} input.checked').map((e) => e.getAttribute('name')).toList();
   choices.addAll(querySelectorAll('#${id} input[checked]').map((e) => e.getAttribute('name')));
+  choices.addAll(querySelectorAll('#${id} input').where((e) => (e as CheckboxInputElement).checked).map((e) => e.getAttribute('name')));
 
   if (choices.length < min) {
     showWarning("Not enough choices selected. Please select at least ${min} item(s).");

@@ -108,7 +108,7 @@ instance J.ToJSON Effect where
   toJSON (MultiEffect effects)         = J.toJSON [J.String "multiEffect", J.toJSON effects]
   toJSON NullEffect                    = J.toJSON [J.String "nullEffect"]
 
-instance J.ToJSON Decision where
+instance J.ToJSON (Decision a) where
   toJSON (ChooseToUse effect _) = J.object ["type"   J..= J.String "use",
                                             "effect" J..= T.pack (show effect)]
 
@@ -155,7 +155,7 @@ instance J.ToJSON GameState where
 
 showInfo (vis,info) = "@" ++ show vis ++ " " ++ info
 
-instance J.ToJSON (GameState,Decision) where
+instance J.ToJSON (GameState, (Decision a)) where
   toJSON (state,decision) = J.object ["state"    J..= J.toJSON state,
                                             "decision" J..= J.toJSON decision
                                             ]

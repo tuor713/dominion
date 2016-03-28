@@ -9,6 +9,7 @@ import qualified Data.Maybe as Maybe
 import System.Random (StdGen, randomR)
 
 import Data.Array.ST
+import Control.Applicative ()
 import Control.Monad
 import Control.Monad.ST
 import Data.STRef
@@ -63,7 +64,7 @@ data CardDef = CardDef { -- Card id is purely a performance artifact to avoid st
                    cardCost :: GameState -> Cost,
                    types :: ![CardType],
                    cardPoints :: !(Player -> Int),
-                   onPlay :: !(Maybe Card -> Action),
+                   onPlay :: !(Maybe Card -> ActionTemplate),
                    initialSupply :: Int -> Int,
                    triggers :: TriggerHandler,
                    canBuy :: GameState -> Bool
@@ -97,75 +98,79 @@ data TriggerSource = FromCard Card Location |
                      FromCardEffect CardDef |
                      FromSupply CardDef
 
-type TriggerHandler = Trigger -> Effect -> TriggerSource -> Action -> Action
+type TriggerHandler = Trigger -> Effect -> TriggerSource -> ActionTemplate -> ActionTemplate
 
 nullHandler :: TriggerHandler
 nullHandler _ _ _ cont = cont
 
 whileInPlay :: TriggerHandler -> TriggerHandler
-whileInPlay inner trigger effect (FromCard card loc) cont player state
-  | card `elem` inp = inner trigger effect (FromCard card loc) cont player state
-  | otherwise = cont player state
+whileInPlay inner trigger effect (FromCard card loc) cont player = gameState' >>= sub
   where
-    inp = inPlay $ playerByName state player
-whileInPlay _ _ _ _ cont player state = cont player state
+    sub state
+      | card `elem` inp = inner trigger effect (FromCard card loc) cont player
+      | otherwise = cont player
+      where
+        inp = inPlay $ playerByName state player
+whileInPlay _ _ _ _ cont player = cont player
 
 whileInHand :: TriggerHandler -> TriggerHandler
-whileInHand inner trigger effect (FromCard card loc) cont player state
-  | card `elem` inp = inner trigger effect (FromCard card loc) cont player state
-  | otherwise = cont player state
+whileInHand inner trigger effect (FromCard card loc) cont player = gameState' >>= sub
   where
-    inp = hand $ playerByName state player
-whileInHand _ _ _ _ cont player state = cont player state
+    sub state
+      | card `elem` inp = inner trigger effect (FromCard card loc) cont player
+      | otherwise = cont player
+      where
+        inp = hand $ playerByName state player
+whileInHand _ _ _ _ cont player = cont player
 
 combineHandlers :: TriggerHandler -> TriggerHandler -> TriggerHandler
 combineHandlers h1 h2 trigger effect source cont = h1 trigger effect source (h2 trigger effect source cont)
 
-onDiscardFromPlay :: (Card -> Action -> Action) -> TriggerHandler
+onDiscardFromPlay :: (Card -> ActionTemplate -> ActionTemplate) -> TriggerHandler
 onDiscardFromPlay act DiscardTrigger (EffectDiscard c1 InPlay) (FromCard c2 _) cont = if c1 == c2 then act c2 cont else cont
 onDiscardFromPlay _ _ _ _ cont = cont
 
-onDiscardSelf :: (Card -> Action) -> TriggerHandler
+onDiscardSelf :: (Card -> ActionTemplate) -> TriggerHandler
 onDiscardSelf action DiscardTrigger (EffectDiscard c1 _) (FromCard c2 _) cont = if c1 == c2 then action c2 &&& cont else cont
 onDiscardSelf _ _ _ _ cont = cont
 
-onBuyA :: (TriggerSource -> CardDef -> Action) -> TriggerHandler
+onBuyA :: (TriggerSource -> CardDef -> ActionTemplate) -> TriggerHandler
 onBuyA action BuyTrigger (EffectBuy def) source cont = (action source def) &&& cont
 onBuyA _ _ _ _ cont = cont
 
-onBuy :: (CardDef -> Action) -> TriggerHandler
+onBuy :: (CardDef -> ActionTemplate) -> TriggerHandler
 onBuy action = onBuyA (\_ -> action)
 
-onBuySelf :: Action -> TriggerHandler
+onBuySelf :: ActionTemplate -> TriggerHandler
 onBuySelf action BuyTrigger (EffectBuy c1) (FromCardEffect c2) cont = if c1 == c2 then action &&& cont else cont
 onBuySelf _ _ _ _ cont = cont
 
-onGainSelf :: Action -> TriggerHandler
+onGainSelf :: ActionTemplate -> TriggerHandler
 onGainSelf action GainTrigger (EffectGainFrom c1 _ _) (FromCard c2 _) cont = if c1 == c2 then action &&& cont else cont
 onGainSelf action GainTrigger (EffectGain d1 _) (FromCardEffect d2) cont = if d1 == d2 then action &&& cont else cont
 onGainSelf _ _ _ _ cont = cont
 
-onTrashSelf :: Action -> TriggerHandler
+onTrashSelf :: ActionTemplate -> TriggerHandler
 onTrashSelf action TrashTrigger (EffectTrash c1 _) (FromCard c2 _) cont = if c1 == c2 then action &&& cont else cont
 onTrashSelf _ _ _ _ cont = cont
 
-onTrash :: Action -> TriggerHandler
+onTrash :: ActionTemplate -> TriggerHandler
 onTrash action TrashTrigger _ _ cont = cont &&& action
 onTrash _ _ _ _ cont = cont
 
-onStartOfTurn :: Action -> TriggerHandler
+onStartOfTurn :: ActionTemplate -> TriggerHandler
 onStartOfTurn action StartOfTurnTrigger _ _ cont = action &&& cont
 onStartOfTurn _ _ _ _ cont = cont
 
-onStartOfGame :: Action -> TriggerHandler
+onStartOfGame :: ActionTemplate -> TriggerHandler
 onStartOfGame action StartOfGameTrigger _ _ cont = action &&& cont
 onStartOfGame _ _ _ _ cont = cont
 
-onAttack :: Action -> TriggerHandler
+onAttack :: ActionTemplate -> TriggerHandler
 onAttack action AttackTrigger _ _ cont = action &&& cont
 onAttack _ _ _ _ cont = cont
 
-onAttackA :: (TriggerSource -> Action) -> TriggerHandler
+onAttackA :: (TriggerSource -> ActionTemplate) -> TriggerHandler
 onAttackA action AttackTrigger _ source cont = (action source) &&& cont
 onAttackA _ _ _ _ cont = cont
 
@@ -179,37 +184,36 @@ noTriggers :: TriggerHandler
 noTriggers = nullHandler
 
 -- TODO refactor these to use carddef* instead
-carddef :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> Action -> TriggerHandler -> Edition -> CardDef
+carddef :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> ActionTemplate -> TriggerHandler -> Edition -> CardDef
 carddef id name cost types points effect triggers edition = CardDef id name edition (const cost) types points (\_ -> effect) (const 10) triggers (const True)
 
-carddefA :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> (Maybe Card -> Action) -> TriggerHandler -> Edition -> CardDef
+carddefA :: Int -> String -> Cost -> [CardType] -> (Player -> Int) -> (Maybe Card -> ActionTemplate) -> TriggerHandler -> Edition -> CardDef
 carddefA id name cost types points effect triggers edition = CardDef id name edition (const cost) types points effect (const 10) triggers (const True)
 
 treasure :: Int -> String -> Int -> Int -> Edition -> CardDef
 treasure id name cost money edition = CardDef id name edition (const (simpleCost cost)) [Treasure] noPoints (\_ -> plusMoney money) (const 10) noTriggers (const True)
 
-action :: Int -> String -> Int -> Action -> Edition -> CardDef
+action :: Int -> String -> Int -> ActionTemplate -> Edition -> CardDef
 action id name cost effect edition = CardDef id name edition (const (simpleCost cost)) [Action] noPoints (\_ -> effect) (const 10) noTriggers (const True)
 
-actionA :: Int -> String -> Int -> (Maybe Card -> Action) -> Edition -> CardDef
+actionA :: Int -> String -> Int -> (Maybe Card -> ActionTemplate) -> Edition -> CardDef
 actionA id name cost effect edition = CardDef id name edition (const (simpleCost cost)) [Action] noPoints effect (const 10) noTriggers (const True)
 
-duration :: Int -> String -> Int -> Action -> Action -> Edition -> CardDef
+duration :: Int -> String -> Int -> ActionTemplate -> ActionTemplate -> Edition -> CardDef
 duration id name cost effect startOfTurn edition =
   CardDef id name edition (const (simpleCost cost)) [Action, Duration] noPoints  (\_ -> effect) (const 10) (onStartOfTurn startOfTurn) (const True)
 
-durationA :: Int -> String -> Int -> (Maybe Card -> Action) -> Action -> Edition -> CardDef
+durationA :: Int -> String -> Int -> (Maybe Card -> ActionTemplate) -> ActionTemplate -> Edition -> CardDef
 durationA id name cost effect startOfTurn edition =
   CardDef id name edition (const (simpleCost cost)) [Action, Duration] noPoints  effect (const 10) (onStartOfTurn startOfTurn) (const True)
 
-attack :: Int -> String -> Int -> Action -> Edition -> CardDef
+attack :: Int -> String -> Int -> ActionTemplate -> Edition -> CardDef
 attack id name cost effect edition = CardDef id name edition (const (simpleCost cost)) [Action, Attack] noPoints (\_ -> effect) (const 10) noTriggers (const True)
 
 victory :: Int -> String -> Int -> Int -> Edition -> CardDef
 victory id name cost points edition = CardDef id name edition (const (simpleCost cost)) [Victory] (const points) (\_ -> pass) (const 10) noTriggers (const True)
 
 notImplemented name edition = CardDef (-1) name edition (const (simpleCost 0)) [] (\_ -> 0) (\_ -> pass) (const 0) noTriggers (const False)
-
 
 withTrigger :: (Edition -> CardDef) -> TriggerHandler -> Edition -> CardDef
 withTrigger cardgen trigger ed = card { triggers = trigger }
@@ -224,6 +228,7 @@ withBuyRestriction cardgen pred ed = (cardgen ed) { canBuy = pred }
 
 withSpecialCost :: (Edition -> CardDef) -> (GameState -> Cost) -> Edition -> CardDef
 withSpecialCost cardgen f ed = (cardgen ed) { cardCost = f }
+
 
 -- Basic cards
 
@@ -250,11 +255,11 @@ cHovel = carddef 850 "Hovel" (simpleCost 1) [Reaction, Shelter] noPoints pass (w
 cNecropolis = carddef 851 "Necropolis" (simpleCost 1) [Action, Shelter] noPoints (plusActions 2) noTriggers DarkAges
 cOvergrownEstate = carddef 852 "Overgrown Estate" (simpleCost 1) [Victory, Shelter] noPoints pass (onTrashSelf (plusCards 1)) DarkAges
 
-hovelTrigger :: TriggerSource -> CardDef -> Action
-hovelTrigger (FromCard hovel _) card p s
-  | hasType card Victory = choose (ChooseToReact hovel BuyTrigger) (\b -> if b then trash hovel (Hand p) else pass) p s
-  | otherwise = toSimulation s
-hovelTrigger _ _ _ s = toSimulation s
+hovelTrigger :: TriggerSource -> CardDef -> ActionTemplate
+hovelTrigger (FromCard hovel _) card p
+  | hasType card Victory = choose (ChooseToReact hovel BuyTrigger) (\b -> if b then trash hovel (Hand p) else pass) p
+  | otherwise = noOpSimulation
+hovelTrigger _ _ _ = noOpSimulation
 
 shelters = [cHovel, cNecropolis, cOvergrownEstate]
 
@@ -269,21 +274,23 @@ ruins = map ($ DarkAges)
    carddef 844 "Survivors" (simpleCost 0) [Action, Ruins] noPoints (reshuffleIfNeededN 2 &&& survivors) noTriggers
   ]
 
-survivors :: Action
-survivors p s
-  | null d = toSimulation s
-  | length d == 1 = choose (ChooseToUse (EffectDiscard (head d) (TopOfDeck p))) (\b -> if b then discard (head d) (TopOfDeck p) else pass) p s
-  | otherwise = (addLog (LogPeek (VisibleToPlayer p) p [c1,c2] (TopOfDeck p))
-                 &&& chooseEffects 1 [EffectDiscard unknown (TopOfDeck p), EffectPut unknown (TopOfDeck p) (TopOfDeck p)] enact)
-                  p s
+survivors :: ActionTemplate
+survivors p = gameState' >>= inner
   where
-    d = deck $ playerByName s p
-    [c1,c2] = d
-    enact [(EffectDiscard _ _)] = discardAll [c1,c2] (TopOfDeck p)
-    enact _ = chooseMany (EffectPut unknown (TopOfDeck p) (TopOfDeck p))
-                         [c1,c2]
-                         (2,2)
-                         (\cs -> putAll (reverse cs) (TopOfDeck p) (TopOfDeck p))
+    inner s
+      | null d = noOpSimulation
+      | length d == 1 = choose (ChooseToUse (EffectDiscard (head d) (TopOfDeck p))) (\b -> if b then discard (head d) (TopOfDeck p) else pass) p
+      | otherwise = (addLog (LogPeek (VisibleToPlayer p) p [c1,c2] (TopOfDeck p))
+                     &&& chooseEffects 1 [EffectDiscard unknown (TopOfDeck p), EffectPut unknown (TopOfDeck p) (TopOfDeck p)] enact)
+                      p
+      where
+        d = deck $ playerByName s p
+        [c1,c2] = d
+        enact [(EffectDiscard _ _)] = discardAll [c1,c2] (TopOfDeck p)
+        enact _ = chooseMany (EffectPut unknown (TopOfDeck p) (TopOfDeck p))
+                             [c1,c2]
+                             (2,2)
+                             (\cs -> putAll (reverse cs) (TopOfDeck p) (TopOfDeck p))
 
 
 
@@ -291,6 +298,7 @@ unknownDef = CardDef (-1) "XXX" Base (const (simpleCost 0)) [Action] (\_ -> 0) (
 unknown = Card (-1) unknownDef
 
 isUnknown card = cardName (typ card) == "XXX"
+
 
 type PlayerId = String
 
@@ -398,18 +406,84 @@ data GameState = GameState { players :: Map.Map PlayerId Player,
 
 data Result = Tie [PlayerId] | Win PlayerId deriving (Eq, Read, Show)
 
-newtype SimulationState = SimulationState { randomGenerator :: StdGen }
+data SimulationState = SimulationState { game :: GameState, randomGenerator :: StdGen }
 
-type SimulationT a = St.State SimulationState a
-type Simulation = SimulationT GameStep
+
+-- Notes on the type hierarchy
+-- o Base non-monadic type is GameState
+-- o Combined with the random generator state, GameState forms the SimulationState
+-- o Based on SimulationState we have GameT, which is just a state monad
+-- o Finally at the top of the edifice we have SimulationT, which is a monad tracking player decisions
+--   and decision dependent continuations. Internally it is uses GameT for actual state tracking
+
+type GameT a = St.State SimulationState a
+
+newtype SimulationT a = SimulationT { nextStep :: GameT (MaybeDecision a (SimulationT a)) }
+
+instance Functor SimulationT where
+    fmap f m = m >>= \a -> return (f a)
+
+instance Applicative SimulationT where
+    pure v = return v
+
+    (<*>) mf ma = do
+        f <- mf
+        a <- ma
+        return (f a)
+
+instance Monad SimulationT where
+    return v = SimulationT $ return (Result v)
+
+    (>>=) (SimulationT dec1) f = SimulationT $
+        dec1 >>= \decision ->
+            case decision of
+                (Result v) -> nextStep (f v)
+                (Decision player _ choice) ->
+                    gameState >>= \state -> return $ Decision player state $ choice `andThenI` f
+
+andThenI :: Decision (SimulationT a) -> (a -> SimulationT b) -> Decision (SimulationT b)
+andThenI (ChooseToReact caption card cont) f = ChooseToReact caption card (\b -> cont b >>= f )
+andThenI (ChooseToUse effect cont) f = ChooseToUse effect (\b -> cont b >>= f)
+andThenI (ChooseCard caption cards cont) f = ChooseCard caption cards (\c -> cont c >>= f)
+andThenI (ChooseCards caption cards lohi cont) f = ChooseCards caption cards lohi (\cs -> cont cs >>= f)
+andThenI (ChooseEffects num effects cont) f = ChooseEffects num effects (\cs -> cont cs >>= f)
+andThenI (ChooseNumber effect lohi cont) f = ChooseNumber effect lohi (\cs -> cont cs >>= f)
+andThenI (Optional inner fallback) f = Optional (inner `andThenI` f) (fallback >>= f)
+
+
+decision :: Decision (SimulationT ()) -> ActionTemplate
+decision decision player = gameState' >>= \state -> SimulationT $ return $ Decision player state decision
+
+optDecision :: Decision (SimulationT ()) -> ActionTemplate
+optDecision decision player = gameState' >>= \state ->
+    SimulationT $ return $ Decision player state (Optional decision noOpSimulation)
+
 
 -- Simulation primitives
 
-randomGen :: SimulationT StdGen
+randomGen :: GameT StdGen
 randomGen = fmap randomGenerator St.get
 
-setRandomGen :: StdGen -> SimulationT ()
-setRandomGen gen = St.put (SimulationState gen) >> return ()
+setRandomGen :: StdGen -> GameT ()
+setRandomGen gen = St.modify (\s -> s { randomGenerator = gen })
+
+gameState :: GameT GameState
+gameState = fmap game St.get
+
+putGameState :: GameState -> GameT ()
+putGameState state = St.modify (\s -> s { game = state})
+
+modGameState :: (GameState -> GameState) -> GameT ()
+modGameState f = St.modify (\s -> s { game = f (game s) })
+
+gameState' :: SimulationT GameState
+gameState' = SimulationT (fmap Result gameState)
+
+putGameState' :: GameState -> SimulationT ()
+putGameState' state = SimulationT (fmap Result (putGameState state))
+
+modGameState' :: (GameState -> GameState) -> SimulationT ()
+modGameState' f = SimulationT (fmap Result (modGameState f))
 
 -- TODO add source card
 data Trigger =
@@ -449,16 +523,16 @@ data Effect =
   MultiEffect [Effect] |
   NullEffect
 
-data Decision =
-  Optional Decision Simulation |
-  ChooseCard Effect [Card] (Card -> Simulation) |
-  ChooseCards Effect [Card] (Int,Int) ([Card] -> Simulation) |
-  ChooseToUse Effect (Bool -> Simulation) |
-  ChooseToReact Card Trigger (Bool -> Simulation) | -- Or actually, ChooseToReact Trigger Effect, but the original is more descriptive of the decision
-  ChooseEffects Int [Effect] ([Effect] -> Simulation) |
-  ChooseNumber Effect (Int,Int) (Int -> Simulation)
+data Decision a =
+  Optional (Decision a) a |
+  ChooseCard Effect [Card] (Card -> a) |
+  ChooseCards Effect [Card] (Int,Int) ([Card] -> a) |
+  ChooseToUse Effect (Bool -> a) |
+  ChooseToReact Card Trigger (Bool -> a) | -- Or actually, ChooseToReact Trigger Effect, but the original is more descriptive of the decision
+  ChooseEffects Int [Effect] ([Effect] -> a) |
+  ChooseNumber Effect (Int,Int) (Int -> a)
 
-instance Show Decision where
+instance Show (Decision a) where
   show (Optional dec _) = "Optional(" ++ show dec ++ ")"
   show (ChooseCard effect cards _) = "ChooseCard(" ++ show effect ++ ", " ++ show cards ++ ")"
   show (ChooseCards effect cards (lo,hi) _) = "ChooseCards(" ++ show effect ++ ", " ++ show cards ++ ", " ++ show lo ++ ", " ++ show hi ++ ")"
@@ -468,10 +542,9 @@ instance Show Decision where
   show (ChooseNumber effect (lo,hi) _) = "ChooseNumber(" ++ show effect ++ ", " ++ show lo ++ ", " ++ show hi ++ ")"
 
 -- TODO add source of decision
-data GameStep = State GameState | Decision PlayerId GameState Decision
+data MaybeDecision a b = Result a | Decision PlayerId GameState (Decision b)
 
-type Action = PlayerId -> GameState -> Simulation
-
+type ActionTemplate = PlayerId -> SimulationT ()
 
 instance Show GameState where
   show g = "Game {\n" ++
@@ -496,8 +569,8 @@ instance Show GameState where
     " }\n" ++
     "}"
 
-instance Show GameStep where
-  show (State state) = "State(" ++ show state ++ ")"
+instance Show a => Show (MaybeDecision a b) where
+  show (Result state) = "State(" ++ show state ++ ")"
   show (Decision pid state decision) = "Decision(" ++ show pid ++ ", " ++ show state ++ ", " ++ show decision ++ ")"
 
 instance Show Effect where
@@ -527,7 +600,7 @@ instance Show Effect where
 
 -- Game creation
 
-mkPlayer :: [Card] -> String -> SimulationT Player
+mkPlayer :: [Card] -> String -> GameT Player
 mkPlayer deck name = draw Player { name = name, hand = [],
                                    discardPile = deck, deck = [], inPlay = [],
                                    mats = Map.empty, inPlayDuration = [],
@@ -550,10 +623,6 @@ nullState =
               finished = False,
               gameLog = [] }
 
-toGameState :: GameStep -> Maybe GameState
-toGameState (State state) = Just state
-toGameState _ = Nothing
-
 initialDeck :: [CardDef]
 initialDeck = replicate 7 copper ++ replicate 3 estate
 
@@ -566,29 +635,29 @@ mkPile card num = map ((`Card` card) . (+ (100 * cardTypeId card))) [0..(num-1)]
 mkPlayerPile :: [CardDef] -> Int -> [Card]
 mkPlayerPile cards playerNo = zipWith (\c seq -> Card (seq + (100*(20+playerNo))) c) cards [0..]
 
-addNonSupplyPile :: CardDef -> Action
-addNonSupplyPile card _ state =
-  toSimulation $ state { nonSupplyPiles = Map.insert card
-                                                     (mkPile card (initialSupply card (length (turnOrder state))))
-                                                     (nonSupplyPiles state) }
+addNonSupplyPile :: CardDef -> ActionTemplate
+addNonSupplyPile card _ =
+  modGameState' $ \state -> state { nonSupplyPiles = Map.insert card
+                                                    (mkPile card (initialSupply card (length (turnOrder state))))
+                                                    (nonSupplyPiles state) }
 
 mkGame :: GameType -> [String] -> [CardDef] -> SimulationT GameState
 mkGame typ names kingdomCards =
-  (sequence $ zipWith mkPlayer decks names) >>= (\players ->
-    fmap (Maybe.fromJust . toGameState) $
-      handleAllTriggers
+  SimulationT (liftM Result (sequence $ zipWith mkPlayer decks names))
+  >>= (\players -> putGameState' (protoState players))
+  >> (handleAllTriggers
         StartOfGameTrigger
         (map FromCardEffect kingdomCards)
         NullEffect
         pass
-        (head names)
-        (protoState players))
-  >>= \state ->
-    if useRuins
-      then do
-            shuffledRuins <- shuffle allRuins
-            return (state { piles = Map.insert ruinsPseudoDef (take (10 * (length names - 1)) shuffledRuins) (piles state) })
-      else return state
+        (head names))
+  >> (if useRuins
+      then
+        SimulationT (do shuffledRuins <- shuffle allRuins
+                        modGameState (\state -> state { piles = Map.insert ruinsPseudoDef (take (10 * (length names - 1)) shuffledRuins) (piles state) })
+                        return (Result ()))
+      else noOpSimulation)
+  >> gameState'
 
   where
     playerNo = length names
@@ -608,81 +677,68 @@ mkGame typ names kingdomCards =
 
     protoState players = nullState { players = Map.fromList $ zip names players, turnOrder = names, piles = pileMap }
 
-
 -- Combinators
 
-decision :: Decision -> Action
-decision decision player state = return $ Decision player state decision
 
-optDecision :: Decision -> Action
-optDecision decision player state = return $ Decision player state (Optional decision (return (State state)))
+toAction :: MaybeDecision () (SimulationT ()) -> ActionTemplate
+toAction step _ = SimulationT $ return (step)
 
-andThenI :: Decision -> (GameState -> Simulation) -> Decision
-andThenI (ChooseToReact caption card cont) f = ChooseToReact caption card (\b -> cont b `andThen` f)
-andThenI (ChooseToUse effect cont) f = ChooseToUse effect (\b -> cont b `andThen` f)
-andThenI (ChooseCard caption cards cont) f = ChooseCard caption cards (\c -> cont c `andThen` f)
-andThenI (ChooseCards caption cards lohi cont) f = ChooseCards caption cards lohi (\cs -> cont cs `andThen` f)
-andThenI (ChooseEffects num effects cont) f = ChooseEffects num effects (\cs -> cont cs `andThen` f)
-andThenI (ChooseNumber effect lohi cont) f = ChooseNumber effect lohi (\cs -> cont cs `andThen` f)
-andThenI (Optional inner fallback) f = Optional (inner `andThenI` f) (fallback `andThen` f)
+toSimulation :: GameState -> SimulationT GameState
+toSimulation = return
 
-andThen :: Simulation -> (GameState -> Simulation) -> Simulation
-andThen sim f = do
-  step <- sim
-  case step of
-    (State state) -> f state
-    (Decision player state choice) -> decision (choice `andThenI` f) player state
+noOpSimulation :: SimulationT ()
+noOpSimulation = return ()
 
-toAction :: GameStep -> Action
-toAction step _ _ = return step
-
-toSimulation :: GameState -> Simulation
-toSimulation state = return (State state)
+simWhen :: Bool -> SimulationT () -> SimulationT ()
+simWhen p s = if p then s else noOpSimulation
 
 {-# INLINE (&&&) #-}
-(&&&) :: Action -> Action -> Action
-(&&&) act1 act2 player state = act1 player state `andThen` act2 player
+(&&&) :: ActionTemplate -> ActionTemplate -> ActionTemplate
+(&&&) act1 act2 player = act1 player >> act2 player
 
 {-# INLINE (&&+) #-}
-(&&+) :: Action -> (PlayerId -> GameState -> Action) -> Action
-(&&+) act1 act2 player state = act1 player state `andThen` (\s2 -> (act2 player s2) player s2)
+(&&+) :: ActionTemplate -> (PlayerId -> GameState -> ActionTemplate) -> ActionTemplate
+(&&+) act1 act2 player = act1 player >> gameState' >>= \state -> act2 player state player
 
 {-# INLINE (&&=) #-}
-(&&=) :: (a -> Action) -> a -> Action
+(&&=) :: (a -> ActionTemplate) -> a -> ActionTemplate
 (&&=) = ($)
 
-seqSteps :: (a -> GameState -> Simulation) -> [a] -> GameState -> Simulation
-seqSteps _ [] state = toSimulation state
-seqSteps f (x:xs) state = f x state `andThen` seqSteps f xs
 
-seqActions :: (a -> Action) -> [a] -> Action
-seqActions _ [] _ state = toSimulation state
-seqActions f (x:xs) p state = f x p state `andThen` seqActions f xs p
+seqSteps :: ActionTemplate -> [PlayerId] -> SimulationT ()
+seqSteps _ [] = noOpSimulation
+seqSteps f (x:xs) = f x >> seqSteps f xs
 
-choose :: ((a -> Simulation) -> Decision) -> (a -> Action) -> Action
-choose dec cont player state = decision (dec (\input -> cont input player state)) player state
+seqActions :: (a -> ActionTemplate) -> [a] -> ActionTemplate
+seqActions _ [] _ = noOpSimulation
+seqActions f (x:xs) p = f x p >> seqActions f xs p
 
-chooseOne :: Effect -> [Card] -> (Card -> Action) -> Action
-chooseOne typ choices cont player state =
-  decision (ChooseCard typ choices (\card -> cont card player state)) player state
+choose :: ((a -> SimulationT ()) -> Decision (SimulationT ())) -> (a -> ActionTemplate) -> ActionTemplate
+choose dec cont player = decision (dec (\input -> cont input player)) player
 
-chooseMany :: Effect -> [Card] -> (Int,Int) -> ([Card] -> Action) -> Action
-chooseMany typ choices lohi cont player state =
-  decision (ChooseCards typ choices lohi (\chosen -> cont chosen player state)) player state
+chooseOne :: Effect -> [Card] -> (Card -> ActionTemplate) -> ActionTemplate
+chooseOne typ choices cont player =
+  decision (ChooseCard typ choices (\card -> cont card player)) player
 
-chooseEffects :: Int -> [Effect] -> ([Effect] -> Action) -> Action
-chooseEffects num effects cont player state =
-  decision (ChooseEffects num effects (\chosen -> cont chosen player state)) player state
+chooseMany :: Effect -> [Card] -> (Int,Int) -> ([Card] -> ActionTemplate) -> ActionTemplate
+chooseMany typ choices lohi cont player =
+  decision (ChooseCards typ choices lohi (\chosen -> cont chosen player)) player
 
-chooseToReveal :: (CardDef -> Bool) -> Action -> Action -> Action
-chooseToReveal selector fyes fno player state
-  | null cands = fno player state
-  | otherwise = decision (ChooseToUse (EffectReveal (head cands))
-                                      (\b -> if b then (reveal [(head cands)] &&& fyes) player state
-                                                  else fno player state))
-                  player state
+chooseEffects :: Int -> [Effect] -> ([Effect] -> ActionTemplate) -> ActionTemplate
+chooseEffects num effects cont player =
+  decision (ChooseEffects num effects (\chosen -> cont chosen player)) player
+
+chooseToReveal :: (CardDef -> Bool) -> ActionTemplate -> ActionTemplate -> ActionTemplate
+chooseToReveal selector fyes fno player = gameState' >>= inner
   where
-    cands = filter (selector . typ) $ hand $ playerByName state player
+    inner state
+      | null cands = fno player
+      | otherwise = decision (ChooseToUse (EffectReveal (head cands))
+                                          (\b -> if b then (reveal [(head cands)] &&& fyes) player
+                                                      else fno player))
+                      player
+      where
+        cands = filter (selector . typ) $ hand $ playerByName state player
 
 
 -- Game functions
@@ -738,7 +794,7 @@ addDurationEffect def state =
 updatePlayer :: GameState -> String -> (Player -> Player) -> GameState
 updatePlayer state pname f = state { players = Map.adjust f pname (players state) }
 
-updatePlayerR :: GameState -> String -> (Player -> SimulationT Player) -> SimulationT GameState
+updatePlayerR :: GameState -> String -> (Player -> GameT Player) -> GameT GameState
 updatePlayerR state pname f =
   f ((players state) Map.! pname) >>= \new ->
   return (state { players = Map.insert pname new (players state) })
@@ -844,6 +900,7 @@ gameLogs = reverse . gameLog
 visibleGameLogs :: PlayerId -> GameState -> [Log]
 visibleGameLogs pid = reverse . filter (canSee pid) . gameLog
 
+
 moneyValue :: CardDef -> Int
 moneyValue card
   | card == platinum = 5
@@ -865,6 +922,8 @@ visibleState id state = state { players = Map.map anonymize (players state) }
       | id == name p = p { deck = L.sort (deck p) }
       | otherwise = p { hand = replicate (length (hand p)) unknown,
                         deck = replicate (length (deck p)) unknown }
+
+
 
 
 -- Utilities
@@ -893,8 +952,9 @@ shuffle' xs gen = runST (do
     newArray :: Int -> [a] -> ST s (STArray s Int a)
     newArray n xs =  newListArray (1,n) xs
 
-shuffle :: [a] -> SimulationT [a]
+shuffle :: [a] -> GameT [a]
 shuffle xs = randomGen >>= \gen -> let (cards,gen') = shuffle' xs gen in setRandomGen gen' >> return cards
+
 
 -- Clojure / F# style threading
 {-# INLINE (|>) #-}
@@ -910,7 +970,8 @@ summarizeCards cards =
   L.intersperse ", " |>
   concat
 
-reshuffleDiscard :: Player -> SimulationT Player
+
+reshuffleDiscard :: Player -> GameT Player
 reshuffleDiscard p =
   do
     shuffled <- shuffle (discardPile p)
@@ -919,14 +980,14 @@ reshuffleDiscard p =
 canDraw :: Player -> Bool
 canDraw p = not (null (deck p)) || not (null (discardPile p))
 
-draw :: Player -> Int -> SimulationT Player
+draw :: Player -> Int -> GameT Player
 draw p num
   | length (deck p) < num = fmap (\p -> p !!! num) (reshuffleDiscard p)
   | otherwise = return $ p !!! num
   where
     (!!!) p num = p { hand = take num (deck p) ++ hand p, deck = drop num (deck p)}
 
-ensureCanDraw :: Int -> GameState -> PlayerId -> SimulationT (Maybe GameState)
+ensureCanDraw :: Int -> GameState -> PlayerId -> GameT (Maybe GameState)
 ensureCanDraw num state name
   | length (deck (playerByName state name)) >= num = return $ Just state
   | otherwise =
@@ -935,37 +996,36 @@ ensureCanDraw num state name
 
 -- Game action
 
-addModifier :: ModAttribute -> Modifier -> Action
-addModifier attr mod _ state =
-  toSimulation $ state { turn = (turn state) { modifiers = Map.insertWith stackMod attr mod (modifiers (turn state)) } }
+addModifier :: ModAttribute -> Modifier -> ActionTemplate
+addModifier attr mod _ = modGameState' $ \state -> state { turn = (turn state) { modifiers = Map.insertWith stackMod attr mod (modifiers (turn state)) } }
 
-addLog :: Log -> Action
-addLog item _ state = toSimulation $ state { turn = (turn state) { turnLog = item : turnLog (turn state) }, gameLog = item : (gameLog state) }
+addLog :: Log -> ActionTemplate
+addLog item _ = modGameState' $ \state -> state { turn = (turn state) { turnLog = item : turnLog (turn state) }, gameLog = item : (gameLog state) }
 
-playEffect :: CardDef -> Maybe Card -> Action
-playEffect card source player state =
+playEffect :: CardDef -> Maybe Card -> ActionTemplate
+playEffect card source player =
+  modGameState' (\state -> if Maybe.isNothing source && hasType card Duration
+                              then addDurationEffect card state
+                              else state) >>
   (addLog (LogPlay player card) &&& onPlay card source)
   player
-  (if Maybe.isNothing source && hasType card Duration
-   then addDurationEffect card state
-   else state)
 
-playFrom :: Card -> Location -> Action
-playFrom card loc player state =
+playFrom :: Card -> Location -> ActionTemplate
+playFrom card loc player =
+  modGameState' (transfer card loc (if isDuration card then InPlayDuration else InPlay)) >>
   playEffect (typ card)
              (Just card)
              player
-             (transfer card loc (if isDuration card then InPlayDuration else InPlay) state)
 
 
-play :: Card -> Action
-play card player state = playFrom card (Hand player) player state
+play :: Card -> ActionTemplate
+play card player = playFrom card (Hand player) player
 
-playAll :: [Card] -> Action
-playAll [] _ state = toSimulation state
-playAll (c:cs) player state = play c player state `andThen` playAll cs player
+playAll :: [Card] -> ActionTemplate
+playAll [] _ = noOpSimulation
+playAll (c:cs) player = play c player >> playAll cs player
 
-getTrigger :: TriggerSource -> Trigger -> Effect -> Action -> Action
+getTrigger :: TriggerSource -> Trigger -> Effect -> ActionTemplate -> ActionTemplate
 getTrigger (FromCard card loc) trigger effect cont = (triggers (typ card)) trigger effect (FromCard card loc) cont
 getTrigger (FromCardEffect def) trigger effect cont = (triggers def) trigger effect (FromCardEffect def) cont
 getTrigger (FromSupply def) trigger effect cont = (triggers def) trigger effect (FromSupply def) cont
@@ -974,34 +1034,38 @@ getTrigger (FromSupply def) trigger effect cont = (triggers def) trigger effect 
 topOfSupply :: CardDef -> GameState -> Card
 topOfSupply card state = head $ (piles state) Map.! card
 
-handleTriggers :: Trigger -> TriggerSource -> Effect -> Action -> Action
+handleTriggers :: Trigger -> TriggerSource -> Effect -> ActionTemplate -> ActionTemplate
 handleTriggers trigger card = getTrigger card trigger
 
-handleAllTriggers :: Trigger -> [TriggerSource] -> Effect -> Action -> Action
+handleAllTriggers :: Trigger -> [TriggerSource] -> Effect -> ActionTemplate -> ActionTemplate
 handleAllTriggers trigger cards effect cont =
   foldr (\c cont -> getTrigger c trigger effect cont)
         cont
         cards
 
-reshuffle :: Action
-reshuffle player state = reshuffleDiscard (playerByName state player) >>= \p ->
-                         toSimulation $ state { players = Map.insert player p (players state) }
+reshuffle :: ActionTemplate
+reshuffle player =
+    gameState' >>= \state ->
+        SimulationT (liftM Result (reshuffleDiscard (playerByName state player)
+                                   >>= (\p -> return $ state { players = Map.insert player p (players state) })
+                                   >>= putGameState))
 
-reshuffleIfNeeded :: Action
-reshuffleIfNeeded player state = if null (deck (playerByName state player)) then reshuffle player state else toSimulation state
 
-reshuffleIfNeededN :: Int -> Action
-reshuffleIfNeededN n player state = if length (deck (playerByName state player)) < n then reshuffle player state else toSimulation state
+reshuffleIfNeeded :: ActionTemplate
+reshuffleIfNeeded player = gameState' >>= \state -> if null (deck (playerByName state player)) then reshuffle player else noOpSimulation
+
+reshuffleIfNeededN :: Int -> ActionTemplate
+reshuffleIfNeededN n player = gameState' >>= \state -> if length (deck (playerByName state player)) < n then reshuffle player else noOpSimulation
 
 -- same as put but without the extra logging
-move :: Card -> Location -> Location -> Action
-move card source target _ state = toSimulation $ transfer card source target state
+move :: Card -> Location -> Location -> ActionTemplate
+move card source target _ = modGameState' $ transfer card source target
 
-put :: Card -> Location -> Location -> Action
-put card source target p state =
-  (addLog (LogPut (VisibleToPlayer p) p card source target) &&& move card source target) p state
+put :: Card -> Location -> Location -> ActionTemplate
+put card source target p =
+  (addLog (LogPut (VisibleToPlayer p) p card source target) &&& move card source target) p
 
-putAll :: [Card] -> Location -> Location -> Action
+putAll :: [Card] -> Location -> Location -> ActionTemplate
 putAll cards source target = seqActions (\c -> put c source target) cards
 
 playerTriggers :: Player -> [TriggerSource]
@@ -1010,129 +1074,139 @@ playerTriggers p = map (`FromCard` (Hand (name p))) (hand p) ++ map (`FromCard` 
 supplyTriggers :: GameState -> [TriggerSource]
 supplyTriggers state = map FromSupply $ Map.keys (piles state)
 
-gainFromTo :: Card -> Location -> Location -> Action
-gainFromTo card source target player state =
-  (addLog (LogGain player card source target)
-   &&& handleAllTriggers GainTrigger
-        ((FromCard card source):playerTriggers (playerByName state player) ++ supplyTriggers state)
-        (EffectGainFrom card source target)
-        (move card source target))
-    player state
+gainFromTo :: Card -> Location -> Location -> ActionTemplate
+gainFromTo card source target player =
+  gameState' >>= \state ->
+      (addLog (LogGain player card source target)
+       &&& handleAllTriggers GainTrigger
+            ((FromCard card source):playerTriggers (playerByName state player) ++ supplyTriggers state)
+            (EffectGainFrom card source target)
+            (move card source target))
+        player
 
-gainFrom :: Card -> Location -> Action
+gainFrom :: Card -> Location -> ActionTemplate
 gainFrom card source player = gainFromTo card source (Discard player) player
 
-gainSpecial :: CardDef -> Location -> Action
-gainSpecial card target player state
-  | null pile = toSimulation state
-  | otherwise = (addLog (LogGain player c NonSupply target) &&&
-                  handleAllTriggers GainTrigger
-                    ((FromCardEffect card):playerTriggers (playerByName state player) ++ supplyTriggers state)
-                    (EffectGain card target)
-                    (move c NonSupply target))
-                  player state
+gainSpecial :: CardDef -> Location -> ActionTemplate
+gainSpecial card target player = gameState' >>= inner
   where
-    pile = Map.findWithDefault [] card (nonSupplyPiles state)
-    c = head pile
-
-gainTo :: CardDef -> Location -> Action
-gainTo card target player state
-  | inSupply state card =
-    (addLog (LogGain player top Supply target) &&&
-      handleAllTriggers GainTrigger
+    inner state
+      | null pile = noOpSimulation
+      | otherwise = (addLog (LogGain player c NonSupply target) &&&
+                      handleAllTriggers GainTrigger
                         ((FromCardEffect card):playerTriggers (playerByName state player) ++ supplyTriggers state)
                         (EffectGain card target)
-                        transferT)
-                      player state
-  | otherwise = toSimulation state
-  where
-    top = topOfSupply card state
-    transferT player state = move (topOfSupply card state) Supply target player state
+                        (move c NonSupply target))
+                      player
+      where
+        pile = Map.findWithDefault [] card (nonSupplyPiles state)
+        c = head pile
 
-gain :: CardDef -> Action
+gainTo :: CardDef -> Location -> ActionTemplate
+gainTo card target player = gameState' >>= inner
+  where
+    inner state
+      | inSupply state card =
+        (addLog (LogGain player top Supply target) &&&
+          handleAllTriggers GainTrigger
+                            ((FromCardEffect card):playerTriggers (playerByName state player) ++ supplyTriggers state)
+                            (EffectGain card target)
+                            transferT)
+                          player
+      | otherwise = noOpSimulation
+      where
+        top = topOfSupply card state
+        transferT player = gameState' >>= \state -> move (topOfSupply card state) Supply target player
+
+gain :: CardDef -> ActionTemplate
 gain card player = gainTo card (Discard player) player
 
-reveal :: [Card] -> Action
-reveal cards player state = addLog (LogReveal player cards) player state
+reveal :: [Card] -> ActionTemplate
+reveal cards player = addLog (LogReveal player cards) player
 
-buy :: CardDef -> Action
-buy card player state =
-  (addLog (LogBuy player card) &&&
-    handleAllTriggers BuyTrigger ((FromCardEffect card):playerTriggers (playerByName state player)) (EffectBuy card)
-      (gain card))
-    player state
+buy :: CardDef -> ActionTemplate
+buy card player =
+  gameState' >>= \state ->
+      (addLog (LogBuy player card) &&&
+        handleAllTriggers BuyTrigger ((FromCardEffect card):playerTriggers (playerByName state player)) (EffectBuy card)
+          (gain card))
+        player
 
-trash :: Card -> Location -> Action
-trash card source player state =
-  (addLog (LogTrash player card) &&& handleAllTriggers TrashTrigger ((FromCard card source):playerTriggers (playerByName state player)) (EffectTrash card source) transferT)
-    player state
+trash :: Card -> Location -> ActionTemplate
+trash card source player =
+  gameState' >>= \state ->
+      (addLog (LogTrash player card) &&& handleAllTriggers TrashTrigger ((FromCard card source):playerTriggers (playerByName state player)) (EffectTrash card source) transferT)
+        player
   where
-    transferT _ state = toSimulation $ transfer card source Trash state
+    transferT _ = modGameState' (transfer card source Trash)
 
-trashAll :: [Card] -> Location -> Action
-trashAll cards source player state =
-  (seqActions (\c -> addLog (LogTrash player c)) cards &&&
-    (foldr (\c cont -> handleAllTriggers TrashTrigger ((FromCard c source):playerTriggers (playerByName state player)) (EffectTrash c source) cont) transferT cards))
-    player state
+trashAll :: [Card] -> Location -> ActionTemplate
+trashAll cards source player =
+  gameState' >>= \state ->
+      (seqActions (\c -> addLog (LogTrash player c)) cards &&&
+        (foldr (\c cont -> handleAllTriggers TrashTrigger ((FromCard c source):playerTriggers (playerByName state player)) (EffectTrash c source) cont)
+               transferT
+               cards))
+        player
   where
-    transferT _ state = toSimulation $ foldr (\c s -> transfer c source Trash s) state cards
+    transferT _ = modGameState' $ \state -> foldr (\c s -> transfer c source Trash s) state cards
 
-doDiscard :: Card -> Location -> Action
-doDiscard card loc player state = handleTriggers DiscardTrigger (FromCard card loc) (EffectDiscard card loc) (move card loc (Discard player)) player state
+doDiscard :: Card -> Location -> ActionTemplate
+doDiscard card loc player = handleTriggers DiscardTrigger (FromCard card loc) (EffectDiscard card loc) (move card loc (Discard player)) player
 
-discard :: Card -> Location -> Action
-discard card loc player state = (addLog (LogDiscard player [card]) &&& doDiscard card loc) player state
+discard :: Card -> Location -> ActionTemplate
+discard card loc player = (addLog (LogDiscard player [card]) &&& doDiscard card loc) player
 
 -- TODO all triggers have to happen upfront
-discardAll :: [Card] -> Location -> Action
-discardAll cards loc player state = (addLog (LogDiscard player cards) &&& seqActions (\c -> doDiscard c loc) cards) player state
+discardAll :: [Card] -> Location -> ActionTemplate
+discardAll cards loc player = (addLog (LogDiscard player cards) &&& seqActions (\c -> doDiscard c loc) cards) player
 
-plusMoney :: Int -> Action
-plusMoney num _ state = toSimulation $ state { turn = (turn state) { money = num + money (turn state) } }
+plusMoney :: Int -> ActionTemplate
+plusMoney num _ = modGameState' $ \state -> state { turn = (turn state) { money = num + money (turn state) } }
 
-plusPotion :: Action
-plusPotion _ state = toSimulation $ state { turn = (turn state) { potions = 1 + potions (turn state) } }
+plusPotion :: ActionTemplate
+plusPotion _ = modGameState' $ \state -> state { turn = (turn state) { potions = 1 + potions (turn state) } }
 
-plusCards :: Int -> Action
-plusCards num player state =
+plusCards :: Int -> ActionTemplate
+plusCards num player =
   do
-    s2 <- updatePlayerR state player $ \p -> draw p num
+    state <- gameState'
+    s2 <- SimulationT $ fmap Result (updatePlayerR state player $ \p -> draw p num)
+    putGameState' s2
     let newhand = hand (playerByName s2 player)
     let newcards = take (length newhand - length (hand (playerByName state player))) newhand
-    addLog (LogDraw (VisibleToPlayer player) player newcards) player s2
+    addLog (LogDraw (VisibleToPlayer player) player newcards) player
 
-plusBuys :: Int -> Action
-plusBuys num _ state = toSimulation $ state { turn = (turn state) { buys = num + buys (turn state) } }
+plusBuys :: Int -> ActionTemplate
+plusBuys num _ = modGameState' $ \state -> state { turn = (turn state) { buys = num + buys (turn state) } }
 
-plusActions :: Int -> Action
-plusActions num _ state = toSimulation $ state { turn = (turn state) { actions = num + actions (turn state) } }
+plusActions :: Int -> ActionTemplate
+plusActions num _ = modGameState' $ \state -> state { turn = (turn state) { actions = num + actions (turn state) } }
 
-plusTokens :: Int -> Token -> Action
-plusTokens num token player state = toSimulation $ updatePlayer state player $ \p -> p { tokens = Map.insertWith (+) token num (tokens p)}
+plusTokens :: Int -> Token -> ActionTemplate
+plusTokens num token player = modGameState' $ \state -> updatePlayer state player $ \p -> p { tokens = Map.insertWith (+) token num (tokens p)}
 
-pass :: Action
-pass _ = toSimulation
+pass :: ActionTemplate
+pass _ = noOpSimulation
 
-goToPhase :: Phase -> Action
-goToPhase ph _ state = toSimulation $ state { turn = (turn state) { phase = ph } }
+goToPhase :: Phase -> ActionTemplate
+goToPhase ph _ = modGameState' $ \state -> state { turn = (turn state) { phase = ph } }
 
 -- Macro flows
 
 newTurn :: TurnState
 newTurn = TurnState { money = 0, buys = 1, actions = 1, potions = 0, modifiers = Map.empty, turnLog = [], phase = ActionPhase }
 
-nextTurn :: GameState -> Simulation
-nextTurn state = (discardAll (inPlay player) InPlay
+nextTurn :: GameState -> SimulationT GameState
+nextTurn state = ((discardAll (inPlay player) InPlay
                   &&& discardAll (hand player) (Hand current)
-                  &&& plusCards 5
-                  &&& next)
-                  current state
+                  &&& plusCards 5)
+                  current)
+                  >> modGameState' next >> gameState'
   where
     player = activePlayer state
     current = activePlayerId state
-    next :: Action
-    next _ state = toSimulation $
-                   state { turn = newTurn,
+    next state = state { turn = newTurn,
                            turnOrder = tail (turnOrder state) ++ [current],
                            ply = 1 + ply state}
 
@@ -1152,76 +1226,81 @@ endGame state = state { finished = True, players = Map.map clearMats (players st
                                 mats = Map.delete NativeVillageMat $ Map.delete IslandMat (mats player)
                                 }
 
-cleanupPhase :: Action
-cleanupPhase _ state = nextTurn state `andThen` \s -> return $ State $ if checkFinished s then endGame s else s
+cleanupPhase :: ActionTemplate
+-- TODO this should probably have some sort of 'andThen' construct or simply separate monads ...
+cleanupPhase _ = gameState' >>= nextTurn >>= \state -> if checkFinished state then modGameState' endGame else noOpSimulation
 
-buyPhase :: Action
-buyPhase name state
-  | buys (turn state) == 0 = toSimulation state
-  | otherwise = buyDecision state
+buyPhase :: ActionTemplate
+buyPhase name = gameState' >>= inner
   where
-    buyDecision s2 = optDecision (ChooseCard (EffectBuy unknownDef)
-                                      candidates
-                                      (\card -> (plusBuys (-1) &&& payCosts (cost s2 (typ card)) &&& buy (typ card) &&& buyPhase) name s2))
-                                    name s2
+    inner state
+      | buys (turn state) == 0 = noOpSimulation
+      | otherwise = optDecision (ChooseCard (EffectBuy unknownDef)
+                                                        candidates
+                                                        (\card -> (plusBuys (-1) &&& payCosts (cost state (typ card)) &&& buy (typ card) &&& buyPhase) name))
+                                                      name
       where
-        payCosts cost _ state = toSimulation $
-          state { turn = t { money = money t - moneyCost cost, potions = potions t - potionCost cost }}
-          where
-            t = turn state
-        moneyToSpend = money (turn s2)
-        potionToSpend = potions (turn s2)
-        candidates = map (`topOfSupply` s2) $ filter (`canBuy` s2) $ affordableCards (fullCost moneyToSpend potionToSpend) s2
+        payCosts cost _ = modGameState' (\state ->
+                            let t = turn state
+                            in state { turn = t { money = money t - moneyCost cost, potions = potions t - potionCost cost }})
+                            >> noOpSimulation
+        moneyToSpend = money (turn state)
+        potionToSpend = potions (turn state)
+        candidates = map (`topOfSupply` state) $ filter (`canBuy` state) $ affordableCards (fullCost moneyToSpend potionToSpend) state
 
-playTreasures :: Action
-playTreasures name state
-  | length treasures > 0 = playTreasureDecision
-  | otherwise = toSimulation state
+playTreasures :: ActionTemplate
+playTreasures name = gameState' >>= inner
   where
-    treasures = filter isTreasure (hand (activePlayer state))
-    playTreasureDecision = optDecision (ChooseCards (EffectPlayTreasure unknown)
-                                             treasures
-                                             (0,length treasures)
-                                             -- we cycle play treasures because cards like IGG might add new ones
-                                             (\cards -> playAll cards name state `andThen` playTreasures name))
-                            name state
+    inner state
+      | length treasures > 0 = playTreasureDecision
+      | otherwise = noOpSimulation
+      where
+        treasures = filter isTreasure (hand (activePlayer state))
+        playTreasureDecision = optDecision (ChooseCards (EffectPlayTreasure unknown)
+                                                 treasures
+                                                 (0,length treasures)
+                                                 -- we cycle play treasures because cards like IGG might add new ones
+                                                 (\cards -> playAll cards name >> playTreasures name))
+                                name
 
-useCoinTokens :: Action
-useCoinTokens player state
-  | numCoins == 0 = toSimulation state
-  | otherwise = optDecision (ChooseNumber (EffectUseTokens CoinToken) (0,numCoins) cont) player state
+
+useCoinTokens :: ActionTemplate
+useCoinTokens player = do
+    state <- gameState'
+    let numCoins = Map.findWithDefault 0 CoinToken (tokens $ playerByName state player)
+    simWhen (numCoins > 0) $
+        optDecision (ChooseNumber (EffectUseTokens CoinToken) (0,numCoins) cont) player
+    where
+        cont num = ((plusMoney num &&& plusTokens (- num) CoinToken)) player
+
+actionPhase :: ActionTemplate
+actionPhase name = do
+    state <- gameState'
+    let actionsInHand = filter isAction (hand (activePlayer state))
+    simWhen (not (actions (turn state) == 0 || null actionsInHand)) $
+        optDecision (ChooseCard (EffectPlayAction unknown) actionsInHand (\card -> (plusActions (-1) &&& play card &&& actionPhase) name)) name
+
+startOfTurn :: ActionTemplate
+startOfTurn player = gameState' >>= inner
   where
-    numCoins = Map.findWithDefault 0 CoinToken (tokens $ playerByName state player)
-    cont num = ((plusMoney num &&& plusTokens (- num) CoinToken)) player state
+    inner state
+        | null durations = noOpSimulation
+        | otherwise = putGameState' (updatePlayer state player (const p { inPlayDuration = [], inPlay = durationCards ++ inPlay p }))
+            >> allTriggers player
+        where
+          allTriggers = handleAllTriggers StartOfTurnTrigger (map triggerSource durations) NullEffect pass
+          p = playerByName state player
+          durations = inPlayDuration p
+          durationCards = Either.lefts durations
+          triggerSource (Left card) = FromCard card InPlay
+          triggerSource (Right def) = FromCardEffect def
 
-actionPhase :: Action
-actionPhase name state
-  | actions (turn state) == 0 || null actionsInHand = toSimulation state
-  | otherwise = optDecision (ChooseCard (EffectPlayAction unknown) actionsInHand (\card -> (plusActions (-1) &&& play card &&& actionPhase) name state))
-                         name state
-  where
-    actionsInHand = filter isAction (hand (activePlayer state))
-
-startOfTurn :: Action
-startOfTurn player state
-  | null durations = toSimulation state
-  | otherwise = allTriggers player (updatePlayer state player (const p { inPlayDuration = [], inPlay = durationCards ++ inPlay p }))
-  where
-    allTriggers = handleAllTriggers StartOfTurnTrigger (map triggerSource durations) NullEffect pass
-    p = playerByName state player
-    durations = inPlayDuration p
-    durationCards = Either.lefts durations
-    triggerSource (Left card) = FromCard card InPlay
-    triggerSource (Right def) = FromCardEffect def
-
-
-
-playTurn :: Action
-playTurn name state =
-  (addLog (LogTurn name (turnNo state) state) &&& goToPhase ActionPhase &&& startOfTurn &&& actionPhase &&&
+playTurn :: ActionTemplate
+playTurn =
+  ((\name -> gameState' >>= \state -> addLog (LogTurn name (turnNo state) state) name) &&&
+   goToPhase ActionPhase &&& startOfTurn &&& actionPhase &&&
    goToPhase BuyPhase &&& useCoinTokens &&& playTreasures &&& buyPhase &&&
    goToPhase CleanupPhase &&& cleanupPhase)
-   name state
 
 winner :: GameState -> Result
 winner state
@@ -1244,15 +1323,19 @@ winner state
 -- Simulation Stepping
 
 seedSim :: StdGen -> SimulationState
-seedSim = SimulationState
+seedSim = SimulationState nullState
 
-evalSim :: SimulationT a -> SimulationState -> a
-evalSim sim st = St.evalState sim st
+evalGameT :: GameT a -> SimulationState -> a
+evalGameT g st = St.evalState g st
 
-runSim :: SimulationT a -> SimulationState -> (a,SimulationState)
+evalSim :: SimulationT a -> SimulationState -> MaybeDecision a (SimulationT a)
+evalSim sim st = St.evalState (nextStep sim) st
+
+runSim :: SimulationT a -> SimulationState -> (MaybeDecision a (SimulationT a),SimulationState)
 runSim sim st = (res,st')
   where
-    (res,st') = St.runState sim st
+    (res,st') = St.runState (nextStep sim) st
 
 sim2Gen :: SimulationState -> StdGen
 sim2Gen = randomGenerator
+

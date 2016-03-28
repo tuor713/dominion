@@ -129,7 +129,7 @@ dataAttr = attribute "data" " data=\""
 
 passButton = H.button H.! A.class_ "ui teal button" H.! dataChoice "" $ "Pass"
 
-decisionHtml :: Bool -> Decision -> H.Html
+decisionHtml :: Bool -> Decision a -> H.Html
 decisionHtml _ (Optional inner _) = decisionHtml True inner
 
 decisionHtml allowsPass (ChooseNumber effect (lo,hi) _) =
@@ -258,7 +258,7 @@ logToMessage (LogPeek vis p cards loc) = (show vis, p ++ " finds " ++ summarizeC
 logToMessage (LogDraw vis p cards) = (show vis, p ++ " draws " ++ summarizeCards cards)
 logToMessage (LogTurn p no _) = ("All", "Turn " ++ show no ++ " - " ++ p)
 
-htmlDecision :: PlayerId -> (GameState, Decision) -> H.Html
+htmlDecision :: PlayerId -> (GameState, Decision a) -> H.Html
 htmlDecision p (state, decision) =
   template "/play" $ do
     column 1 $ ""

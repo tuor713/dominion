@@ -16,17 +16,17 @@ import qualified Data.List as L
 defaultBotId :: String
 defaultBotId = "Multi Strategy"
 
-altStrategy :: PlayerId -> (GameState -> Bool) -> (PlayerId -> AIBot) -> StateBot (Maybe AIBot) -> StateBot (Maybe AIBot)
+altStrategy :: PlayerId -> (GameState -> Bool) -> (PlayerId -> AIBot a) -> StateBot (Maybe (AIBot a)) a -> StateBot (Maybe (AIBot a)) a
 altStrategy _ _ _ _ (Just bot) state decision = (bot state decision, Just bot)
 altStrategy id pred bot fallback Nothing state decision
   | pred state = ((bot id) state decision, Just (bot id))
   | otherwise = fallback Nothing state decision
 
-defaultStrategy :: AIBot -> StateBot (Maybe AIBot)
+defaultStrategy :: AIBot a -> StateBot (Maybe (AIBot a)) a
 defaultStrategy _ (Just bot) state decision = (bot state decision, Just bot)
 defaultStrategy bot Nothing state decision = (bot state decision, Just bot)
 
-multiStrategy :: PlayerId -> StateBot (Maybe AIBot)
+multiStrategy :: PlayerId -> StateBot (Maybe (AIBot a)) a
 multiStrategy id =
   altStrategy id (\s -> cardInTableau (lookupCard "Beggar") s && cardInTableau (lookupCard "Gardens") s) beggarGardens $
   altStrategy id (cardInTableau (lookupCard "Wharf")) bmWharf $
@@ -41,7 +41,7 @@ multiStrategy id =
   altStrategy id (cardInTableau (lookupCard "Familiar")) familiarOnly $
   defaultStrategy (betterBigMoney id)
 
-botLibrary :: [(String, PlayerId -> IO Bot)]
+botLibrary :: [(String, PlayerId -> IO (Bot a))]
 botLibrary = L.sortOn fst $
   [("Big Money", return . aiBot . betterBigMoney),
    ("Big Smithy", return . aiBot . bigSmithy),

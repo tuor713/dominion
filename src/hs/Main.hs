@@ -114,9 +114,9 @@ writeHtml = writeLBS . renderHtml
 
 -- Game API
 
-data DecisionState = GameEnded GameState | DecisionPending GameState Decision (Simulation -> IO Game)
+data DecisionState = GameEnded GameState | DecisionPending GameState (Decision (SimulationT GameState)) (SimulationT GameState -> IO Game)
 
-data PlayerState = Bot Bot | External (MVar DecisionState)
+data PlayerState = Bot (Bot GameState) | External (MVar DecisionState)
 type Game = Map.Map PlayerId PlayerState
 
 instance Show PlayerState where
@@ -144,7 +144,7 @@ playerUpdateState :: PlayerState -> GameState -> IO ()
 playerUpdateState (Bot _) _ = return ()
 playerUpdateState (External mvar) state = putMVar mvar (GameEnded state)
 
-playerDecision :: Game -> PlayerState -> PlayerId -> GameState -> Decision -> (Game -> Simulation -> IO Game) -> IO Game
+playerDecision :: Game -> PlayerState -> PlayerId -> GameState -> Decision (SimulationT GameState) -> (Game -> SimulationT GameState -> IO Game) -> IO Game
 playerDecision game (Bot bot) _ state decision cont = do
   sim <- bot state decision
   cont game sim
@@ -285,7 +285,7 @@ decisionHandler _ gamesRepository = do
 
   nextDecision gamesRepository gameId playerId
 
-parseDecision :: Decision -> String -> Simulation
+parseDecision :: Decision (SimulationT GameState) -> String -> SimulationT GameState
 parseDecision (ChooseToUse _ f) input           = f (input == "true")
 parseDecision (ChooseNumber _ _ f) input        = f $ fst $ Maybe.fromJust $ C8.readInt $ C8.pack input
 parseDecision (ChooseToReact _ _ f) input       = f (input == "true")
