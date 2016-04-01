@@ -240,50 +240,51 @@ baseCards = map ($ Base)
    ]
 
 cellar :: ActionTemplate
-cellar = plusActions 1
-  &&+ \p s -> chooseMany (EffectDiscard unknown (Hand p)) (hand (playerByName s p)) (0,length $ (hand (playerByName s p)))
-  &&= \cards -> discardAll cards (Hand p) &&& plusCards (length cards)
+cellar p = do
+  plusActions 1 p
+  h <- qHand p
+  cards <- qChooseMany (EffectDiscard unknown (Hand p)) h (0,length h) p
+  discardAll cards (Hand p) p
+  plusCards (length cards) p
 
 chapel :: ActionTemplate
 chapel = trashNCards 0 4
 
 deckIntoDiscard :: ActionTemplate
-deckIntoDiscard player = modGameState' $ \state -> updatePlayer state player (\p -> p { deck = [], discardPile = deck p ++ discardPile p })
+deckIntoDiscard player = modGameState' $ \s -> updatePlayer s player (\p -> p { deck = [], discardPile = deck p ++ discardPile p })
 
 chancellor :: ActionTemplate
-chancellor player = plusMoney 2 player >> decision (ChooseToUse (SpecialEffect cChancellor) cont) player
-  where
-    cont b = if b then deckIntoDiscard player else noOpSimulation
+chancellor player = do
+  plusMoney 2 player
+  b <- qChoose (ChooseToUse (SpecialEffect cChancellor)) player
+  when b $ deckIntoDiscard player
 
 workshop :: ActionTemplate
-workshop player =
-  gameState' >>= \state ->
-  (chooseOne (EffectGain unknownDef (Discard player)) (map (`topOfSupply` state) (affordableCardsM 4 state))
-   &&= \c -> gain (typ c))
-  player
+workshop p = do
+  s <- gameState'
+  c <- qChooseOne (EffectGain unknownDef (Discard p)) (map (`topOfSupply` s) (affordableCardsM 4 s)) p
+  gain (typ c) p
 
 
 bureaucrat :: ActionTemplate
-bureaucrat player = (gainTo silver (TopOfDeck player) &&& playAttack (\op -> gameState' >>= \state -> treasureToDeck op state)) player
+bureaucrat p = gainTo silver (TopOfDeck p) p >> playAttack attack p
   where
-    treasureToDeck op state
-      | null treasures = reveal h op
-      | otherwise = decision (ChooseCard (EffectPut unknown (Hand op) (TopOfDeck op)) treasures cont) op
-      where
-        h = hand $ playerByName state op
-        treasures = filter isTreasure h
-        cont card = (reveal [card] &&& put card (Hand op) (TopOfDeck op)) op
+    attack op = do h <- qHand op
+                   let treasures = filter isTreasure h
+                   if null treasures
+                    then reveal h op
+                    else do
+                        card <- qChooseOne (EffectPut unknown (Hand op) (TopOfDeck op)) treasures op
+                        reveal [card] op
+                        put card (Hand op) (TopOfDeck op) op
 
 feast :: Maybe Card -> ActionTemplate
-feast mCard player =
-  (case mCard of
-    Just card -> trash card InPlay player
-    Nothing -> noOpSimulation)
-  >> gameState'
-  >>= \s2 -> decision (ChooseCard (EffectGain unknownDef (Discard player))
-                                        (map (`topOfSupply` s2) (affordableCardsM 5 s2))
-                                        (\c -> gain (typ c) player))
-                            player
+feast mCard p = do
+  case mCard of Just card -> trash card InPlay p
+                Nothing -> noOpSimulation
+  s <- gameState'
+  c <- qChooseOne (EffectGain unknownDef (Discard p)) (map (`topOfSupply` s) (affordableCardsM 5 s)) p
+  gain (typ c) p
 
 moneylender :: ActionTemplate
 moneylender player = do
@@ -293,30 +294,25 @@ moneylender player = do
     (trash (head coppers) (Hand player) &&& plusMoney 3) player
 
 spy :: ActionTemplate
-spy player = (plusCards 1 &&& plusActions 1 &&& spyAction &&& playAttack spyAction) player
+spy p = (plusCards 1 &&& plusActions 1 &&& spyAction &&& playAttack spyAction) p
   where
     spyAction attackee = do
       reshuffleIfNeeded attackee
-      state <- gameState'
-      if null (deck $ playerByName state attackee)
-        then noOpSimulation
-        else doSpy attackee state
-    doSpy attackee state =
-      (addLog (LogReveal attackee [top]) &&& decision (ChooseToUse (EffectDiscard top (TopOfDeck player)) cont)) player
-      where
-        cont b = if b then discard top (TopOfDeck attackee) attackee else noOpSimulation
-        top = head $ deck $ playerByName state attackee
+      deck <- qDeck attackee
+      unless (null deck) $ do
+        let top = head deck
+        addLog (LogReveal attackee [top]) p
+        b <- qChoose (ChooseToUse (EffectDiscard top (TopOfDeck attackee))) p
+        when b $ discard top (TopOfDeck attackee) attackee
 
 thief :: ActionTemplate
 thief player = playAttack doThief player
   where
-    doThief :: ActionTemplate
     doThief op = do
       reshuffleIfNeededN 2 op
       state <- gameState'
-      if null (deck $ playerByName state op)
-        then noOpSimulation
-        else decide op state
+      unless (null (deck $ playerByName state op)) $
+        decide op state
     decide op state
       | null (filter isTreasure top) = seqActions (\c -> discard c (TopOfDeck op)) top op
       | otherwise = decision (ChooseCard (EffectTrash unknown (TopOfDeck op)) (filter isTreasure top) cont) player
@@ -439,14 +435,10 @@ baron :: ActionTemplate
 baron player = do
   h <- qHand player
   let estates = filter ((==estate) . typ) h
-  if null estates
-    then gain estate player
-    else
-      decision (ChooseToUse (EffectDiscard (head estates) (Hand player))
-                            (\b -> if b
-                                     then (discard (head estates) (Hand player) &&& plusMoney 4) player
-                                     else gain estate player))
-               player
+  use <- if null estates then return False
+                         else qChoose (ChooseToUse (EffectDiscard (head estates) (Hand player))) player
+  if use then (discard (head estates) (Hand player) &&& plusMoney 4) player
+         else gain estate player
 
 conspirator :: ActionTemplate
 conspirator p = do
@@ -462,15 +454,13 @@ courtyard p = do
   put card (Hand p) (TopOfDeck p) p
 
 ironworks :: ActionTemplate
-ironworks player = gameState' >>= \state ->
-  (chooseOne (EffectGain unknownDef (Discard player)) (map (`topOfSupply` state) (affordableCardsM 4 state))
-   &&= \c -> gain (typ c) &&& ironBenefits c)
-  player
-  where
-    ironBenefits card =
-      (if isAction card then plusActions 1 else pass)
-      &&& (if isTreasure card then plusMoney 1 else pass)
-      &&& (if isVictory card then plusCards 1 else pass)
+ironworks player = do
+  s <- gameState'
+  c <- qChooseOne (EffectGain unknownDef (Discard player)) (map (`topOfSupply` s) (affordableCardsM 4 s)) player
+  gain (typ c) player
+  when (isAction c) $ plusActions 1 player
+  when (isTreasure c) $ plusMoney 1 player
+  when (isVictory c) $ plusCards 1 player
 
 masquerade player = gameState' >>= \state -> (iter (turnOrder state ++ [head $ turnOrder state]) &&& trashNCards 0 1) player
   where
@@ -520,19 +510,18 @@ scout cards p =
     nonVs = filter (not . isVictory) cards
 
 shantyDraw player = do
-  state <- gameState'
-  let h = hand (playerByName state player)
-      noActions = not $ any isAction h
-  (reveal h &&& if noActions then plusCards 2 else pass) player
+  h <- qHand player
+  let noActions = not $ any isAction h
+  reveal h player
+  when noActions $ plusCards 2 player
 
 torturerAttack op = chooseEffects 1 [EffectDiscardNo 2, EffectGain curse (Hand op)] enactEffects op
 
 -- TODO what if a trigger replaces the trashing?
 tradingPost player = do
   h <- qHand player
-  if (length h >= 2)
-    then (trashNCards 2 2 &&& gainTo silver (Hand player)) player
-    else trashNCards 2 2 player
+  trashNCards 2 2 player
+  when (length h >= 2) $ gainTo silver (Hand player) player
 
 wishingWell :: CardDef -> ActionTemplate
 wishingWell def p = do
@@ -603,17 +592,13 @@ ghostShip op = gameState' >>= inner
         h = hand $ playerByName state op
 
 island :: Maybe Card -> ActionTemplate
-island mCard player = gameState' >>= inner
-  where
-    inner state
-      | null h = islandPut player
-      | otherwise = chooseOne (EffectPut unknown (Hand player) (Mat player IslandMat)) h cont player
-      where
-        h = hand $ playerByName state player
-        cont card = islandPut &&& put card (Hand player) (Mat player IslandMat)
-        islandPut = case mCard of
-          Just card -> put card InPlay (Mat player IslandMat)
-          Nothing -> pass
+island mCard player = do
+  h <- qHand player
+  unless (null h) $ do
+    c <- qChooseOne (EffectPut unknown (Hand player) (Mat player IslandMat)) h player
+    put c (Hand player) (Mat player IslandMat) player
+  case mCard of Just card -> put card InPlay (Mat player IslandMat) player
+                Nothing -> noOpSimulation
 
 lighthouseProtection :: TriggerHandler
 lighthouseProtection AttackTrigger _ _ _ = pass
