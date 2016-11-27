@@ -314,7 +314,7 @@ thief player = playAttack doThief player
       unless (null (deck $ playerByName state op)) $
         decide op state
     decide op state
-      | null (filter isTreasure top) = seqActions (\c -> discard c (TopOfDeck op)) top op
+      | null (filter isTreasure top) = discardAll top (TopOfDeck op) op
       | otherwise = decision (ChooseCard (EffectTrash unknown (TopOfDeck op)) (filter isTreasure top) cont) player
       where
         top = take 2 $ hand $ playerByName state op
@@ -387,8 +387,8 @@ adventurer treasures others player
     draw1 state = do
       putGameState' s2
       adventurer (if isTreasure top then top:treasures else treasures)
-                             (if isTreasure top then others else top:others)
-                             player
+                 (if isTreasure top then others else top:others)
+                 player
       where
         top = head $ hand (playerByName state player)
         s2 = updatePlayer state player (\p -> p { deck = tail (deck p) })
@@ -580,16 +580,12 @@ explorer player =
                  player
 
 ghostShip :: ActionTemplate
-ghostShip op = gameState' >>= inner
-  where
-    inner state
-      | numToPut > 0 = chooseMany (EffectPut unknown (Hand op) (TopOfDeck op)) h (numToPut,numToPut)
-                        (\cards -> seqActions (\c -> put c (Hand op) (TopOfDeck op)) cards)
-                        op
-      | otherwise = noOpSimulation
-      where
-        numToPut = length h - 3
-        h = hand $ playerByName state op
+ghostShip op = do
+  h <- qHand op
+  let numToPut = length h - 3
+  when (numToPut > 0) $ do
+    cards <- qChooseMany (EffectPut unknown (Hand op) (TopOfDeck op)) h (numToPut,numToPut) op
+    putAll cards (Hand op) (TopOfDeck op) op
 
 island :: Maybe Card -> ActionTemplate
 island mCard player = do
@@ -606,22 +602,19 @@ lighthouseProtection _ _ _ cont = cont
 
 nativeVillage :: ActionTemplate
 nativeVillage player = chooseEffects 1 [EffectPut unknown (TopOfDeck player) (Mat player NativeVillageMat),
-                                              EffectPut unknown (Mat player NativeVillageMat) (Hand player)]
+                                        EffectPut unknown (Mat player NativeVillageMat) (Hand player)]
                                 cont player
   where
-    cont [(EffectPut _ (TopOfDeck _) (Mat _ NativeVillageMat))] player =
-      (reshuffleIfNeeded &&& \p -> gameState' >>= \s ->
-                                     let d = deck (playerByName s p) in
-                                       if null d then noOpSimulation
-                                                 else put (head d) (TopOfDeck p) (Mat p NativeVillageMat) p )
-      player
+    cont [(EffectPut _ (TopOfDeck _) (Mat _ NativeVillageMat))] player = do
+      reshuffleIfNeeded player
+      d <- qDeck player
+      unless (null d) $
+        put (head d) (TopOfDeck player) (Mat player NativeVillageMat) player
 
 
-    cont [(EffectPut _ (Mat _ NativeVillageMat) (Hand _))] player =
-      gameState' >>= \state ->
-      seqActions (\c -> put c (Mat player NativeVillageMat) (Hand player))
-                 (getCards (Mat player NativeVillageMat) state)
-                 player
+    cont [(EffectPut _ (Mat _ NativeVillageMat) (Hand _))] player = do
+      cards <- fmap (getCards (Mat player NativeVillageMat)) $ gameState'
+      putAll cards (Mat player NativeVillageMat) (Hand player) player
     cont _ _ = error "Invalid selection for Native Village"
 
 
@@ -931,23 +924,20 @@ kingsCourt player = do
     (play card &&& playEffect (typ card) Nothing &&& playEffect (typ card) Nothing) player
 
 vault :: ActionTemplate
-vault player = gameState' >>= inner
-  where
-    inner state =
-      (chooseMany (EffectDiscard unknown (Hand player)) h (0,length h) (\cards -> seqActions (\c -> discard c (Hand player)) cards &&& plusMoney (length cards))
-       &&& eachOtherPlayer otherAction)
-        player
-      where
-        h = hand $ playerByName state player
-        otherCont player cards = (seqActions (\c -> discard c (Hand player)) cards &&& if length cards == 2 then plusCards 1 else pass) player
-        otherAction player = gameState' >>= i2
-          where
-            i2 state
-              | null h2 = noOpSimulation
-              | otherwise = optDecision (ChooseCards (EffectDiscard unknown (Hand player)) h2 (num,num) (otherCont player)) player
-              where
-                h2 = hand $ playerByName state player
-                num = min 2 (length h2)
+vault p = do
+  h <- qHand p
+  cards <- qChooseMany (EffectDiscard unknown (Hand p)) h (0,length h) p
+  discardAll cards (Hand p) p
+  plusMoney (length cards) p
+
+  (flip eachOtherPlayer) p $ \op -> do
+    h2 <- qHand op
+    unless (null h2) $ do
+      let num = min 2 (length h2)
+      dec <- qOptDecision (ChooseCards (EffectDiscard unknown (Hand op)) h2 (num,num)) op
+      qWhenJust dec $ \cards -> do
+        discardAll cards (Hand op) op
+        when (length cards == 2) $ plusCards 1 op
 
 -- Cornucopia 6xx
 
@@ -995,14 +985,14 @@ fortuneTeller :: ActionTemplate
 fortuneTeller = revealUntilSelector (\c -> typ c == curse || isVictory c) (\_ other p -> discardAll other (TopOfDeck p) p)
 
 hamlet :: ActionTemplate
-hamlet = (\p -> gameState' >>= \s ->
-                  optDecision
-                    (ChooseCard (EffectDiscard unknown (Hand p)) (hand (playerByName s p)) (\c -> (discard c (Hand p) &&& plusActions 1) p))
-                    p)
-  &&& (\p -> gameState' >>= \s ->
-               optDecision
-                (ChooseCard (EffectDiscard unknown (Hand p)) (hand (playerByName s p)) (\c -> (discard c (Hand p) &&& plusBuys 1) p))
-                p)
+hamlet p = do
+  h <- qHand p
+  d <- qOptDecision (ChooseCard (EffectDiscard unknown (Hand p)) h) p
+  qWhenJust d $ \c -> discard c (Hand p) p >> plusActions 1 p
+
+  h2 <- qHand p
+  d <- qOptDecision (ChooseCard (EffectDiscard unknown (Hand p)) h2) p
+  qWhenJust d $ \c -> discard c (Hand p) p >> plusBuys 1 p
 
 harvest :: ActionTemplate
 harvest = revealUntil ((==4) . length) (\cs p -> (discardAll cs (TopOfDeck p) &&& plusMoney (length cs)) p)
@@ -1214,7 +1204,7 @@ mandarinTrigger :: ActionTemplate
 mandarinTrigger player = do
   state <- gameState'
   let treasures = filter isTreasure $ inPlay (playerByName state player)
-  seqActions (\c -> put c InPlay (TopOfDeck player)) treasures player
+  putAll treasures InPlay (TopOfDeck player) player
 
 nomadCamp :: TriggerHandler
 nomadCamp GainTrigger (EffectGainFrom c1 source target) (FromCard c2 _) cont
@@ -1398,11 +1388,11 @@ ironmonger player = do
     when (isVictory t) $ plusCards 1 player
 
 poorHouse :: ActionTemplate
-poorHouse = plusMoney 4 &&& \p ->
-  gameState' >>= \s ->
-  plusMoney (- (min (money (turn s))
-                    (length (filter isTreasure (hand (playerByName s p))))))
-    p
+poorHouse p = do
+  ts <- fmap (filter isTreasure) $ qHand p
+  plusMoney 4 p
+  s <- gameState'
+  plusMoney (- (min (money (turn s)) (length ts))) p
 
 procession :: ActionTemplate
 procession p = do
@@ -1435,7 +1425,7 @@ squireTrigger p = do
   s <- gameState'
   let attacks = filter isAttack $ map (head . snd) $ Map.toList $ Map.filter (not . null) $ piles s
   unless (null attacks) $
-    chooseOne (EffectGain unknownDef (Discard p)) attacks (\c -> gain (typ c)) p
+    chooseOne (EffectGain unknownDef (Discard p)) attacks (gain . typ) p
 
 vagrant :: ActionTemplate
 vagrant p = do

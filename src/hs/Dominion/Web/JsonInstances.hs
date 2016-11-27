@@ -154,8 +154,3 @@ instance J.ToJSON GameState where
                            "ply" J..= J.toJSON (ply state)]
 
 showInfo (vis,info) = "@" ++ show vis ++ " " ++ info
-
-instance J.ToJSON (GameState, (Decision a)) where
-  toJSON (state,decision) = J.object ["state"    J..= J.toJSON state,
-                                            "decision" J..= J.toJSON decision
-                                            ]

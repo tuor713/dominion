@@ -24,3 +24,12 @@ much more reliably and have loads of strategies defined.
 - Build Dart sources `dart2js src/dart/main.dart -o static/js/app.js`
 - Start the server `cabal run web`
 - Navigate to [http://localhost:8080](http://localhost:8080)
+
+## Docker
+
+The build can be docker enabled as well or build as a stand-alone Docker. app
+
+~~~~
+docker build .
+docker run -d -p 8000:8000 <image id>
+~~~~
